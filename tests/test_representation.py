@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -37,6 +38,25 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
     assert decision["protocol_id"] == "phase-context-policy-v3"
     assert decision["status"] == "DECISION_RECORDED"
     assert decision["formal_execution_authorized"] is False
+    source_population = decision["prospective_source_population"]
+    assert source_population["status"] == (
+        "SOURCE_POPULATION_FROZEN_PENDING_REPRESENTATION_QUALIFICATION"
+    )
+    assert source_population["selection_rule"] == {
+        "language": "python",
+        "quality_disposition": "QUALITY_INCLUDED",
+    }
+    assert source_population["task_unit_count"] == 381
+    assert source_population["technical_readiness_diagnostic_count"] == 101
+    assert source_population["technical_readiness_is_not_an_admission_rule"] is True
+    assert source_population["formal_role_assigned_count"] == 0
+    assert source_population["prompt_tsg_status"] == (
+        "NOT_GENERATED_PENDING_METHOD_FREEZE"
+    )
+    manifest_path = ROOT / source_population["data_bundle_path"] / "manifest.json"
+    assert hashlib.sha256(manifest_path.read_bytes()).hexdigest() == (
+        source_population["data_manifest_sha256"]
+    )
     assert decision["analysis_scope"]["fields"] == [
         "security_pattern_id",
         "context_query_id",
@@ -52,6 +72,54 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
             "assignments_per_task_policy_coordinate"
         ]
         == 1
+    )
+
+
+@pytest.mark.extended
+def test_frozen_python_source_population_replays_from_reviewer_bundle() -> None:
+    decision = json.loads(
+        (ROOT / "configs/formal/identity_and_scope_decision.json").read_text(
+            encoding="utf-8"
+        )
+    )["prospective_source_population"]
+    bundle = ROOT / decision["data_bundle_path"]
+    tasks = {
+        row["task_unit_id"]: row
+        for row in _jsonl(bundle / "task-units.jsonl")
+    }
+    quality = {
+        row["task_unit_id"]: row
+        for row in _jsonl(bundle / "task-quality.jsonl")
+    }
+    readiness = {
+        row["task_unit_id"]: row
+        for row in _jsonl(bundle / "readiness-worklist.jsonl")
+    }
+    rule = decision["selection_rule"]
+    task_ids = tuple(
+        sorted(
+            task_unit_id
+            for task_unit_id, task in tasks.items()
+            if task["pre_treatment_source_metadata"]["language"] == rule["language"]
+            and quality[task_unit_id]["quality_disposition"]
+            == rule["quality_disposition"]
+        )
+    )
+
+    assert len(task_ids) == decision["task_unit_count"]
+    assert content_hash(task_ids) == decision["task_unit_id_set_sha256"]
+    assert sum(
+        readiness[task_unit_id]["readiness_summary_status"]
+        == "TECHNICALLY_READY_PENDING_METHOD_FREEZE"
+        for task_unit_id in task_ids
+    ) == decision["technical_readiness_diagnostic_count"]
+
+
+def _jsonl(path: Path) -> tuple[dict[str, object], ...]:
+    return tuple(
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
     )
 
 

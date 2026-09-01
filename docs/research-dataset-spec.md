@@ -421,14 +421,23 @@ Java 37, Rust 33, PHP 19, and Go 8. It also spans all seven source lineages:
 CyberSecEval Instruct Prime 313, CodeSecEval Plus 128, CWEval 70, SeCodePLT
 64, SALLM 56, SecurityEval 54, and LLMSecEval 35.
 
-The final local artifact is
-`.codex-runtime/subagent-full-review/final-data-v7-a`, with a byte-identical
-second build at `final-data-v7-b`. Their common bundle SHA-256 is
+The canonical reviewer artifact is tracked at
+`data/dataset-curation/reviewer-task-unit-dataset-v5`. It was copied
+byte-for-byte from `.codex-runtime/subagent-full-review/final-data-v7-a`; the
+independent `final-data-v7-b` build remains byte-identical execution evidence.
+All three copies share bundle SHA-256
 `33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
 The verifier status is
 `VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`. The review uses no
 CWE/readiness metadata, experimental role, arm, generated code, Oracle result,
 or outcome. Prompt TSG remains intentionally empty until the method is frozen.
+
+The prospective source-population decision selects exactly the 381
+`QUALITY_INCLUDED` Python task units from this bundle. Its sorted task-unit ID
+set hashes to
+`d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8`.
+The 101 records currently marked technically ready remain a diagnostic subset,
+not an admission condition or formal role.
 
 During review, two protocol ambiguities were exposed and corrected only for
 their affected nonterminal subsets: response-envelope instructions are not

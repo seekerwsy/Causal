@@ -30,8 +30,10 @@ The path preserves these boundaries:
 - A task unit is the independent, cross-source-deduplicated analysis unit.
 - After representation qualification, an optional pre-Discovery D0 may use one
   bounded selector-blind round of independently sourced natural tasks. Its
-  schema and fail-closed validators are implemented; no acquisition runs while
-  cleaning and coverage thresholds remain unfinished.
+  schema and fail-closed validators are implemented. Data cleaning is complete
+  and the 381-task Python source population is frozen, but no acquisition runs
+  while representation qualification and coverage thresholds remain
+  unfinished.
 - Atomic Full/RD-only and Pair Full/No-Relation are the required RQ2
   comparisons. Qualified blinded Expert and seeded Random selectors are
   available RQ1 baselines on the same support-qualified universe and fixed K.
@@ -107,6 +109,13 @@ Run milestone closure and the complete retained suite:
 
 Tests and the reviewer smoke establish implementation behavior only. They do
 not establish that the formal study ran or that an effect exists.
+
+The canonical content-cleaned reviewer data set is
+`data/dataset-curation/reviewer-task-unit-dataset-v5`. It contains exactly ten
+files and independently verifies under manifest SHA-256
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+The source-population rule is `QUALITY_INCLUDED` plus language `python`; it
+freezes 381 upstream task units without assigning an experimental role.
 
 ## Historical boundary
 

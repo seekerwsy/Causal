@@ -32,6 +32,40 @@
   "decision_id": "identity-and-scope.phase-context-policy-v3.v1",
   "decided_on": "2026-08-31",
   "formal_execution_authorized": false,
+  "prospective_source_population": {
+    "arms_or_outcomes_used": false,
+    "data_bundle_path": "data/dataset-curation/reviewer-task-unit-dataset-v5",
+    "data_manifest_sha256": "33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da",
+    "formal_role_assigned_count": 0,
+    "formal_use_authorized": false,
+    "forbidden_selection_fields": [
+      "assignment",
+      "generated_code",
+      "oracle_outcome",
+      "readiness_summary_status",
+      "workstream"
+    ],
+    "population_id": "phase-context-policy-v3.quality-included-python-source.v1",
+    "prompt_tsg_status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
+    "selection_rule": {
+      "language": "python",
+      "quality_disposition": "QUALITY_INCLUDED"
+    },
+    "source_lineage_counts": {
+      "codesec_eval_plus": 128,
+      "cweval": 15,
+      "cyberseceval_instruct_prime": 44,
+      "llmseceval": 20,
+      "sallm": 56,
+      "secodeplt": 64,
+      "securityeval": 54
+    },
+    "status": "SOURCE_POPULATION_FROZEN_PENDING_REPRESENTATION_QUALIFICATION",
+    "task_unit_count": 381,
+    "task_unit_id_set_sha256": "d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8",
+    "technical_readiness_diagnostic_count": 101,
+    "technical_readiness_is_not_an_admission_rule": true
+  },
   "model_dispatch": {
     "confirmation_cross_product_models": false,
     "primary_candidate_rule": "confirm_only_at_bound_primary_model",

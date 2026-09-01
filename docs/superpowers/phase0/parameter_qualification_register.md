@@ -120,6 +120,15 @@ block is a response template, not a frozen configuration or authorization artifa
 `CONFIRMATION`; it excludes `LEGACY_ONLY` and does not replace hypothesis-specific power analysis.
 The current outcome-blind census contains 141 unexposed ready task units.
 
+The completed all-task review now supplies a separately frozen upstream source
+population: 381 `QUALITY_INCLUDED` Python task units from reviewer bundle
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`,
+with sorted task-unit ID-set digest
+`d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8`.
+This closes data quality and source-population identity only. It does not
+approve the 101-task technical-readiness diagnostic subset, allocate roles,
+open `QUAL_ACCEPT`, or resolve any author decision below.
+
 The complete outcome-blind ledger contains 346 quality-qualified Python task units in the current
 21-CWE scope. After 28 exact legacy overlaps, its exact-unexposed ceiling is 318: 141 ready, 159
 pending Oracle support, 16 pending binding, and two pending independent review. Thus the 240 total

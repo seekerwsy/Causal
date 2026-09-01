@@ -12,9 +12,14 @@ optional D0 data-preparation decision: a qualified, outcome-blind coverage
 census may either accept the existing Discovery population, execute one
 bounded selector-blind natural-task supplementation round, or end in
 `COVERAGE_BLOCKED`. The repository currently implements and tests the D0
-records and validators only. It does not acquire tasks, assign new formal
-roles, or generate formal Prompt TSGs while data cleaning and author threshold
-freezing remain incomplete.
+records and validators only. The terminal reviewer data set is now tracked at
+`data/dataset-curation/reviewer-task-unit-dataset-v5`; its manifest SHA-256 is
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+The outcome-blind source population is frozen as the 381
+`QUALITY_INCLUDED` Python task units. Technical readiness (currently 101) is
+diagnostic and is not an admission rule. The repository still does not assign
+new formal roles or generate formal Prompt TSGs while representation profiles,
+author thresholds, power, and budget remain unfrozen.
 
 The sole executable study entry point is:
 

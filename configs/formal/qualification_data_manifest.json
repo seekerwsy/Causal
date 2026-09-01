@@ -3,7 +3,7 @@
   "artifact_kind": "qualification_data_manifest_draft",
   "protocol_id": "phase-context-policy-v3",
   "protocol_status": "SPECIFIED_DRAFT",
-  "status": "PROSPECTIVE_CENSUS_COMPLETE_BLOCKED_ROLE_ALLOCATION_AND_POWER",
+  "status": "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_AND_POWER",
   "formal_use_authorized": false,
   "scientific_claim_allowed": false,
   "arms_or_outcomes_used": false,
@@ -24,6 +24,23 @@
     "DISCOVERY",
     "CONFIRMATION"
   ],
+  "prospective_source_population": {
+    "data_bundle_path": "data/dataset-curation/reviewer-task-unit-dataset-v5",
+    "data_manifest_sha256": "33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da",
+    "formal_role_assigned_count": 0,
+    "population_id": "phase-context-policy-v3.quality-included-python-source.v1",
+    "prompt_tsg_status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
+    "role_assignment_frozen": false,
+    "selection_rule": {
+      "language": "python",
+      "quality_disposition": "QUALITY_INCLUDED"
+    },
+    "status": "SOURCE_POPULATION_FROZEN_PENDING_REPRESENTATION_QUALIFICATION",
+    "task_unit_count": 381,
+    "task_unit_id_set_sha256": "d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8",
+    "technical_readiness_diagnostic_count": 101,
+    "technical_readiness_is_not_an_admission_rule": true
+  },
   "bindings": [
     {
       "data_id": "legacy-prompt-tsg-external-qualification-v5",
@@ -193,7 +210,7 @@
     "status": "LEGACY_ONLY_REPOSITORY_ARCHIVE_COPY_VERIFIED_PENDING_COMMIT",
     "formal_use_authorized": false
   },
-  "prospective_role_census": {
+  "historical_pre_final_data_role_census": {
     "bundle_path": "data/method/phase-context-policy-v3-role-census-v6",
     "bundle_sha256": "89b941ef33977ac81371b33ebd643103a1818fc6d7ed89e96789e20f30961ce1",
     "task_manifest_path": "data/method/phase-context-policy-v3-role-census-v6/task-units.json",
@@ -205,9 +222,10 @@
     "population_target_task_unit_count": 240,
     "population_target_met": false,
     "role_assignment_frozen": false,
-    "arms_or_outcomes_used": false
+    "arms_or_outcomes_used": false,
+    "status": "SUPERSEDED_BY_FINAL_REVIEWER_SOURCE_POPULATION"
   },
-  "disjointness_report": {
+  "historical_disjointness_report": {
     "legacy_binding_count": 3,
     "legacy_task_unit_count": 69,
     "task_unit_overlap_across_legacy_bindings": 0,
@@ -220,9 +238,10 @@
     "outcome_data_read": false
   },
   "blocking_conditions": [
-    "The outcome-blind census leaves 141 unexposed prospective task units after excluding 23 exact LEGACY_ONLY overlaps, below the current 240-task population target.",
+    "The 381-task quality-included Python source population is frozen, but its representation profile, qualification thresholds, and outcome-blind eligibility rule are not accepted.",
     "Power-qualified counts for QUAL_DEV, QUAL_ACCEPT, DISCOVERY, and CONFIRMATION have not been selected, so no prospective role is assigned.",
-    "A one-shot QUAL_ACCEPT subset has not been independently sealed from the 141-task unexposed census."
+    "A one-shot QUAL_ACCEPT subset has not been independently sealed from the frozen source population.",
+    "Practical margins, model policy, K ceilings, familywise alpha, target power, request slots, and provider budget remain author-unapproved."
   ],
-  "next_gate": "Qualify the minimum role sizes without outcomes, expand the unexposed ready population if those sizes cannot be met, then freeze one complete DataRoleManifest before any qualification profile is developed."
+  "next_gate": "Approve the joint author decision, freeze the representation qualification plan and its outcome-blind eligibility rule, then power-qualify and freeze one complete DataRoleManifest before opening QUAL_ACCEPT or generating formal Prompt TSGs."
 }

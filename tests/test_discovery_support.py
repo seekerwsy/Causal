@@ -246,7 +246,7 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
     assert manifest["protocol_id"] == "phase-context-policy-v3"
     assert manifest["protocol_status"] == "SPECIFIED_DRAFT"
     assert manifest["status"] == (
-        "PROSPECTIVE_CENSUS_COMPLETE_BLOCKED_ROLE_ALLOCATION_AND_POWER"
+        "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_AND_POWER"
     )
     assert manifest["formal_use_authorized"] is False
     assert manifest["scientific_claim_allowed"] is False
@@ -258,6 +258,23 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
         "DISCOVERY",
         "CONFIRMATION",
     ]
+    source_population = manifest["prospective_source_population"]
+    assert source_population["data_manifest_sha256"] == hashlib.sha256(
+        (
+            ROOT
+            / source_population["data_bundle_path"]
+            / "manifest.json"
+        ).read_bytes()
+    ).hexdigest()
+    assert source_population["selection_rule"] == {
+        "language": "python",
+        "quality_disposition": "QUALITY_INCLUDED",
+    }
+    assert source_population["task_unit_count"] == 381
+    assert source_population["technical_readiness_diagnostic_count"] == 101
+    assert source_population["technical_readiness_is_not_an_admission_rule"] is True
+    assert source_population["formal_role_assigned_count"] == 0
+    assert source_population["role_assignment_frozen"] is False
 
     bindings = manifest["bindings"]
     assert [binding["data_id"] for binding in bindings] == sorted(
@@ -328,7 +345,7 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
 
     assert len(all_task_unit_ids) == 69
     assert len(set(all_task_unit_ids)) == 69
-    census = manifest["prospective_role_census"]
+    census = manifest["historical_pre_final_data_role_census"]
     census_root = ROOT / census["bundle_path"]
     verify_bundle(census_root)
     assert bundle_digest(census_root) == census["bundle_sha256"]
@@ -345,8 +362,9 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
     )
     assert census["role_assignment_frozen"] is False
     assert census["population_target_met"] is False
+    assert census["status"] == "SUPERSEDED_BY_FINAL_REVIEWER_SOURCE_POPULATION"
 
-    assert manifest["disjointness_report"] == {
+    assert manifest["historical_disjointness_report"] == {
         "legacy_binding_count": 3,
         "legacy_task_unit_count": 69,
         "task_unit_overlap_across_legacy_bindings": 0,

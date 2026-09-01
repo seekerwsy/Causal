@@ -74,14 +74,19 @@ bundles should include an equivalent machine-readable execution receipt.
 - reservation: `.codex-runtime/subagent-full-review/reservation-363991e-v4`
 - final build A: `.codex-runtime/subagent-full-review/final-data-v7-a`
 - final build B: `.codex-runtime/subagent-full-review/final-data-v7-b`
+- canonical tracked release:
+  `data/dataset-curation/reviewer-task-unit-dataset-v5`
 - common bundle SHA-256:
   `33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`
 - verifier status:
   `VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`
 
-Both final builds contain the same ten files byte for byte. The reviewer
+Both final builds and the tracked release contain the same ten files byte for
+byte. The tracked release independently verifies as
+`VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED` and is the sole
+reviewer-facing data coordinate. The reviewer
 backend does not provide seed-stable replay, so future calls need not reproduce
 the same prose. The frozen packets, decisions, assignment plans, prompts,
 repairs, merge records, and final bundles are the reproducible artifact.
-The local run directory is intentionally Git-ignored; publication still needs
-either an archived release bundle or a stable download carrying this hash.
+The local A/B run directories remain intentionally Git-ignored execution
+provenance; the Git-tracked canonical copy closes the release-archive gap.

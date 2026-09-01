@@ -247,6 +247,12 @@ byte. Their common bundle/manifest SHA-256 is
 The independent verifier returns
 `VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`.
 
+The canonical publication copy is tracked byte-for-byte at
+`data/dataset-curation/reviewer-task-unit-dataset-v5`. The ignored A/B build
+directories remain execution provenance only; the tracked copy is the single
+reviewer-facing data coordinate and replays the same verifier status and
+manifest hash.
+
 The terminal corpus contains no response-envelope requirement, no included
 contract with unresolved semantics, and no stale contract-quality diagnostic
 in readiness. Technical readiness remains separate and currently contains 101
