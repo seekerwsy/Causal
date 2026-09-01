@@ -222,6 +222,11 @@ def _add_curation_group(groups: Any) -> None:
     prepare_subagent_review.add_argument("output", type=Path)
     prepare_subagent_review.add_argument("--repository-root", type=Path, default=Path.cwd())
     prepare_subagent_review.add_argument("--producer-commit", required=True)
+    prepare_subagent_review.add_argument(
+        "--nonterminal-reviews-root",
+        type=Path,
+        help="review only task IDs with a nonterminal decision in this prior review bundle",
+    )
 
     seal_subagent_review = _leaf(
         actions,
@@ -243,6 +248,44 @@ def _add_curation_group(groups: Any) -> None:
     finalize_subagent_review.add_argument("adjudication_decisions_root", type=Path)
     finalize_subagent_review.add_argument("proposals_root", type=Path)
     finalize_subagent_review.add_argument("output", type=Path)
+
+    prepare_subagent_repairs = _leaf(
+        actions,
+        "prepare-subagent-contract-repairs",
+        _run_prepare_subagent_contract_repairs,
+        "freeze source-only repair packets for nonterminal reviewed contracts",
+    )
+    prepare_subagent_repairs.add_argument("base_bundle", type=Path)
+    prepare_subagent_repairs.add_argument("proposals_root", type=Path)
+    prepare_subagent_repairs.add_argument("reviews_root", type=Path)
+    prepare_subagent_repairs.add_argument("output", type=Path)
+    prepare_subagent_repairs.add_argument("--repository-root", type=Path, default=Path.cwd())
+    prepare_subagent_repairs.add_argument("--producer-commit", required=True)
+
+    finalize_subagent_repairs = _leaf(
+        actions,
+        "finalize-subagent-contract-repairs",
+        _run_finalize_subagent_contract_repairs,
+        "freeze repaired proposals after validating every subagent repair packet",
+    )
+    finalize_subagent_repairs.add_argument("base_bundle", type=Path)
+    finalize_subagent_repairs.add_argument("proposals_root", type=Path)
+    finalize_subagent_repairs.add_argument("reviews_root", type=Path)
+    finalize_subagent_repairs.add_argument("packets_root", type=Path)
+    finalize_subagent_repairs.add_argument("decisions_root", type=Path)
+    finalize_subagent_repairs.add_argument("output", type=Path)
+    finalize_subagent_repairs.add_argument("--producer-commit", required=True)
+
+    merge_subagent_reviews = _leaf(
+        actions,
+        "merge-subagent-contract-reviews",
+        _run_merge_subagent_contract_reviews,
+        "merge repaired-contract review decisions into the full prior review population",
+    )
+    merge_subagent_reviews.add_argument("prior_reviews_root", type=Path)
+    merge_subagent_reviews.add_argument("revised_reviews_root", type=Path)
+    merge_subagent_reviews.add_argument("proposals_root", type=Path)
+    merge_subagent_reviews.add_argument("output", type=Path)
 
     semantic_repairs = _leaf(
         actions,
@@ -905,6 +948,7 @@ def _run_prepare_subagent_contract_review(
             args.proposals_root,
             args.output,
             producer_commit=args.producer_commit,
+            nonterminal_reviews_root=args.nonterminal_reviews_root,
         )
     )
 
@@ -932,6 +976,56 @@ def _run_finalize_subagent_contract_review(
         finalize_subagent_contract_reviews(
             args.initial_root,
             args.adjudication_decisions_root,
+            args.proposals_root,
+            args.output,
+        )
+    )
+
+
+def _run_prepare_subagent_contract_repairs(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import prepare_subagent_contract_repairs
+
+    return _emit_status(
+        prepare_subagent_contract_repairs(
+            args.repository_root,
+            args.base_bundle,
+            args.proposals_root,
+            args.reviews_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
+
+
+def _run_finalize_subagent_contract_repairs(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import finalize_subagent_contract_repairs
+
+    return _emit_status(
+        finalize_subagent_contract_repairs(
+            args.base_bundle,
+            args.proposals_root,
+            args.reviews_root,
+            args.packets_root,
+            args.decisions_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
+
+
+def _run_merge_subagent_contract_reviews(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import merge_subagent_contract_reviews
+
+    return _emit_status(
+        merge_subagent_contract_reviews(
+            args.prior_reviews_root,
+            args.revised_reviews_root,
             args.proposals_root,
             args.output,
         )

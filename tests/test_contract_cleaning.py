@@ -17,7 +17,7 @@ from prompt_mechanism_study.contract_cleaning import (
 )
 from prompt_mechanism_study.functional_judge import JudgeGateError
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.subagent_review import _decision_rows
+from prompt_mechanism_study.subagent_review import _decision_rows, _repair_rows
 
 
 def _batch():
@@ -369,6 +369,28 @@ def test_review_derives_diagnostic_repair_category_from_primary_decisions() -> N
         json.dumps({"reviews": [response]}).encode(), _batch()
     )[0]
     assert row["issue_codes"] == ["other"]
+
+
+def test_subagent_repair_rows_bind_task_identity_and_contract_schema() -> None:
+    decision = {
+        "task_unit_id": "task-a",
+        "resolution_status": "resolved",
+        "entrypoint": "solve",
+        "requirements": ["Return the input value unchanged."],
+        "inputs": ["value"],
+        "outputs": ["the unchanged input value"],
+        "side_effects": [],
+        "environment_dependencies": [],
+        "source_specification_assessment": "sufficient",
+        "repair_category": "CONTRACT_EXTRACTION_ERROR",
+        "reason": "The repaired contract restates the explicit behavior.",
+    }
+    rows = _repair_rows([decision], _batch())
+    assert rows[0]["task_unit_id"] == "task-a"
+    assert rows[0]["requirements"] == decision["requirements"]
+
+    with pytest.raises(ContractCleaningError):
+        _repair_rows([{**decision, "task_unit_id": "task-b"}], _batch())
 
 
 def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypatch) -> None:

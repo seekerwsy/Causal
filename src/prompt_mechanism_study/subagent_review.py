@@ -16,25 +16,38 @@ from prompt_mechanism_study.artifact_io import (
     write_bundle,
 )
 from prompt_mechanism_study.contract_cleaning import (
+    _CONTENT_FIELDS,
     ContractCleaningError,
     _base_population,
+    _full_prompt_content_evidence,
     _manifest_digest,
+    _parse_contract_repairs,
     _parse_content_reviews,
     _proposal_payload,
     _terminal_quality,
     _unique_by,
 )
-from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.task_unit_data import verify_task_unit_data
 
 _SLOTS = ("reviewer-a", "reviewer-b", "reviewer-c")
 _PACKET_ITEMS = 25
+_REPAIR_PACKET_ITEMS = 10
 _DECISION_FIELDS = {
     "task_unit_id",
     "contract_status",
     "evidence_status",
     "source_specification_disposition",
     "issue_codes",
+    "repair_category",
+    "reason",
+}
+_REPAIR_FIELDS = {
+    "task_unit_id",
+    "resolution_status",
+    "entrypoint",
+    *_CONTENT_FIELDS,
+    "source_specification_assessment",
     "repair_category",
     "reason",
 }
@@ -47,8 +60,13 @@ def prepare_subagent_contract_reviews(
     output: Path,
     *,
     producer_commit: str,
+    nonterminal_reviews_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Freeze two blind reviewer assignments and inspectable work packets per task."""
+    """Freeze two blind reviewer assignments and inspectable work packets per task.
+
+    A prior review bundle may select only nonterminal contracts after repair.  The
+    selection is frozen in the plan; it never depends on task roles or outcomes.
+    """
 
     if not producer_commit or any(character.isspace() for character in producer_commit):
         raise ValueError("producer_commit must be one non-empty token")
@@ -62,8 +80,34 @@ def prepare_subagent_contract_reviews(
         "task_unit_id",
         "proposed contracts",
     )
+    reviewed_task_ids = set(_assignment_map(plan))
+    if not reviewed_task_ids <= set(proposed):
+        raise ContractCleaningError("subagent review selection is absent from proposals")
     if set(tasks) != set(proposed):
         raise ContractCleaningError("proposal population differs from the base task population")
+    selected_task_ids = set(tasks)
+    selection: dict[str, Any] = {"kind": "full_population"}
+    if nonterminal_reviews_root is not None:
+        prior_reviews = nonterminal_reviews_root.resolve()
+        verify_bundle(prior_reviews)
+        prior = _unique_by(
+            read_json(prior_reviews / "contract-content-reviews.json"),
+            "task_unit_id",
+            "prior contract reviews",
+        )
+        if set(prior) != set(tasks):
+            raise ContractCleaningError("prior review population differs from the base tasks")
+        selected_task_ids = {
+            task_id
+            for task_id, review in prior.items()
+            if review.get("terminal_quality_decision") is None
+        }
+        if not selected_task_ids:
+            raise ContractCleaningError("prior review bundle has no nonterminal contracts")
+        selection = {
+            "kind": "prior_nonterminal_contracts",
+            "prior_reviews_bundle_sha256": bundle_digest(prior_reviews),
+        }
     prompt_path = repository_root.resolve() / "data/dataset-curation/contract-content-review-v1.txt"
     prompt = prompt_path.read_text(encoding="utf-8").strip()
     if not prompt:
@@ -71,7 +115,7 @@ def prepare_subagent_contract_reviews(
 
     assignments = []
     by_slot: dict[str, list[dict[str, Any]]] = {slot: [] for slot in _SLOTS}
-    for task_id in sorted(tasks):
+    for task_id in sorted(selected_task_ids):
         primary_index = int(hashlib.sha256(f"primary:{task_id}".encode()).hexdigest(), 16) % 3
         primary = _SLOTS[primary_index]
         secondary = _SLOTS[(primary_index + 1) % 3]
@@ -132,7 +176,8 @@ def prepare_subagent_contract_reviews(
         "base_bundle_sha256": _manifest_digest(base),
         "proposals_bundle_sha256": bundle_digest(proposals),
         "protocol_prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
-        "task_unit_count": len(tasks),
+        "task_unit_count": len(selected_task_ids),
+        "selection": selection,
         "reviewer_slots": list(_SLOTS),
         "packet_item_limit": _PACKET_ITEMS,
         "assignments": assignments,
@@ -154,7 +199,7 @@ def prepare_subagent_contract_reviews(
     write_bundle(output.resolve(), artifacts)
     return {
         "status": "SUBAGENT_CONTRACT_REVIEW_PACKETS_FROZEN",
-        "task_unit_count": len(tasks),
+        "task_unit_count": len(selected_task_ids),
         "review_assignment_count": sum(len(values) for values in by_slot.values()),
         "packet_count": len(packet_index),
         "packets_by_reviewer": dict(
@@ -162,6 +207,133 @@ def prepare_subagent_contract_reviews(
         ),
         "bundle_sha256": bundle_digest(output.resolve()),
         "arms_or_outcomes_used": False,
+    }
+
+
+def prepare_subagent_contract_repairs(
+    repository_root: Path,
+    base_bundle: Path,
+    proposals_root: Path,
+    reviews_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+) -> dict[str, Any]:
+    """Freeze source-only repair packets for every nonterminal contract review."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    proposals = proposals_root.resolve()
+    reviews = reviews_root.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(proposals)
+    verify_bundle(reviews)
+    tasks, _, _ = _base_population(base)
+    proposed = _unique_by(
+        read_json(proposals / "proposed-contracts.json"),
+        "task_unit_id",
+        "proposed contracts",
+    )
+    reviewed = _unique_by(
+        read_json(reviews / "contract-content-reviews.json"),
+        "task_unit_id",
+        "contract reviews",
+    )
+    if set(tasks) != set(proposed) or set(tasks) != set(reviewed):
+        raise ContractCleaningError("repair inputs do not cover the base task population")
+    repair_ids = {
+        task_id
+        for task_id, review in reviewed.items()
+        if review.get("terminal_quality_decision") is None
+    }
+    if not repair_ids:
+        raise ContractCleaningError("contract review has no nonterminal repairs")
+    prompt_path = repository_root.resolve() / "data/dataset-curation/contract-semantic-repair-v2.txt"
+    if not prompt_path.read_text(encoding="utf-8").strip():
+        raise ContractCleaningError("subagent repair prompt is empty")
+
+    by_slot: dict[str, list[dict[str, Any]]] = {slot: [] for slot in _SLOTS}
+    assignments = []
+    for task_id in sorted(repair_ids):
+        slot = _SLOTS[
+            int(hashlib.sha256(f"repair:{task_id}".encode()).hexdigest(), 16) % len(_SLOTS)
+        ]
+        assignments.append({"task_unit_id": task_id, "repair_producer": slot})
+        task = tasks[task_id]
+        by_slot[slot].append(
+            {
+                "task_unit_id": task_id,
+                "language": task["declared_execution_context"]["language"],
+                "source_prompt": task["model_visible_input"]["natural_prompt"],
+                "previous_contract": _proposal_payload(proposed[task_id]),
+                "previous_review": {
+                    key: reviewed[task_id][key]
+                    for key in (
+                        "contract_status",
+                        "evidence_status",
+                        "source_specification_disposition",
+                        "issue_codes",
+                        "repair_category",
+                        "reason",
+                    )
+                },
+            }
+        )
+
+    artifacts: dict[str, Any] = {}
+    packet_index = []
+    for slot in _SLOTS:
+        items = sorted(by_slot[slot], key=lambda item: item["task_unit_id"])
+        for number, start in enumerate(range(0, len(items), _REPAIR_PACKET_ITEMS), start=1):
+            packet_items = items[start : start + _REPAIR_PACKET_ITEMS]
+            packet_id = f"{slot}-repair-{number:04d}"
+            file_name = f"{packet_id}.json"
+            artifacts[file_name] = {
+                "schema_version": "subagent-contract-repair-packet-1.0",
+                "packet_id": packet_id,
+                "repair_producer": slot,
+                "blindness": {
+                    "arms_outcomes_roles_withheld": True,
+                    "cwe_readiness_oracles_withheld": True,
+                },
+                "protocol_prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+                "tasks": packet_items,
+            }
+            packet_index.append(
+                {
+                    "packet_id": packet_id,
+                    "file_name": file_name,
+                    "repair_producer": slot,
+                    "task_unit_ids": [item["task_unit_id"] for item in packet_items],
+                }
+            )
+    plan = {
+        "schema_version": "subagent-contract-repair-plan-1.0",
+        "protocol_id": "source_only_subagent_contract_repair_v1",
+        "producer_commit": producer_commit,
+        "base_bundle_sha256": _manifest_digest(base),
+        "proposals_bundle_sha256": bundle_digest(proposals),
+        "reviews_bundle_sha256": bundle_digest(reviews),
+        "protocol_prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+        "task_unit_count": len(repair_ids),
+        "assignments": assignments,
+        "packets": packet_index,
+        "decision_fields": sorted(_REPAIR_FIELDS),
+        "evidence_policy": "whole_prompt_exact_span_pending_independent_semantic_review",
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+    }
+    artifacts["plan.json"] = plan
+    write_bundle(output.resolve(), artifacts)
+    return {
+        "status": "SUBAGENT_CONTRACT_REPAIR_PACKETS_FROZEN",
+        "repair_task_unit_count": len(repair_ids),
+        "packet_count": len(packet_index),
+        "packets_by_producer": dict(
+            sorted(Counter(item["repair_producer"] for item in packet_index).items())
+        ),
+        "bundle_sha256": bundle_digest(output.resolve()),
     }
 
 
@@ -287,15 +459,15 @@ def finalize_subagent_contract_reviews(
     adjudications = _load_adjudications(
         initial, adjudication_decisions_root.resolve(), adjudication_plan
     )
-    if set(agreements) | set(disagreements) != set(proposed) or set(agreements) & set(
-        disagreements
-    ):
+    if set(agreements) | set(disagreements) != reviewed_task_ids or set(
+        agreements
+    ) & set(disagreements):
         raise ContractCleaningError("subagent review populations are invalid")
     if set(adjudications) != set(disagreements):
         raise ContractCleaningError("subagent adjudication population is incomplete")
 
     frozen = []
-    for task_id in sorted(proposed):
+    for task_id in sorted(reviewed_task_ids):
         decision = agreements.get(task_id, adjudications.get(task_id))
         assert decision is not None
         core = {
@@ -349,6 +521,249 @@ def finalize_subagent_contract_reviews(
         {"contract-content-reviews.json": frozen, "report.json": report},
     )
     return report
+
+
+def finalize_subagent_contract_repairs(
+    base_bundle: Path,
+    proposals_root: Path,
+    reviews_root: Path,
+    packets_root: Path,
+    decisions_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+) -> dict[str, Any]:
+    """Replace only nonterminal proposals with source-only subagent repairs."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    proposals = proposals_root.resolve()
+    reviews = reviews_root.resolve()
+    packets = packets_root.resolve()
+    decisions = decisions_root.resolve()
+    verify_task_unit_data(base)
+    for root in (proposals, reviews, packets):
+        verify_bundle(root)
+    tasks, _, _ = _base_population(base)
+    proposed = _unique_by(
+        read_json(proposals / "proposed-contracts.json"),
+        "task_unit_id",
+        "proposed contracts",
+    )
+    prior_ledger = _unique_by(
+        read_json(proposals / "contract-repair-ledger.json"),
+        "task_unit_id",
+        "contract repair ledger",
+    )
+    reviewed = _unique_by(
+        read_json(reviews / "contract-content-reviews.json"),
+        "task_unit_id",
+        "contract reviews",
+    )
+    plan = read_json(packets / "plan.json")
+    if (
+        plan.get("schema_version") != "subagent-contract-repair-plan-1.0"
+        or plan.get("arms_or_outcomes_used") is not False
+        or set(tasks) != set(proposed)
+        or set(tasks) != set(prior_ledger)
+        or set(tasks) != set(reviewed)
+    ):
+        raise ContractCleaningError("subagent repair inputs are invalid")
+    repair_ids = {
+        task_id
+        for task_id, review in reviewed.items()
+        if review.get("terminal_quality_decision") is None
+    }
+    planned_ids = {row["task_unit_id"] for row in plan.get("assignments", [])}
+    if planned_ids != repair_ids:
+        raise ContractCleaningError("subagent repair selection is stale")
+    expected_files = {packet["packet_id"] + ".json" for packet in plan["packets"]}
+    if {path.name for path in decisions.glob("*.json")} != expected_files:
+        raise ContractCleaningError("subagent repair decision file set is incomplete")
+
+    repaired: dict[str, dict[str, Any]] = {}
+    for packet_row in plan["packets"]:
+        packet = read_json(packets / packet_row["file_name"])
+        rows = _repair_rows(
+            read_json(decisions / f"{packet_row['packet_id']}.json"),
+            packet["tasks"],
+        )
+        values = _unique_by(rows, "task_unit_id", "subagent contract repairs")
+        expected = {item["task_unit_id"] for item in packet["tasks"]}
+        if set(values) != expected or set(repaired) & set(values):
+            raise ContractCleaningError("subagent repair identities differ")
+        repaired.update(values)
+    if set(repaired) != repair_ids:
+        raise ContractCleaningError("subagent repair population is incomplete")
+
+    next_proposals = []
+    next_ledger = []
+    for task_id in sorted(tasks):
+        if task_id not in repaired:
+            next_proposals.append(proposed[task_id])
+            next_ledger.append(prior_ledger[task_id])
+            continue
+        repair = repaired[task_id]
+        task = tasks[task_id]
+        prompt = task["model_visible_input"]["natural_prompt"]
+        prompt_sha256 = task["model_visible_input"]["natural_prompt_content_sha256"]
+        contract_values = {
+            key: repair[key]
+            for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+        }
+        evidence = _full_prompt_content_evidence(contract_values, prompt, prompt_sha256)
+        core = {
+            "schema_version": "functional-contract-cleaning-proposal-1.0",
+            "task_unit_id": task_id,
+            "record_id": task["representative_record_id"],
+            "source_prompt_sha256": prompt_sha256,
+            **contract_values,
+            "content_evidence": evidence,
+            "proposal_mode": "SUBAGENT_SEMANTIC_REPAIR",
+            "producer_source_assessment": repair["source_specification_assessment"],
+            "producer_reason": repair["reason"],
+            "arms_or_outcomes_used": False,
+        }
+        proposal = {**core, "contract_id": content_id("functional_contract_", core)}
+        next_proposals.append(proposal)
+        old_ledger = prior_ledger[task_id]
+        ledger_core = {
+            **{
+                key: value
+                for key, value in old_ledger.items()
+                if key != "repair_ledger_record_sha256"
+            },
+            "schema_version": "contract-repair-ledger-1.1",
+            "old_contract_id": proposed[task_id]["contract_id"],
+            "repair_category": repair["repair_category"],
+            "repair_status": "PROPOSED_PENDING_INDEPENDENT_REVIEW",
+            "new_contract_id": proposal["contract_id"],
+            "source_specification_disposition": repair[
+                "source_specification_assessment"
+            ],
+            "evidence_binding_status": "full_prompt_pending_review",
+            "evidence_adjudication": "FULL_PROMPT_PENDING_INDEPENDENT_REVIEW",
+            "review_status": "PENDING",
+            "review_issue_codes": [],
+            "output_sha256": content_hash(proposal),
+            "producer_commit": producer_commit,
+        }
+        next_ledger.append(
+            {**ledger_core, "repair_ledger_record_sha256": content_hash(ledger_core)}
+        )
+    report = {
+        "schema_version": "1.0",
+        "status": "SUBAGENT_CONTRACT_REPAIRS_FROZEN_PENDING_REVIEW",
+        "task_unit_count": len(tasks),
+        "repaired_contract_count": len(repaired),
+        "unchanged_terminal_contract_count": len(tasks) - len(repaired),
+        "full_prompt_pending_review_count": len(repaired),
+        "base_bundle_sha256": _manifest_digest(base),
+        "prior_proposals_bundle_sha256": bundle_digest(proposals),
+        "prior_reviews_bundle_sha256": bundle_digest(reviews),
+        "repair_packets_bundle_sha256": bundle_digest(packets),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        output.resolve(),
+        {
+            "proposed-contracts.json": next_proposals,
+            "contract-repair-ledger.json": next_ledger,
+            "report.json": report,
+        },
+    )
+    return {**report, "bundle_sha256": bundle_digest(output.resolve())}
+
+
+def merge_subagent_contract_reviews(
+    prior_reviews_root: Path,
+    revised_reviews_root: Path,
+    proposals_root: Path,
+    output: Path,
+) -> dict[str, Any]:
+    """Merge a repaired-contract review subset into the prior full review population."""
+
+    prior_root = prior_reviews_root.resolve()
+    revised_root = revised_reviews_root.resolve()
+    proposals = proposals_root.resolve()
+    for root in (prior_root, revised_root, proposals):
+        verify_bundle(root)
+    prior = _unique_by(
+        read_json(prior_root / "contract-content-reviews.json"),
+        "task_unit_id",
+        "prior contract reviews",
+    )
+    revised = _unique_by(
+        read_json(revised_root / "contract-content-reviews.json"),
+        "task_unit_id",
+        "revised contract reviews",
+    )
+    proposed = _unique_by(
+        read_json(proposals / "proposed-contracts.json"),
+        "task_unit_id",
+        "proposed contracts",
+    )
+    if set(prior) != set(proposed) or not set(revised) <= set(prior):
+        raise ContractCleaningError("review merge populations are invalid")
+    if any(
+        prior[task_id].get("terminal_quality_decision") is not None
+        for task_id in revised
+    ):
+        raise ContractCleaningError("revised reviews may replace only prior nonterminal tasks")
+
+    merged = []
+    for task_id in sorted(prior):
+        review = revised.get(task_id, prior[task_id])
+        if review.get("contract_id") != proposed[task_id].get("contract_id"):
+            raise ContractCleaningError("merged review does not bind the current proposal")
+        _validate_review_record_identity(review)
+        merged.append(review)
+    terminal = sum(row["terminal_quality_decision"] is not None for row in merged)
+    report = {
+        "schema_version": "1.0",
+        "status": "CONTRACT_CONTENT_REVIEW_FROZEN",
+        "review_protocol_id": "subagent_review_repair_merge_v1",
+        "task_unit_count": len(merged),
+        "terminal_quality_decision_count": terminal,
+        "nonterminal_count": len(merged) - terminal,
+        "revised_review_count": len(revised),
+        "preserved_review_count": len(merged) - len(revised),
+        "contract_status_counts": dict(
+            sorted(Counter(row["contract_status"] for row in merged).items())
+        ),
+        "evidence_status_counts": dict(
+            sorted(Counter(row["evidence_status"] for row in merged).items())
+        ),
+        "source_specification_disposition_counts": dict(
+            sorted(
+                Counter(row["source_specification_disposition"] for row in merged).items()
+            )
+        ),
+        "quality_disposition_counts": dict(
+            sorted(
+                Counter(
+                    row["terminal_quality_decision"]
+                    for row in merged
+                    if row["terminal_quality_decision"] is not None
+                ).items()
+            )
+        ),
+        "prior_reviews_bundle_sha256": bundle_digest(prior_root),
+        "revised_reviews_bundle_sha256": bundle_digest(revised_root),
+        "proposals_bundle_sha256": bundle_digest(proposals),
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        output.resolve(),
+        {"contract-content-reviews.json": merged, "report.json": report},
+    )
+    return {**report, "bundle_sha256": bundle_digest(output.resolve())}
 
 
 def _assignment_map(plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -441,6 +856,30 @@ def _decision_rows(value: Any) -> list[dict[str, Any]]:
     return value
 
 
+def _repair_rows(value: Any, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if (
+        not isinstance(value, list)
+        or len(value) != len(tasks)
+        or any(not isinstance(row, dict) or set(row) != _REPAIR_FIELDS for row in value)
+    ):
+        raise ContractCleaningError("subagent repairs must be one exact JSON array")
+    by_task = _unique_by(value, "task_unit_id", "subagent repair decisions")
+    expected = {item["task_unit_id"] for item in tasks}
+    if set(by_task) != expected:
+        raise ContractCleaningError("subagent repair task identities differ")
+    ordered = []
+    for index, item in enumerate(tasks, start=1):
+        row = by_task[item["task_unit_id"]]
+        ordered.append(
+            {
+                "item_index": index,
+                **{key: value for key, value in row.items() if key != "task_unit_id"},
+            }
+        )
+    raw = json.dumps({"items": ordered}, ensure_ascii=False).encode()
+    return _parse_contract_repairs(raw, tasks)
+
+
 def _review_tuple(review: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         review["contract_status"],
@@ -449,8 +888,26 @@ def _review_tuple(review: Mapping[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _validate_review_record_identity(review: Mapping[str, Any]) -> None:
+    core = {
+        key: value
+        for key, value in review.items()
+        if key != "contract_content_review_record_sha256"
+    }
+    if (
+        review.get("schema_version") != "contract-content-review-1.0"
+        or review.get("contract_content_review_record_sha256") != content_hash(core)
+        or review.get("arms_or_outcomes_used") is not False
+        or review.get("terminal_quality_decision") != _terminal_quality(review)
+    ):
+        raise ContractCleaningError("contract review record identity is invalid")
+
+
 __all__ = [
+    "finalize_subagent_contract_repairs",
     "finalize_subagent_contract_reviews",
+    "merge_subagent_contract_reviews",
+    "prepare_subagent_contract_repairs",
     "prepare_subagent_contract_reviews",
     "seal_initial_subagent_contract_reviews",
 ]
