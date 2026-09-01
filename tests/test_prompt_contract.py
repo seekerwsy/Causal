@@ -282,6 +282,46 @@ def test_flash_transport_v3_gate_is_single_task_and_bounded() -> None:
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
 
 
+@pytest.mark.reviewer
+def test_flash_qual_dev_regression_v3_is_frozen_after_transport_gate() -> None:
+    plan = json.loads(
+        (
+            ROOT / "data/method/prompt-contract-qwen37flash-qual-dev-regression-v3-plan.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["response_protocol_id"] == "task_keyed_prompt_contract_json_schema_v3"
+    assert plan["data_role"] == "LEGACY_EXPOSED_DEVELOPMENT_REGRESSION"
+    assert plan["formal_use_authorized"] is False
+    assert plan["scientific_claim_allowed"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["arms_or_outcomes_used"] is False
+    assert plan["maximum_provider_calls"] == 56
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["maximum_cost_microunits"] == (
+        plan["maximum_provider_calls"]
+        * plan["model_policy"]["maximum_cost_microunits_per_call"]
+    )
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_regression_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_regression_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_regression_microunits"]
+    )
+    assert plan["trigger"]["transport_gate_status"] == (
+        "PROMPT_CONTRACT_EXTRACTION_COMPLETE"
+    )
+    assert plan["execution"]["task_units"] == 28
+    assert plan["execution"]["task_workers"] == 4
+    for value in plan["inputs"].values():
+        path = ROOT / value["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
+
+
 def _inputs():
     tasks = {
         task["source"]["upstream_id"]: task
