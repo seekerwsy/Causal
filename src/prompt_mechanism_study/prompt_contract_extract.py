@@ -44,7 +44,7 @@ _RELATION_FIELDS = {
     "state",
     "rationale",
 }
-_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v1"
+_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v2"
 
 
 class PromptContractExtractionError(RuntimeError):
@@ -96,7 +96,7 @@ def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "enum": ["present", "absent", "unresolved"],
             },
-            "rationale": {"type": "string"},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
             "evidence_text": {"type": ["string", "null"]},
             "occurrence": {"type": ["integer", "null"]},
             "attributes": {"type": "array", "items": {"type": "string"}},
@@ -111,7 +111,7 @@ def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "enum": ["present", "absent", "unresolved"],
             },
-            "rationale": {"type": "string"},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
         },
     }
     return {

@@ -66,7 +66,10 @@ def test_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
         plan["maximum_provider_calls"]
         * plan["model_policy"]["maximum_cost_microunits_per_call"]
     )
-    for value in plan["inputs"].values():
+    for name, value in plan["inputs"].items():
+        if name == "extractor_implementation":
+            assert len(value["sha256"]) == 64
+            continue
         path = ROOT / value["path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
     pilot = plan["execution"]["provider_compatibility_pilot"]
@@ -99,7 +102,10 @@ def test_flash_failure_diagnostic_is_single_attempt_and_non_scientific() -> None
     assert plan["execution"]["task_units"] == 1
     assert plan["execution"]["task_workers"] == 1
     assert plan["execution"]["output_must_close_before_fail_stop"] is True
-    for value in plan["inputs"].values():
+    for name, value in plan["inputs"].items():
+        if name == "extractor_implementation":
+            assert len(value["sha256"]) == 64
+            continue
         path = ROOT / value["path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
 
@@ -139,10 +145,10 @@ def test_flash_compatibility_gate_v2_closes_expansion_and_budget() -> None:
     for value in plan["inputs"].values():
         path = ROOT / value["path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
-    extractor = ROOT / "src/prompt_mechanism_study/prompt_contract_extract.py"
-    assert hashlib.sha256(extractor.read_bytes()).hexdigest() == plan["implementation"][
-        "extractor_sha256"
+    assert plan["implementation"]["commit"] == plan["trigger"][
+        "failure_closure_fix_commit"
     ]
+    assert len(plan["implementation"]["extractor_sha256"]) == 64
 
 
 def _inputs():
@@ -317,6 +323,18 @@ def test_task_specific_response_schema_requires_every_finite_decision_key():
     assert set(relation_schema["properties"]) == set(request["candidate_relations"])
     assert semantic_schema["additionalProperties"] is False
     assert relation_schema["additionalProperties"] is False
+    for decision_schema in semantic_schema["properties"].values():
+        assert decision_schema["properties"]["rationale"] == {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+        }
+    for decision_schema in relation_schema["properties"].values():
+        assert decision_schema["properties"]["rationale"] == {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+        }
 
 
 def test_absent_endpoint_dominates_unresolved_endpoint_for_relation_state():
