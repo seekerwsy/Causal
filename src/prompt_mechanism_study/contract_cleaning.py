@@ -2497,19 +2497,11 @@ def _parse_content_reviews(
     }
     frozen = []
     for row, item in zip(rows, batch, strict=True):
-        issues = row.get("issue_codes")
         faithful_supported = (
             row.get("contract_status") == "faithful"
             and row.get("evidence_status") == "supported"
         )
-        source_only_issues = (
-            faithful_supported
-            and row.get("source_specification_disposition")
-            in {"insufficient", "defect", "uncertain"}
-            and isinstance(issues, list)
-            and bool(issues)
-        )
-        normalized_issues = ["none"] if source_only_issues else issues
+        normalized_issues = _normalize_review_issues(row)
         normalized_category = _canonical_review_repair_category(
             row, normalized_issues
         )
@@ -2546,6 +2538,37 @@ def _parse_content_reviews(
             }
         )
     return frozen
+
+
+def _normalize_review_issues(row: Mapping[str, Any]) -> list[str]:
+    faithful_supported = (
+        row.get("contract_status") == "faithful"
+        and row.get("evidence_status") == "supported"
+    )
+    if faithful_supported:
+        return ["none"]
+    raw = row.get("issue_codes")
+    normalized: list[str] = []
+    unknown = False
+    if isinstance(raw, list):
+        for issue in raw:
+            if issue in _REVIEW_ISSUES - {"none"}:
+                if issue not in normalized:
+                    normalized.append(issue)
+            else:
+                unknown = True
+    else:
+        unknown = True
+    if unknown and "other" not in normalized:
+        normalized.append("other")
+    if not normalized:
+        if row.get("contract_status") == "uncertain":
+            normalized = ["uncertain_semantics"]
+        elif row.get("evidence_status") == "unsupported":
+            normalized = ["evidence_mismatch"]
+        else:
+            normalized = ["other"]
+    return normalized[:6]
 
 
 def _canonical_review_repair_category(

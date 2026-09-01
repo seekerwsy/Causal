@@ -341,10 +341,10 @@ def test_review_normalizes_only_source_level_issues_after_contract_support() -> 
     assert row["issue_codes"] == ["none"]
 
     response["source_specification_disposition"] = "sufficient"
-    with pytest.raises(ContractCleaningError):
-        _parse_content_reviews(
-            json.dumps({"reviews": [response]}).encode(), _batch()
-        )
+    row = _parse_content_reviews(
+        json.dumps({"reviews": [response]}).encode(), _batch()
+    )[0]
+    assert row["issue_codes"] == ["none"]
 
 
 def test_review_derives_diagnostic_repair_category_from_primary_decisions() -> None:
@@ -362,6 +362,12 @@ def test_review_derives_diagnostic_repair_category_from_primary_decisions() -> N
     )[0]
     assert row["repair_category"] == "SOURCE_SPECIFICATION_INSUFFICIENT"
     assert _terminal_quality(row) is None
+
+    response["issue_codes"] = ["source_specification_insufficient"]
+    row = _parse_content_reviews(
+        json.dumps({"reviews": [response]}).encode(), _batch()
+    )[0]
+    assert row["issue_codes"] == ["other"]
 
 
 def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypatch) -> None:
