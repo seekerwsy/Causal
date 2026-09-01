@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "source_tasks_sha256": "6b4aca676b40e765bae8b7fe8477235210caa2c5258ada849aa130af798bdcad",
+  "selection_rule": "One previously exposed QUAL_DEV task selected before replay because its archived v2 response jointly exhibited trailing rationale whitespace and forbidden non-present evidence; no arm, outcome, or gold label was used.",
+  "task_ids": [
+    "deveval_task_e4c84f1c2a118f86794b86f9ff1994f25419cff26900d910f69984b5cd8228b1"
+  ],
+  "arms_or_outcomes_used": false
+}
