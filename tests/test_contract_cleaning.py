@@ -17,6 +17,7 @@ from prompt_mechanism_study.contract_cleaning import (
 from prompt_mechanism_study.cli import _run_adjudicate_contract_repair_evidence
 from prompt_mechanism_study.functional_judge import JudgeGateError
 from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.subagent_review import _decision_rows
 
 
 def _batch():
@@ -446,3 +447,19 @@ def test_response_binding_uses_last_duplicate_only_when_index_set_is_complete() 
         _parse_evidence_backfill(
             json.dumps({"items": [{**needs_repair, "item_index": 2}]}).encode(), batch
         )
+
+
+def test_subagent_review_decisions_use_the_frozen_content_validator() -> None:
+    decision = {
+        "task_unit_id": "task-a",
+        "contract_status": "faithful",
+        "evidence_status": "supported",
+        "source_specification_disposition": "sufficient",
+        "issue_codes": ["none"],
+        "repair_category": "EVIDENCE_BACKFILL_ONLY",
+        "reason": "The complete contract is source-supported.",
+    }
+    assert _decision_rows([decision.copy()]) == [decision]
+
+    with pytest.raises(ContractCleaningError):
+        _decision_rows([{**decision, "unexpected": True}])

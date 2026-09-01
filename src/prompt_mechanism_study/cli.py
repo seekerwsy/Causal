@@ -212,6 +212,39 @@ def _add_curation_group(groups: Any) -> None:
         default="contract-cleaning-reviewer-qwen37max.json",
     )
 
+    prepare_subagent_review = _leaf(
+        actions,
+        "prepare-subagent-contract-review",
+        _run_prepare_subagent_contract_review,
+        "freeze dual-blind subagent review assignments and packets",
+    )
+    prepare_subagent_review.add_argument("base_bundle", type=Path)
+    prepare_subagent_review.add_argument("proposals_root", type=Path)
+    prepare_subagent_review.add_argument("output", type=Path)
+    prepare_subagent_review.add_argument("--repository-root", type=Path, default=Path.cwd())
+    prepare_subagent_review.add_argument("--producer-commit", required=True)
+
+    seal_subagent_review = _leaf(
+        actions,
+        "seal-initial-subagent-contract-review",
+        _run_seal_initial_subagent_contract_review,
+        "validate dual reviews and freeze blind disagreement packets",
+    )
+    seal_subagent_review.add_argument("packets_root", type=Path)
+    seal_subagent_review.add_argument("decisions_root", type=Path)
+    seal_subagent_review.add_argument("output", type=Path)
+
+    finalize_subagent_review = _leaf(
+        actions,
+        "finalize-subagent-contract-review",
+        _run_finalize_subagent_contract_review,
+        "merge agreements and blind third decisions into the review bundle",
+    )
+    finalize_subagent_review.add_argument("initial_root", type=Path)
+    finalize_subagent_review.add_argument("adjudication_decisions_root", type=Path)
+    finalize_subagent_review.add_argument("proposals_root", type=Path)
+    finalize_subagent_review.add_argument("output", type=Path)
+
     semantic_repairs = _leaf(
         actions,
         "contract-semantic-repairs",
@@ -859,6 +892,51 @@ def _run_contract_content_review(
         reviewer_config_name=args.reviewer_config,
     )
     return _emit_status(report)
+
+
+def _run_prepare_subagent_contract_review(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import prepare_subagent_contract_reviews
+
+    return _emit_status(
+        prepare_subagent_contract_reviews(
+            args.repository_root,
+            args.base_bundle,
+            args.proposals_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
+
+
+def _run_seal_initial_subagent_contract_review(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import seal_initial_subagent_contract_reviews
+
+    return _emit_status(
+        seal_initial_subagent_contract_reviews(
+            args.packets_root,
+            args.decisions_root,
+            args.output,
+        )
+    )
+
+
+def _run_finalize_subagent_contract_review(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.subagent_review import finalize_subagent_contract_reviews
+
+    return _emit_status(
+        finalize_subagent_contract_reviews(
+            args.initial_root,
+            args.adjudication_decisions_root,
+            args.proposals_root,
+            args.output,
+        )
+    )
 
 
 def _run_contract_semantic_repairs(
