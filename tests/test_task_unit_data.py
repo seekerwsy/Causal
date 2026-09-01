@@ -347,7 +347,7 @@ def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path)
             "report.json": {
                 "status": "fixture",
                 "review_protocol_id": (
-                    "dual_blind_subagent_review_with_third_adjudication_v2_unanchored"
+                    "dual_blind_subagent_review_with_third_adjudication_v3_response_format_excluded"
                 ),
             },
         },
