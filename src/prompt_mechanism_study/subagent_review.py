@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
@@ -18,13 +19,13 @@ from prompt_mechanism_study.contract_cleaning import (
     ContractCleaningError,
     _base_population,
     _manifest_digest,
+    _parse_content_reviews,
     _proposal_payload,
     _terminal_quality,
     _unique_by,
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.task_unit_data import verify_task_unit_data
-
 
 _SLOTS = ("reviewer-a", "reviewer-b", "reviewer-c")
 _PACKET_ITEMS = 25
@@ -282,7 +283,9 @@ def finalize_subagent_contract_reviews(
     adjudications = _load_adjudications(
         initial, adjudication_decisions_root.resolve(), adjudication_plan
     )
-    if set(agreements) | set(disagreements) != set(proposed) or set(agreements) & set(disagreements):
+    if set(agreements) | set(disagreements) != set(proposed) or set(agreements) & set(
+        disagreements
+    ):
         raise ContractCleaningError("subagent review populations are invalid")
     if set(adjudications) != set(disagreements):
         raise ContractCleaningError("subagent adjudication population is incomplete")
@@ -299,9 +302,7 @@ def finalize_subagent_contract_reviews(
             "terminal_quality_decision": _terminal_quality(decision),
             "arms_or_outcomes_used": False,
         }
-        frozen.append(
-            {**core, "contract_content_review_record_sha256": content_hash(core)}
-        )
+        frozen.append({**core, "contract_content_review_record_sha256": content_hash(core)})
     terminal = sum(row["terminal_quality_decision"] is not None for row in frozen)
     report = {
         "schema_version": "1.0",
@@ -401,8 +402,13 @@ def _decision_rows(value: Any) -> list[dict[str, Any]]:
     for row in value:
         if set(row) != _DECISION_FIELDS:
             raise ContractCleaningError("subagent decision fields are invalid")
-        raw = json.dumps({"reviews": [{"item_index": 1, **{k: v for k, v in row.items() if k != "task_unit_id"}}]}).encode()
-        from prompt_mechanism_study.contract_cleaning import _parse_content_reviews
+        raw = json.dumps(
+            {
+                "reviews": [
+                    {"item_index": 1, **{k: v for k, v in row.items() if k != "task_unit_id"}}
+                ]
+            }
+        ).encode()
 
         item = {"task_unit_id": row["task_unit_id"]}
         normalized = _parse_content_reviews(raw, [item])[0]
