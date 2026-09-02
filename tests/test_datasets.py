@@ -555,6 +555,7 @@ def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
     index = read_json(archive / "archive-index.json")
     assert index["formal_use_authorized"] is False
     assert index["qualification_accept_consumed"] is False
+    assert len(index["bundles"]) == 10
     for bundle in index["bundles"]:
         bundle_root = archive / bundle["path"]
         verify_bundle(bundle_root)
@@ -562,12 +563,21 @@ def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
 
     receipt = read_json(
         root
-        / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v4-execution.json"
+        / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v5-execution.json"
     )
-    assert receipt["status"] == "FINAL_PROMPT_ONLY_CANDIDATE_FAILED_CLOSED"
+    assert receipt["status"] == "EVIDENCE_AWARE_REDESIGN_CANARY_FAILED_CLOSED"
     assert receipt["qual_dev_full_started"] is False
     assert receipt["qualification_accept_consumed"] is False
+    assert receipt["formal_use_authorized"] is False
+    assert receipt["scientific_claim_allowed"] is False
     assert receipt["budget"]["actual_provider_calls"] == 6
+    assert receipt["budget"]["actual_conservative_cost_microunits"] == 6 * 4916
+    assert receipt["canary"]["development_replay"]["matched_task_units"] == 2
+    assert receipt["canary"]["development_replay"]["mismatched_task_units"] == 1
+    assert receipt["plan_sha256"] == file_sha256(root / receipt["plan_path"])
+    archived_manifests = {bundle["manifest_sha256"] for bundle in index["bundles"]}
+    assert receipt["canary"]["extraction_bundle_manifest_sha256"] in archived_manifests
+    assert receipt["canary"]["qualification_bundle_manifest_sha256"] in archived_manifests
 
     ledger = read_json(
         root / "data/method/qwen37flash-prospective-qual-dev-execution-ledger-v1.json"
@@ -586,6 +596,7 @@ def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
         - ledger["conservative_cumulative_spend_microunits"]
     )
     assert ledger["qualification_accept_provider_calls"] == 0
+    assert ledger["status"] == "PROSPECTIVE_REDESIGN_CANARY_FAILED_NOT_READY"
 
 
 @pytest.mark.reviewer

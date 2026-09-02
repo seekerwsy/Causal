@@ -108,19 +108,33 @@ false positives and zero wrong realizations.
 The v4 plan prospectively required prompt-only tuning to stop after this failure.
 Accordingly, no 28-task v4 run, `QUAL_ACCEPT` call, role assignment, Prompt TSG
 publication, Discovery run, or randomized experiment occurred. The representation
-candidate is **not ready** for formal use. Further work requires an explicit
-representation redesign and a new prospective qualification plan rather than
-another post-hoc prompt edit.
+candidate was therefore not ready for formal use under the prompt-only path.
+
+An explicit evidence-aware representation redesign then separated semantic
+classification from evidence-span validity. A zero-network replay of the archived
+v4 raw responses matched all three canary cases. Under the prospectively frozen v5
+plan, six new calls were made on the same three source-only cases. The independent
+replay matched YAML and SQL, but both fresh archive annotations classified the
+required archive-confinement semantic and relation as absent. The v5 canary therefore
+closed at 2/3 exact accuracy and `0.666667` present recall, with zero false-positive
+present and zero wrong realization. This is evidence of cross-call semantic
+classification instability, not a remaining evidence-field aggregation error.
+
+The v5 failure rule stopped execution before the 28-task full run. No `QUAL_ACCEPT`
+call, role assignment, Prompt TSG publication, Discovery run, randomized experiment,
+or scientific effect claim occurred. The evidence-aware representation candidate is
+**not ready** for formal use, and no automatic prompt or consensus iteration is
+authorized.
 
 ## Prospective cost and evidence closure
 
-Prospective `QUAL_DEV` used 77 calls with a conservative cost of CNY `0.378532`.
+Prospective `QUAL_DEV` used 83 calls with a conservative cost of CNY `0.408028`.
 Together with the earlier CNY `0.973368`, cumulative conservative preexperiment
-spend is CNY `1.351900`; at least CNY `98.648100` remains under the approved CNY
+spend is CNY `1.381396`; at least CNY `98.618604` remains under the approved CNY
 100 preexperiment ceiling. No retry, fallback, free-tier credit, or cache discount
 is counted, and `QUAL_ACCEPT` consumed zero calls.
 
-All eight closed prospective extraction/qualification bundles are now tracked at
+All ten closed prospective extraction/qualification bundles are now tracked at
 `data/method/qwen37flash-prospective-qual-dev-development-evidence-v1`. The exact
 attempt and budget ledger is
 `data/method/qwen37flash-prospective-qual-dev-execution-ledger-v1.json`. The
