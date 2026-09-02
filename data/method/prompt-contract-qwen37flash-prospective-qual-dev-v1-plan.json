@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "prospective_prompt_contract_qual_dev_preexperiment_plan",
+  "plan_id": "prompt-contract-qwen37flash-prospective-qual-dev-v1",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "frozen_on": "2026-09-02",
+  "protocol_id": "phase-context-policy-v3",
+  "response_protocol_id": "task_keyed_prompt_contract_json_schema_v4",
+  "data_role": "PROSPECTIVE_QUAL_DEV_CANDIDATE_DEVELOPMENT_ONLY",
+  "formal_five_role_manifest_frozen": false,
+  "formal_use_authorized": false,
+  "scientific_claim_allowed": false,
+  "qualification_accept_consumed": false,
+  "arms_or_outcomes_used": false,
+  "budget_authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+  "budget_scope": "PREEXPERIMENT_ONLY",
+  "budget_currency": "CNY",
+  "maximum_provider_calls": 62,
+  "maximum_cost_microunits": 304792,
+  "automatic_retry_ceiling": 0,
+  "pre_call_budget_accounting": {
+    "authorized_total_microunits": 100000000,
+    "prior_conservative_spend_microunits": 973368,
+    "cumulative_maximum_after_plan_microunits": 1278160,
+    "minimum_remaining_after_plan_microunits": 98721840
+  },
+  "execution": {
+    "canary": {
+      "task_units": 3,
+      "calls_per_task": 2,
+      "maximum_provider_calls": 6,
+      "maximum_cost_microunits": 29496,
+      "task_workers": 3,
+      "qualification_scoring_authorized": false,
+      "continue_rule": "All three frozen tasks must close from exactly six single-attempt responses with the fixed model and schema; otherwise stop before the 28-task run."
+    },
+    "qual_dev": {
+      "task_units": 28,
+      "calls_per_task": 2,
+      "maximum_provider_calls": 56,
+      "maximum_cost_microunits": 275296,
+      "task_workers": 4,
+      "qualification_provider_calls": 0,
+      "continue_rule": "The extraction bundle must close all 28 frozen QUAL_DEV candidates from exactly 56 single-attempt responses and then be independently scored against the pre-extraction source gold. Passing is development evidence only and cannot authorize QUAL_ACCEPT, formal roles, or scientific claims."
+    },
+    "within_task_order": "proposer_then_reviewer",
+    "artifact_order": "frozen_selection_order",
+    "output_must_close_before_fail_stop": true,
+    "canary_responses_must_not_be_reused_as_qual_dev_responses": true
+  },
+  "model_policy": {
+    "provider": "ali_bailian_pay_as_you_go",
+    "deployment_region": "cn-beijing",
+    "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
+    "dynamic_alias_allowed": false,
+    "fallback_model_ids": [],
+    "enable_thinking": false,
+    "maximum_input_tokens_per_call": 8192,
+    "maximum_output_tokens_per_call": 4096,
+    "maximum_cost_microunits_per_call": 4916,
+    "credential_execution": "REMOTE_SERVER_EXISTING_ENVIRONMENT_FILE_ONLY",
+    "credential_material_recorded": false
+  },
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "implementation": {
+    "commit": "759b4390718017955ef3a44ac5f238df1fc6da90",
+    "extractor_sha256": "96f973fff1f4fe2bdbe565e361b84aec8f273533d5db930e865483df8c0505dd",
+    "independent_qualifier_sha256": "faba9fe6f45f100bb09ff52d84574645404e22d2cd7e495592218584afd3d208",
+    "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/qwen37flash-prospective-qual-dev-759b439-20260902-08",
+    "remote_experiment_root": "/home/wsy/prompt-mechanism-study-experiments/qwen37flash-prospective-qual-dev-759b439-20260902-08"
+  },
+  "inputs": {
+    "canary_input_bundle": {
+      "path": "data/method/qwen37flash-prospective-qual-dev-v1-inputs",
+      "manifest_sha256": "3b17d16ef28fca97e8ef484303e62049fa99c3f549d898781e009935671a4fe9"
+    },
+    "canary_tasks": {
+      "path": "data/method/qwen37flash-prospective-qual-dev-v1-inputs/canary-tasks.json",
+      "sha256": "b6ea1143cc6a658362f2f02b838f4a1c48675b701f2fdd5f472aaeb33e4a4438"
+    },
+    "canary_selection": {
+      "path": "data/method/qwen37flash-prospective-qual-dev-v1-inputs/canary-selection.json",
+      "sha256": "f2a0e68c83dcb18fc572574b41002e0ce382ce1adc028f9481b0bbde807e343f"
+    },
+    "qual_dev_tasks": {
+      "path": "data/method/qwen37flash-qualification-source-review-candidates-v1/qual-dev-tasks.json",
+      "sha256": "849c4a9731c4cb9575a2e9188aca582f80d455b9f6f813fffc7193f0f52a353a"
+    },
+    "qual_dev_selection": {
+      "path": "data/method/qwen37flash-qualification-source-gold-v1/qual-dev-selection.json",
+      "sha256": "df8a0514f5753d94cc5ed0b3b5160b1cbcd32a5ae2deedffadbba155febbc631"
+    },
+    "qual_dev_gold": {
+      "path": "data/method/qwen37flash-qualification-source-gold-v1/qual-dev-gold.json",
+      "sha256": "3fb7d9939b978c6b184ef49e6b0ee75d5975b07d0ab4804ac8be39d81475c42c"
+    },
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v1.json",
+      "sha256": "d4996be11f68e82abe8085b6fcb28cf306fafefddf90243352769cedf9ec744b"
+    },
+    "mechanism_registry": {
+      "path": "data/method/phase-context-policy-v3-mechanism-registry-v1.json",
+      "sha256": "bff8b78e67520725d7cdd644b77ad7c2d6df64531bee0479a2c08ba9d1874970"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37flash-v1.json",
+      "sha256": "9d9df5785814aac2c42e49bbebb03edd538de5035c3d7b582806b2983dc1e0ef"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v3.txt",
+      "sha256": "27c71e2ef0e86aac441317f982cbea01108bd443b0391bf7e82450b795aba48a"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37flash-v1.json",
+      "sha256": "1e31d7478c7024d280972879ee8f90cb8cbe8a595d2ea3cd9be74923e8605d95"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v3.txt",
+      "sha256": "f78bda9376136b4009b6bdafedf9d0b60a177aa02043cdd3d8def747e739c93a"
+    }
+  }
+}

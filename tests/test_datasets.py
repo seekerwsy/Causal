@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.datasets import (
     build_prospective_role_census,
     freeze_contracts,
@@ -378,6 +378,46 @@ def test_independent_subagent_source_gold_requires_blind_third_review(
     assert receipt["human_external_review"] is False
     assert receipt["root_agent_made_semantic_decisions"] is False
     assert read_json(final / "reviewer-c-decisions.json")["reviewer_slot"] == "reviewer-c"
+
+
+@pytest.mark.reviewer
+def test_prospective_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
+    root = Path(__file__).parents[1]
+    plan = read_json(
+        root / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v1-plan.json"
+    )
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["formal_five_role_manifest_frozen"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["model_policy"]["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
+    assert plan["model_policy"]["fallback_model_ids"] == []
+    assert plan["automatic_retry_ceiling"] == 0
+    for name, artifact in plan["inputs"].items():
+        path = root / artifact["path"]
+        if name == "canary_input_bundle":
+            verify_bundle(path)
+            assert file_sha256(path / "manifest.json") == artifact["manifest_sha256"]
+        else:
+            assert file_sha256(path) == artifact["sha256"]
+    canary_root = root / plan["inputs"]["canary_input_bundle"]["path"]
+    canary_tasks = read_json(canary_root / "canary-tasks.json")
+    canary_selection = read_json(canary_root / "canary-selection.json")
+    canary_gold = read_json(canary_root / "canary-gold.json")
+    canary_ids = [task["task_id"] for task in canary_tasks]
+    assert len(canary_ids) == 3
+    assert canary_selection["task_ids"] == canary_ids
+    assert [case["task_id"] for case in canary_gold["cases"]] == canary_ids
+    assert plan["maximum_provider_calls"] == 6 + 56
+    assert plan["maximum_cost_microunits"] == 62 * 4916
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_plan_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_plan_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_plan_microunits"]
+    )
 
 
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:
