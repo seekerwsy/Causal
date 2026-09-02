@@ -618,6 +618,25 @@ def test_task_specific_response_schema_requires_every_finite_decision_key():
         }
 
 
+def test_task_specific_response_schema_allows_a_relationless_catalog_scope():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v1.json")
+    task = {
+        "task_id": "relationless-owner-mode",
+        "prompt": "Create a private file and set owner-only permissions.",
+        "cwe": "CWE-732",
+        "task_family": "file_permissions",
+    }
+
+    request = contract_decision_request(task, catalog)
+    schema = contract_response_format(request)["json_schema"]["schema"]
+    relation_schema = schema["properties"]["relation_decisions"]
+
+    assert request["candidate_relations"] == {}
+    assert relation_schema["required"] == []
+    assert relation_schema["properties"] == {}
+    assert relation_schema["additionalProperties"] is False
+
+
 def test_absent_endpoint_dominates_unresolved_endpoint_for_relation_state():
     task, catalog = _inputs()
     contract = _contract(task, catalog)

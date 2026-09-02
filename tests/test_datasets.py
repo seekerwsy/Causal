@@ -12,6 +12,7 @@ from prompt_mechanism_study.datasets import (
     prepare_datasets,
     prepare_dedup_candidates,
 )
+from prompt_mechanism_study.qualification_data import prepare_qualification_source_review
 
 pytestmark = pytest.mark.extended
 
@@ -212,6 +213,52 @@ def test_prospective_role_census_excludes_exact_and_near_legacy_leakage(
     ]
     assert rows["cluster-4"]["prospective_role_eligible"] is True
     verify_bundle(tmp_path / "census")
+
+
+@pytest.mark.reviewer
+def test_source_only_qualification_review_candidates_are_disjoint_and_blind(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[1]
+    output = tmp_path / "qualification-review"
+
+    report = prepare_qualification_source_review(
+        root / "data/dataset-curation/reviewer-task-unit-dataset-v5",
+        root / "data/method/prompt-tsg-catalog-v1.json",
+        root / "data/method/phase-context-policy-v3-mechanism-registry-v1.json",
+        output,
+        producer_commit="1" * 40,
+        ranking_salt="phase-context-policy-v3-qwen37flash-qualification-review-v1",
+    )
+
+    verify_bundle(output)
+    assert report["status"] == (
+        "SOURCE_ONLY_REVIEW_PACKETS_READY_FORMAL_ROLE_MANIFEST_AND_GOLD_PENDING"
+    )
+    assert report["formal_role_assignment_frozen"] is False
+    assert report["qualification_accept_attempts_authorized"] == 0
+    assert report["provider_calls_authorized"] == 0
+    dev = read_json(output / "qual-dev-selection.json")
+    accept = read_json(output / "qual-accept-selection.json")
+    dev_ids = set(dev["task_ids_in_review_order"])
+    accept_ids = set(accept["task_ids_in_review_order"])
+    dev_groups = {row["near_duplicate_group_id"] for row in dev["task_units"]}
+    accept_groups = {row["near_duplicate_group_id"] for row in accept["task_units"]}
+    assert len(dev_ids) == len(dev_groups) == 28
+    assert len(accept_ids) == len(accept_groups) == 28
+    assert dev_ids.isdisjoint(accept_ids)
+    assert dev_groups.isdisjoint(accept_groups)
+    assert all(row["exposure_history"] == [] for row in accept["task_units"])
+    packet = read_json(output / "qual-accept-review-packet.json")
+    serialized = json.dumps(packet, sort_keys=True)
+    for forbidden in (
+        "mechanism_realization_id",
+        "oracle_profile_id",
+        "readiness_summary_status",
+        "generated_code",
+    ):
+        assert forbidden not in serialized
+    assert packet["status"] == "AWAITING_EXTERNAL_INDEPENDENT_REVIEW"
 
 
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:

@@ -484,6 +484,21 @@ def _add_representation_group(groups: Any) -> None:
     holdout.add_argument("--task-units-per-cwe", type=int, default=3)
     holdout.add_argument("--ranking-salt", required=True)
 
+    qualification_review = _leaf(
+        actions,
+        "prepare-qualification-review",
+        _run_prepare_qualification_review,
+        "prepare disjoint source-only qualification review packets without assigning roles",
+    )
+    qualification_review.add_argument("source_bundle", type=Path)
+    qualification_review.add_argument("catalog", type=Path)
+    qualification_review.add_argument("registry", type=Path)
+    qualification_review.add_argument("output", type=Path)
+    qualification_review.add_argument("--producer-commit", required=True)
+    qualification_review.add_argument("--ranking-salt", required=True)
+    qualification_review.add_argument("--qual-dev-count", type=int, default=28)
+    qualification_review.add_argument("--qual-accept-count", type=int, default=28)
+
     extract_tsg = _leaf(
         actions,
         "extract-tsg",
@@ -1275,6 +1290,26 @@ def _run_select_tsg_holdout(args: argparse.Namespace, _: argparse.ArgumentParser
         cwes=tuple(sorted(set(args.cwe))),
         task_units_per_cwe=args.task_units_per_cwe,
         ranking_salt=args.ranking_salt,
+    )
+    return _emit_status(report)
+
+
+def _run_prepare_qualification_review(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.qualification_data import (
+        prepare_qualification_source_review,
+    )
+
+    report = prepare_qualification_source_review(
+        args.source_bundle,
+        args.catalog,
+        args.registry,
+        args.output,
+        producer_commit=args.producer_commit,
+        ranking_salt=args.ranking_salt,
+        qual_dev_count=args.qual_dev_count,
+        qual_accept_count=args.qual_accept_count,
     )
     return _emit_status(report)
 

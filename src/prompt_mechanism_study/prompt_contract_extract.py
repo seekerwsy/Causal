@@ -84,7 +84,6 @@ def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
         not isinstance(semantics, dict)
         or not semantics
         or not isinstance(relations, dict)
-        or not relations
         or any(not isinstance(key, str) or not key for key in (*semantics, *relations))
     ):
         raise PromptContractExtractionError("response schema scope is invalid")
