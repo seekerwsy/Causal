@@ -61,6 +61,13 @@
     "credential_execution": "REMOTE_SERVER_EXISTING_ENVIRONMENT_FILE_ONLY",
     "credential_material_recorded": false
   },
+  "execution_environment": {
+    "container_image": "python:3.12.11-slim-bookworm",
+    "container_repo_digest": "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+    "container_image_id": "sha256:688a685f6a1fa9250d7c6cee916889cbca364e4b027520110e0fce80c64a13e0",
+    "python_version": "3.12.11",
+    "network": "provider HTTPS only during extractor calls"
+  },
   "qualification_rule": {
     "minimum_exact_context_accuracy": 0.9,
     "minimum_present_recall": 0.8,
