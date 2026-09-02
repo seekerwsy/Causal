@@ -420,6 +420,53 @@ def test_prospective_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
     )
 
 
+@pytest.mark.reviewer
+def test_targeted_flash_qual_dev_v2_plan_preserves_gold_and_budget() -> None:
+    root = Path(__file__).parents[1]
+    plan = read_json(
+        root / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v2-plan.json"
+    )
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["response_protocol_id"] == "task_keyed_prompt_contract_json_schema_v5"
+    assert plan["formal_use_authorized"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["model_policy"]["fallback_model_ids"] == []
+    for name, artifact in plan["inputs"].items():
+        path = root / artifact["path"]
+        if name == "canary_input_bundle":
+            verify_bundle(path)
+            assert file_sha256(path / "manifest.json") == artifact["manifest_sha256"]
+        else:
+            assert file_sha256(path) == artifact["sha256"]
+
+    source_gold = read_json(root / plan["inputs"]["source_qual_dev_gold"]["path"])
+    candidate_gold = read_json(root / plan["inputs"]["qual_dev_gold"]["path"])
+    assert candidate_gold["cases"] == source_gold["cases"]
+    assert candidate_gold["qualification_rule"] == source_gold["qualification_rule"]
+    assert plan["gold_lineage"]["semantic_label_changes"] == 0
+    assert plan["gold_lineage"]["threshold_changes"] == 0
+
+    canary_root = root / plan["inputs"]["canary_input_bundle"]["path"]
+    canary_tasks = read_json(canary_root / "canary-tasks.json")
+    canary_selection = read_json(canary_root / "canary-selection.json")
+    assert [task["task_id"] for task in canary_tasks] == canary_selection["task_ids"]
+    assert plan["execution"]["canary"]["development_diagnostic_scoring_authorized"] is True
+    assert plan["execution"]["canary"]["formal_qualification_scoring_authorized"] is False
+
+    assert plan["maximum_provider_calls"] == 6 + 56
+    assert plan["maximum_cost_microunits"] == 62 * 4916
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_plan_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_plan_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_plan_microunits"]
+    )
+
+
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:
     sallm = tmp_path / "sallm"
     sallm_data = sallm / "Dataset"
