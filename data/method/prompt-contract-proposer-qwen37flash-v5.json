@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "candidate_id": "prompt-contract-proposer-qwen37flash-v5",
+  "provider": "ali_bailian_pay_as_you_go",
+  "model_id": "qwen3.7-flash-2026-07-15",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "api_key_env": "ALI_BAILIAN_API_KEY",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "seed": 81370,
+  "enable_thinking": false,
+  "timeout_seconds": 180.0,
+  "max_response_bytes": 65536,
+  "maximum_output_tokens": 4096,
+  "max_attempts": 1
+}

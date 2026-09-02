@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.artifact_io import verify_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, verify_bundle
 from prompt_mechanism_study.prompt_contract import (
     RelationDecision,
     SemanticDecision,
@@ -19,10 +19,10 @@ from prompt_mechanism_study.prompt_contract import (
 )
 from prompt_mechanism_study.prompt_contract_extract import (
     PromptContractExtractionError,
-    consensus_contract,
     contract_decision_request,
     contract_from_response,
     contract_response_format,
+    evidence_aware_consensus_contract,
     extract_contract_task_file,
 )
 from prompt_mechanism_study.prompt_contract_qualification import (
@@ -688,7 +688,7 @@ def test_absent_endpoint_dominates_unresolved_endpoint_for_relation_state():
     ) in graph.unresolved_relations
 
 
-def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unresolved():
+def test_response_parser_rejects_omission_and_wrong_attribute_shape():
     task, catalog = _inputs()
     base = _contract(task, catalog)
     parsed = contract_from_response(
@@ -719,24 +719,69 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
             review_status="development_exposed",
         )
 
-    reviewer = replace(
-        parsed,
-        annotator_id="reviewer",
-        semantic_decisions=tuple(
-            replace(row, state=QueryState.UNRESOLVED)
-            if row.semantic_id == "feature.sql_value_parameterization"
-            else row
-            for row in parsed.semantic_decisions
-        ),
-    )
-    consensus = consensus_contract(parsed, reviewer, annotator_id="consensus")
+    assert parsed.annotator_id == "proposer"
 
-    assert next(
-        row
-        for row in consensus.semantic_decisions
-        if row.semantic_id == "feature.sql_value_parameterization"
-    ).state is QueryState.UNRESOLVED
+
+@pytest.mark.reviewer
+def test_evidence_aware_consensus_separates_classification_from_evidence_failure():
+    task, catalog = _inputs()
+    proposer = json.loads(_response(_contract(task, catalog)))
+    reviewer = json.loads(_response(_contract(task, catalog)))
+    reviewer["semantic_decisions"]["constraint.fixed_sql_identifiers"].update(
+        evidence_text=None,
+        occurrence=None,
+    )
+    reviewer["semantic_decisions"]["feature.sql_value_parameterization"].update(
+        state="unresolved",
+        evidence_text=None,
+        occurrence=None,
+        attributes=[],
+    )
+    reviewer["semantic_decisions"]["sink.sql_execution"].update(
+        state="absent",
+        evidence_text=None,
+        occurrence=None,
+        attributes=[],
+    )
+
+    consensus = evidence_aware_consensus_contract(
+        json.dumps(proposer).encode(),
+        json.dumps(reviewer).encode(),
+        task=task,
+        catalog=catalog,
+        proposer_id="proposer",
+        reviewer_id="reviewer",
+        annotator_id="evidence-aware-consensus",
+        review_status="development_exposed",
+    )
+    decisions = {row.semantic_id: row for row in consensus.semantic_decisions}
+
+    assert decisions["constraint.fixed_sql_identifiers"].state is QueryState.PRESENT
+    assert decisions["constraint.fixed_sql_identifiers"].evidence_text is not None
+    assert decisions["feature.sql_value_parameterization"].state is QueryState.ABSENT
+    assert decisions["sink.sql_execution"].state is QueryState.UNRESOLVED
     compile_task_context_contract(consensus, prompt=task["prompt"], catalog=catalog)
+
+
+@pytest.mark.reviewer
+def test_evidence_aware_redesign_replays_archived_canary_without_provider_calls():
+    replay = json.loads(
+        (
+            ROOT
+            / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v5-offline-replay.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert replay["status"] == "DEVELOPMENT_REPLAY_ONLY"
+    assert replay["provider_calls"] == 0
+    assert replay["task_units"] == replay["matched_task_units"] == 3
+    assert replay["exact_context_accuracy"] == 1.0
+    assert replay["present_recall"] == 1.0
+    assert replay["false_positive_present"] == 0
+    assert replay["wrong_realization"] == 0
+    assert replay["implementation_sha256"] == file_sha256(
+        ROOT / "src/prompt_mechanism_study/prompt_contract_extract.py"
+    )
 
 
 def test_response_parser_canonicalizes_transport_only_payload() -> None:
@@ -975,8 +1020,12 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
         json.dumps(
             {
                 "schema_version": "2.0",
-                "contract_protocol_id": "task_context_contract_v2_dual_blind_consensus",
-                "extractor_candidate_id": "dual-blind-consensus:mock-proposer+mock-reviewer",
+                "contract_protocol_id": (
+                    "task_context_contract_v3_evidence_aware_dual_consensus"
+                ),
+                "extractor_candidate_id": (
+                    "dual-evidence-consensus:mock-proposer+mock-reviewer"
+                ),
                 "selection_path": str(selection_path.relative_to(tmp_path)),
                 "review_completed_before_extraction": True,
                 "arms_or_outcomes_used": False,

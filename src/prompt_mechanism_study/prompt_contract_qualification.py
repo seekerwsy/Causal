@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -17,15 +18,13 @@ from prompt_mechanism_study.mechanisms import load_mechanism_registry, tsg_mecha
 from prompt_mechanism_study.prompt_contract import (
     compile_task_context_contract,
     task_context_contract_from_record,
-    task_context_contract_record,
 )
 from prompt_mechanism_study.prompt_contract_extract import (
-    consensus_contract,
     contract_decision_request,
     contract_from_response,
     contract_response_format,
 )
-from prompt_mechanism_study.prompt_tsg import load_catalog, prompt_tsg_record
+from prompt_mechanism_study.prompt_tsg import QueryState, load_catalog, prompt_tsg_record
 from prompt_mechanism_study.records import canonical_json, content_hash
 
 
@@ -76,7 +75,7 @@ def qualify_prompt_contract_extractor(
         or frozenset(gold) not in allowed_gold
         or gold["schema_version"] != "2.0"
         or gold["contract_protocol_id"]
-        != "task_context_contract_v2_dual_blind_consensus"
+        != "task_context_contract_v3_evidence_aware_dual_consensus"
         or gold["review_completed_before_extraction"] is not True
         or gold["arms_or_outcomes_used"] is not False
     ):
@@ -124,7 +123,7 @@ def qualify_prompt_contract_extractor(
         raise PromptContractQualificationError("Prompt contract evaluator records are invalid")
     proposer_id = proposer_evaluator.get("candidate_id")
     reviewer_id = reviewer_evaluator.get("candidate_id")
-    candidate_id = f"dual-blind-consensus:{proposer_id}+{reviewer_id}"
+    candidate_id = f"dual-evidence-consensus:{proposer_id}+{reviewer_id}"
     expected_report = {
         "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
         "protocol_id": gold["contract_protocol_id"],
@@ -142,6 +141,7 @@ def qualify_prompt_contract_extractor(
         "reviewer_evaluator_sha256": _sha256(reviewer_evaluator_path),
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
         "response_protocol_id": "task_keyed_prompt_contract_json_schema_v4",
+        "consensus_policy_id": "unanimous_presence_valid_evidence_v1",
         "failed_task_unit_count": 0,
         "failed_task_units": [],
         "review_status": "prospective_frozen",
@@ -253,16 +253,17 @@ def qualify_prompt_contract_extractor(
                 annotator_id=reviewer_id,
                 review_status="prospective_frozen",
             )
-            expected_contract = consensus_contract(
-                proposer, reviewer, annotator_id=candidate_id
-            )
             contract = task_context_contract_from_record(
                 contract_by_task[case["task_id"]]
             )
-            if task_context_contract_record(expected_contract) != task_context_contract_record(
-                contract
-            ):
-                raise PromptContractQualificationError("Prompt contract consensus replay differs")
+            _verify_evidence_aware_consensus(
+                proposer,
+                reviewer,
+                json.loads(proposer_raw),
+                json.loads(reviewer_raw),
+                contract,
+                catalog,
+            )
             graph = compile_task_context_contract(
                 contract, prompt=task["prompt"], catalog=catalog
             )
@@ -403,6 +404,160 @@ def qualify_prompt_contract_extractor(
     }
     write_bundle(output, {"case-results.json": results, "qualification.json": report})
     return report
+
+
+def _verify_evidence_aware_consensus(
+    proposer: Any,
+    reviewer: Any,
+    proposer_value: dict[str, Any],
+    reviewer_value: dict[str, Any],
+    contract: Any,
+    catalog: dict[str, Any],
+) -> None:
+    """Independently verify aggregation without calling the extractor's combiner."""
+
+    coordinates = (
+        "schema_version",
+        "task_id",
+        "prompt_sha256",
+        "catalog_sha256",
+        "cwe_id",
+        "task_family",
+        "query_ids",
+        "review_status",
+        "arms_or_outcomes_used",
+    )
+    if any(
+        getattr(proposer, field) != getattr(reviewer, field)
+        or getattr(proposer, field) != getattr(contract, field)
+        for field in coordinates
+    ):
+        raise PromptContractQualificationError("independent contract coordinates differ")
+    proposer_semantics = {row.semantic_id: row for row in proposer.semantic_decisions}
+    reviewer_semantics = {row.semantic_id: row for row in reviewer.semantic_decisions}
+    actual_semantics = {row.semantic_id: row for row in contract.semantic_decisions}
+    proposer_raw = proposer_value["semantic_decisions"]
+    reviewer_raw = reviewer_value["semantic_decisions"]
+    if not (
+        set(proposer_semantics)
+        == set(reviewer_semantics)
+        == set(actual_semantics)
+        == set(proposer_raw)
+        == set(reviewer_raw)
+    ):
+        raise PromptContractQualificationError("evidence-aware semantic population differs")
+    allowed_attributes = set(catalog["attribute_names"])
+    for semantic_id, actual in actual_semantics.items():
+        left = proposer_semantics[semantic_id]
+        right = reviewer_semantics[semantic_id]
+        left_raw = proposer_raw[semantic_id]
+        right_raw = reviewer_raw[semantic_id]
+        if not set(left_raw["attributes"]) <= allowed_attributes or not set(
+            right_raw["attributes"]
+        ) <= allowed_attributes:
+            raise PromptContractQualificationError("evidence-aware attributes are invalid")
+        states = {QueryState(left_raw["state"]), QueryState(right_raw["state"])}
+        evidence_text = None
+        occurrence = None
+        attributes = ()
+        if states == {QueryState.PRESENT}:
+            valid = [row for row in (left, right) if row.state is QueryState.PRESENT]
+            if valid:
+                evidence = min(
+                    valid,
+                    key=lambda row: (
+                        -len(row.evidence_text.encode("utf-8")),
+                        row.evidence_text,
+                        row.occurrence,
+                    ),
+                )
+                expected_state = QueryState.PRESENT
+                evidence_text = evidence.evidence_text
+                occurrence = evidence.occurrence
+                attributes = tuple(
+                    (attribute, True)
+                    for attribute in sorted(
+                        set(left_raw["attributes"]) & set(right_raw["attributes"])
+                    )
+                )
+                rationale = (
+                    "Independent annotations unanimously classify this semantic as "
+                    f"present; {len(valid)} of 2 exact evidence spans validated, and "
+                    "the deterministic longer valid span is retained."
+                )
+            else:
+                expected_state = QueryState.UNRESOLVED
+                rationale = (
+                    "Unanimous presence classification lacked any valid exact evidence span."
+                )
+        elif QueryState.PRESENT in states:
+            expected_state = QueryState.UNRESOLVED
+            rationale = "Presence classification lacks independent unanimity."
+        elif QueryState.ABSENT in states:
+            expected_state = QueryState.ABSENT
+            rationale = (
+                "No annotation claims presence and at least one independently resolves absence."
+            )
+        else:
+            expected_state = QueryState.UNRESOLVED
+            rationale = "Both independent annotations remain unresolved."
+        if (
+            actual.state is not expected_state
+            or actual.rationale != rationale
+            or actual.evidence_text != evidence_text
+            or actual.occurrence != occurrence
+            or actual.attributes != attributes
+        ):
+            raise PromptContractQualificationError("evidence-aware semantic replay differs")
+
+    final_states = {row.semantic_id: row.state for row in contract.semantic_decisions}
+    proposer_relations = {row.relation: row for row in proposer.relation_decisions}
+    reviewer_relations = {row.relation: row for row in reviewer.relation_decisions}
+    actual_relations = {row.relation: row for row in contract.relation_decisions}
+    proposer_raw_relations = proposer_value["relation_decisions"]
+    reviewer_raw_relations = reviewer_value["relation_decisions"]
+    encoded_relations = {"|".join(relation): relation for relation in actual_relations}
+    if not (
+        set(proposer_relations)
+        == set(reviewer_relations)
+        == set(actual_relations)
+        and set(encoded_relations)
+        == set(proposer_raw_relations)
+        == set(reviewer_raw_relations)
+    ):
+        raise PromptContractQualificationError("evidence-aware relation population differs")
+    for relation, actual in actual_relations.items():
+        endpoints = {final_states[relation[0]], final_states[relation[2]]}
+        if QueryState.ABSENT in endpoints:
+            expected_state = QueryState.ABSENT
+            rationale = "At least one endpoint is absent in the evidence-aware contract."
+        elif QueryState.UNRESOLVED in endpoints:
+            expected_state = QueryState.UNRESOLVED
+            rationale = "At least one endpoint is unresolved in the evidence-aware contract."
+        else:
+            relation_id = "|".join(relation)
+            states = {
+                QueryState(proposer_raw_relations[relation_id]["state"]),
+                QueryState(reviewer_raw_relations[relation_id]["state"]),
+            }
+            if states == {QueryState.PRESENT}:
+                expected_state = QueryState.PRESENT
+                rationale = (
+                    "Independent annotations unanimously classify this relation as present."
+                )
+            elif QueryState.PRESENT in states:
+                expected_state = QueryState.UNRESOLVED
+                rationale = "Relation presence lacks independent unanimity."
+            elif QueryState.ABSENT in states:
+                expected_state = QueryState.ABSENT
+                rationale = (
+                    "No annotation claims relation presence and at least one resolves absence."
+                )
+            else:
+                expected_state = QueryState.UNRESOLVED
+                rationale = "Both independent relation annotations remain unresolved."
+        if actual.state is not expected_state or actual.rationale != rationale:
+            raise PromptContractQualificationError("evidence-aware relation replay differs")
 
 
 

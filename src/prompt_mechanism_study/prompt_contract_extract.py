@@ -452,14 +452,35 @@ def contract_from_response(
     return contract
 
 
-def consensus_contract(
-    proposer: TaskContextContract,
-    reviewer: TaskContextContract,
+def evidence_aware_consensus_contract(
+    proposer_raw: bytes,
+    reviewer_raw: bytes,
     *,
+    task: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+    proposer_id: str,
+    reviewer_id: str,
     annotator_id: str,
+    review_status: str,
 ) -> TaskContextContract:
-    """Conservatively combine two independent tables; disagreement becomes unresolved."""
+    """Separate unanimous semantic classification from exact-evidence validation."""
 
+    proposer = contract_from_response(
+        proposer_raw,
+        task=task,
+        catalog=catalog,
+        annotator_id=proposer_id,
+        review_status=review_status,
+    )
+    reviewer = contract_from_response(
+        reviewer_raw,
+        task=task,
+        catalog=catalog,
+        annotator_id=reviewer_id,
+        review_status=review_status,
+    )
+    proposer_value = _response_value(proposer_raw)
+    reviewer_value = _response_value(reviewer_raw)
     coordinates = (
         "schema_version",
         "task_id",
@@ -473,46 +494,93 @@ def consensus_contract(
     )
     if any(getattr(proposer, field) != getattr(reviewer, field) for field in coordinates):
         raise PromptContractExtractionError("independent contract coordinates differ")
+
     proposer_semantics = {row.semantic_id: row for row in proposer.semantic_decisions}
     reviewer_semantics = {row.semantic_id: row for row in reviewer.semantic_decisions}
-    if set(proposer_semantics) != set(reviewer_semantics):
+    proposer_raw_semantics = proposer_value["semantic_decisions"]
+    reviewer_raw_semantics = reviewer_value["semantic_decisions"]
+    if not (
+        set(proposer_semantics)
+        == set(reviewer_semantics)
+        == set(proposer_raw_semantics)
+        == set(reviewer_raw_semantics)
+    ):
         raise PromptContractExtractionError("independent semantic tables differ")
+    allowed_attributes = set(catalog["attribute_names"])
+    if any(
+        not set(row["attributes"]) <= allowed_attributes
+        for row in (*proposer_raw_semantics.values(), *reviewer_raw_semantics.values())
+    ):
+        raise PromptContractExtractionError("contract semantic attributes are invalid")
 
     semantic_decisions = []
     for semantic_id in sorted(proposer_semantics):
         left = proposer_semantics[semantic_id]
         right = reviewer_semantics[semantic_id]
-        both_present = (
-            left.state is QueryState.PRESENT and right.state is QueryState.PRESENT
-        )
-        same_non_present = left.state is right.state and left.state is not QueryState.PRESENT
-        if both_present:
-            evidence = min(
-                (left, right),
-                key=lambda row: (
-                    -len(row.evidence_text.encode("utf-8")),
-                    row.evidence_text,
-                    row.occurrence,
-                ),
+        left_state = QueryState(proposer_raw_semantics[semantic_id]["state"])
+        right_state = QueryState(reviewer_raw_semantics[semantic_id]["state"])
+        declared_states = {left_state, right_state}
+        if declared_states == {QueryState.PRESENT}:
+            valid_evidence = [
+                row for row in (left, right) if row.state is QueryState.PRESENT
+            ]
+            if valid_evidence:
+                evidence = min(
+                    valid_evidence,
+                    key=lambda row: (
+                        -len(row.evidence_text.encode("utf-8")),
+                        row.evidence_text,
+                        row.occurrence,
+                    ),
+                )
+                shared_attributes = tuple(
+                    (attribute, True)
+                    for attribute in sorted(
+                        set(proposer_raw_semantics[semantic_id]["attributes"])
+                        & set(reviewer_raw_semantics[semantic_id]["attributes"])
+                    )
+                )
+                decision = replace(
+                    evidence,
+                    rationale=(
+                        "Independent annotations unanimously classify this semantic as "
+                        f"present; {len(valid_evidence)} of 2 exact evidence spans "
+                        "validated, and the deterministic longer valid span is retained."
+                    ),
+                    attributes=shared_attributes,
+                )
+            else:
+                decision = SemanticDecision(
+                    semantic_id,
+                    QueryState.UNRESOLVED,
+                    "Unanimous presence classification lacked any valid exact evidence span.",
+                    None,
+                    None,
+                    (),
+                )
+        elif QueryState.PRESENT in declared_states:
+            decision = SemanticDecision(
+                semantic_id,
+                QueryState.UNRESOLVED,
+                "Presence classification lacks independent unanimity.",
+                None,
+                None,
+                (),
             )
-            shared_attributes = tuple(
-                sorted(set(left.attributes).intersection(right.attributes))
+        elif QueryState.ABSENT in declared_states:
+            decision = SemanticDecision(
+                semantic_id,
+                QueryState.ABSENT,
+                "No annotation claims presence and at least one independently resolves absence.",
+                None,
+                None,
+                (),
             )
-            decision = replace(
-                evidence,
-                rationale=(
-                    "Independent annotations agree on presence; the deterministic "
-                    "longer exact evidence span is retained."
-                ),
-                attributes=shared_attributes,
-            )
-        elif same_non_present:
-            decision = replace(left, rationale="Independent annotations agree on this state.")
         else:
             decision = SemanticDecision(
                 semantic_id,
                 QueryState.UNRESOLVED,
-                "Independent annotations disagree; conservatively unresolved.",
+                "Both independent annotations remain unresolved.",
                 None,
                 None,
                 (),
@@ -522,33 +590,64 @@ def consensus_contract(
     final_states = {row.semantic_id: row.state for row in semantic_decisions}
     proposer_relations = {row.relation: row for row in proposer.relation_decisions}
     reviewer_relations = {row.relation: row for row in reviewer.relation_decisions}
-    if set(proposer_relations) != set(reviewer_relations):
+    proposer_raw_relations = proposer_value["relation_decisions"]
+    reviewer_raw_relations = reviewer_value["relation_decisions"]
+    relation_keys = {
+        _relation_decision_key(relation): relation for relation in proposer_relations
+    }
+    if not (
+        set(proposer_relations) == set(reviewer_relations)
+        and set(relation_keys) == set(proposer_raw_relations) == set(reviewer_raw_relations)
+    ):
         raise PromptContractExtractionError("independent relation tables differ")
     relation_decisions = []
     for relation in sorted(proposer_relations):
         left = proposer_relations[relation]
-        right = reviewer_relations[relation]
         endpoint_states = {final_states[relation[0]], final_states[relation[2]]}
         if QueryState.ABSENT in endpoint_states:
             state = QueryState.ABSENT
-            rationale = "At least one endpoint is absent in the consensus contract."
+            rationale = "At least one endpoint is absent in the evidence-aware contract."
         elif QueryState.UNRESOLVED in endpoint_states:
             state = QueryState.UNRESOLVED
-            rationale = "At least one endpoint is unresolved in the consensus contract."
-        elif left.state is right.state:
-            state = left.state
-            rationale = "Independent annotations agree on this relation."
+            rationale = "At least one endpoint is unresolved in the evidence-aware contract."
         else:
-            state = QueryState.UNRESOLVED
-            rationale = "Independent annotations disagree; conservatively unresolved."
+            relation_id = _relation_decision_key(relation)
+            declared_states = {
+                QueryState(proposer_raw_relations[relation_id]["state"]),
+                QueryState(reviewer_raw_relations[relation_id]["state"]),
+            }
+            if declared_states == {QueryState.PRESENT}:
+                state = QueryState.PRESENT
+                rationale = "Independent annotations unanimously classify this relation as present."
+            elif QueryState.PRESENT in declared_states:
+                state = QueryState.UNRESOLVED
+                rationale = "Relation presence lacks independent unanimity."
+            elif QueryState.ABSENT in declared_states:
+                state = QueryState.ABSENT
+                rationale = "No annotation claims relation presence and at least one resolves absence."
+            else:
+                state = QueryState.UNRESOLVED
+                rationale = "Both independent relation annotations remain unresolved."
         relation_decisions.append(replace(left, state=state, rationale=rationale))
 
-    return replace(
+    contract = replace(
         proposer,
         annotator_id=annotator_id,
         semantic_decisions=tuple(semantic_decisions),
         relation_decisions=tuple(relation_decisions),
     )
+    compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
+    return contract
+
+
+def _response_value(raw: bytes) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise PromptContractExtractionError("contract response is not JSON") from None
+    if not isinstance(value, dict) or set(value) != _RESPONSE_FIELDS:
+        raise PromptContractExtractionError("contract response fields are invalid")
+    return value
 
 
 def extract_task_contract(
@@ -622,25 +721,20 @@ def _attempt_task_contract(
             {**reviewer_evaluator, "response_format": response_format},
             reviewer_prompt,
         )
-        proposer = contract_from_response(
-            proposer_raw,
-            task=task,
-            catalog=catalog,
-            annotator_id=proposer_evaluator["candidate_id"],
-            review_status=review_status,
+        annotator_id = (
+            f"dual-evidence-consensus:{proposer_evaluator['candidate_id']}"
+            f"+{reviewer_evaluator['candidate_id']}"
         )
-        reviewer = contract_from_response(
+        contract = evidence_aware_consensus_contract(
+            proposer_raw,
             reviewer_raw,
             task=task,
             catalog=catalog,
-            annotator_id=reviewer_evaluator["candidate_id"],
+            proposer_id=proposer_evaluator["candidate_id"],
+            reviewer_id=reviewer_evaluator["candidate_id"],
+            annotator_id=annotator_id,
             review_status=review_status,
         )
-        annotator_id = (
-            f"dual-blind-consensus:{proposer_evaluator['candidate_id']}"
-            f"+{reviewer_evaluator['candidate_id']}"
-        )
-        contract = consensus_contract(proposer, reviewer, annotator_id=annotator_id)
         graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
@@ -794,7 +888,7 @@ def extract_contract_task_file(
                 }
             )
     candidate_id = (
-        f"dual-blind-consensus:{proposer_evaluator['candidate_id']}"
+        f"dual-evidence-consensus:{proposer_evaluator['candidate_id']}"
         f"+{reviewer_evaluator['candidate_id']}"
     )
     complete = not failed_task_units
@@ -805,7 +899,8 @@ def extract_contract_task_file(
             if complete
             else "PROMPT_CONTRACT_EXTRACTION_FAILED"
         ),
-        "protocol_id": "task_context_contract_v2_dual_blind_consensus",
+        "protocol_id": "task_context_contract_v3_evidence_aware_dual_consensus",
+        "consensus_policy_id": "unanimous_presence_valid_evidence_v1",
         "tasks": len(selected),
         "contracts": len(contracts),
         "graphs": len(graphs),
@@ -927,10 +1022,10 @@ def _sha256(path: Path) -> str:
 
 __all__ = [
     "PromptContractExtractionError",
-    "consensus_contract",
     "contract_decision_request",
     "contract_from_response",
     "contract_response_format",
+    "evidence_aware_consensus_contract",
     "extract_contract_task_file",
     "extract_task_contract",
 ]
