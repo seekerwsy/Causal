@@ -74,8 +74,55 @@ The raw bundles currently exist in the named remote experiment roots and in igno
 local `.codex-runtime` copies. They still require a tracked reviewer archive before
 publication.
 
-The next permissible provider gate is not a randomized experiment. It is to freeze
-role-disjoint prospective `QUAL_DEV` and one-shot fresh `QUAL_ACCEPT` manifests,
-seal profile v4 and all thresholds before opening `QUAL_ACCEPT`, and qualify the
-remaining Flash roles. Until then, the repository remains `SPECIFIED_DRAFT` and
-formal provider execution remains disabled.
+The next permissible provider gate is not a randomized experiment. Subsequent
+same-date prospective `QUAL_DEV` work is recorded below; `QUAL_ACCEPT` and all
+formal roles remain closed.
+
+## Prospective source-only QUAL_DEV update
+
+Two isolated model reviewers labelled all 56 source-only cases independently, and
+a third isolated reviewer adjudicated only their four disagreements. The frozen
+gold bundle has manifest SHA-256
+`4854c62c2651001e144b79d547cdac489e9b84d2e84a53ffe277cec19bc5579f`.
+This is independent model-review evidence, not external human gold. No root-agent
+semantic label was added, and the 28 `QUAL_ACCEPT` labels were not opened during
+provider execution.
+
+The first full prospective `QUAL_DEV` candidate completed 56 model calls but
+failed the unchanged gate:
+
+- 17/28 exact task-context matches (`0.607143`);
+- present recall 3/7 (`0.428571`);
+- false-positive-present count `0`;
+- wrong-realization count `0`.
+
+Development then remained within `QUAL_DEV`. Candidate v2 failed closed after
+three proposer calls because its stricter provider JSON Schema returned no model
+response bytes. Candidate v3 restored the previously exercised schema and closed
+all six targeted canary calls, but matched only one of three cases. The final
+prompt-only candidate v4 added two general interface-composition rules and again
+closed all six calls, but matched only the archive case; YAML and SQL remained
+unresolved. Its exact accuracy and present recall were both `0.333333`, with zero
+false positives and zero wrong realizations.
+
+The v4 plan prospectively required prompt-only tuning to stop after this failure.
+Accordingly, no 28-task v4 run, `QUAL_ACCEPT` call, role assignment, Prompt TSG
+publication, Discovery run, or randomized experiment occurred. The representation
+candidate is **not ready** for formal use. Further work requires an explicit
+representation redesign and a new prospective qualification plan rather than
+another post-hoc prompt edit.
+
+## Prospective cost and evidence closure
+
+Prospective `QUAL_DEV` used 77 calls with a conservative cost of CNY `0.378532`.
+Together with the earlier CNY `0.973368`, cumulative conservative preexperiment
+spend is CNY `1.351900`; at least CNY `98.648100` remains under the approved CNY
+100 preexperiment ceiling. No retry, fallback, free-tier credit, or cache discount
+is counted, and `QUAL_ACCEPT` consumed zero calls.
+
+All eight closed prospective extraction/qualification bundles are now tracked at
+`data/method/qwen37flash-prospective-qual-dev-development-evidence-v1`. The exact
+attempt and budget ledger is
+`data/method/qwen37flash-prospective-qual-dev-execution-ledger-v1.json`. The
+repository remains `SPECIFIED_DRAFT`, and formal provider execution remains
+disabled.

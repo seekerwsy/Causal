@@ -545,6 +545,49 @@ def test_final_prompt_only_qual_dev_plan_is_fail_closed() -> None:
     )
 
 
+@pytest.mark.reviewer
+def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
+    root = Path(__file__).parents[1]
+    archive = (
+        root
+        / "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1"
+    )
+    index = read_json(archive / "archive-index.json")
+    assert index["formal_use_authorized"] is False
+    assert index["qualification_accept_consumed"] is False
+    for bundle in index["bundles"]:
+        bundle_root = archive / bundle["path"]
+        verify_bundle(bundle_root)
+        assert file_sha256(bundle_root / "manifest.json") == bundle["manifest_sha256"]
+
+    receipt = read_json(
+        root
+        / "data/method/prompt-contract-qwen37flash-prospective-qual-dev-v4-execution.json"
+    )
+    assert receipt["status"] == "FINAL_PROMPT_ONLY_CANDIDATE_FAILED_CLOSED"
+    assert receipt["qual_dev_full_started"] is False
+    assert receipt["qualification_accept_consumed"] is False
+    assert receipt["budget"]["actual_provider_calls"] == 6
+
+    ledger = read_json(
+        root / "data/method/qwen37flash-prospective-qual-dev-execution-ledger-v1.json"
+    )
+    attempt_calls = sum(attempt["actual_provider_calls"] for attempt in ledger["attempts"])
+    attempt_cost = sum(
+        attempt["actual_conservative_cost_microunits"] for attempt in ledger["attempts"]
+    )
+    assert attempt_calls == ledger["prospective_actual_provider_calls"]
+    assert attempt_cost == ledger["prospective_conservative_spend_microunits"]
+    assert ledger["conservative_cumulative_spend_microunits"] == (
+        ledger["pre_prospective_conservative_spend_microunits"] + attempt_cost
+    )
+    assert ledger["minimum_remaining_microunits"] == (
+        ledger["authorized_total_microunits"]
+        - ledger["conservative_cumulative_spend_microunits"]
+    )
+    assert ledger["qualification_accept_provider_calls"] == 0
+
+
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:
     sallm = tmp_path / "sallm"
     sallm_data = sallm / "Dataset"
