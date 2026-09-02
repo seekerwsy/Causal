@@ -834,6 +834,47 @@ def test_archive_boundary_stability_diagnostic_inputs_are_frozen() -> None:
 
 
 @pytest.mark.reviewer
+def test_archive_boundary_stability_diagnostic_plan_closes_budget() -> None:
+    root = Path(__file__).parents[1]
+    plan = read_json(
+        root / "data/method/archive-boundary-stability-diagnostic-v1-plan.json"
+    )
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["formal_use_authorized"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["scientific_claim_allowed"] is False
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["decision_rule"]["method_change_after_result_authorized"] is False
+    assert plan["execution"]["replicate_runs"] == 3
+    assert plan["execution"]["task_units_per_replicate"] == 4
+    assert plan["execution"]["calls_per_task"] == 2
+    assert plan["execution"]["task_workers"] == 1
+    assert plan["maximum_provider_calls"] == 24
+    assert plan["maximum_cost_microunits"] == 24 * 4916
+    for name, artifact in plan["inputs"].items():
+        path = root / artifact["path"]
+        if name == "diagnostic_input_bundle":
+            verify_bundle(path)
+            assert file_sha256(path / "manifest.json") == artifact["manifest_sha256"]
+        else:
+            assert file_sha256(path) == artifact["sha256"]
+    design = read_json(root / plan["inputs"]["diagnostic_design"]["path"])
+    assert design["decision_rule"]["ordered_rules"]
+    assert design["decision_rule"]["target_semantic_id"] == (
+        "source.untrusted_archive_member"
+    )
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_plan_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_plan_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_plan_microunits"]
+    )
+
+
+@pytest.mark.reviewer
 def test_evidence_aware_qual_dev_v5_plan_closes_redesign_and_budget() -> None:
     root = Path(__file__).parents[1]
     plan = read_json(
