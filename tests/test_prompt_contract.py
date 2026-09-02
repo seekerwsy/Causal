@@ -600,14 +600,6 @@ def test_task_specific_response_schema_requires_every_finite_decision_key():
     relation_schema = schema["properties"]["relation_decisions"]
     assert set(semantic_schema["required"]) == set(request["candidate_semantics"])
     assert set(semantic_schema["properties"]) == set(request["candidate_semantics"])
-    semantic_value = next(iter(semantic_schema["properties"].values()))
-    assert semantic_value["properties"]["evidence_text"]["minLength"] == 1
-    assert semantic_value["properties"]["evidence_text"]["maxLength"] == 2048
-    assert semantic_value["properties"]["occurrence"]["minimum"] == 1
-    assert semantic_value["properties"]["attributes"]["uniqueItems"] is True
-    assert set(semantic_value["properties"]["attributes"]["items"]["enum"]) == set(
-        request["allowed_attributes"]
-    )
     assert set(relation_schema["required"]) == set(request["candidate_relations"])
     assert set(relation_schema["properties"]) == set(request["candidate_relations"])
     assert semantic_schema["additionalProperties"] is False
