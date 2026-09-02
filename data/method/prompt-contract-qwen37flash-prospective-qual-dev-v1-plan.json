@@ -69,6 +69,8 @@
   },
   "implementation": {
     "commit": "759b4390718017955ef3a44ac5f238df1fc6da90",
+    "deployment_commit": "6eb8d9a404cd7e7126464c3587076c7e26d780b3",
+    "source_archive_sha256": "563c41eee6007625cf89f1fd4ffbe1a882b70ab3aa4b6249828d3c43889c0c26",
     "extractor_sha256": "96f973fff1f4fe2bdbe565e361b84aec8f273533d5db930e865483df8c0505dd",
     "independent_qualifier_sha256": "faba9fe6f45f100bb09ff52d84574645404e22d2cd7e495592218584afd3d208",
     "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/qwen37flash-prospective-qual-dev-759b439-20260902-08",
