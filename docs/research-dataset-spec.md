@@ -107,16 +107,14 @@ The original planning target was 60 task units, approximately 10 per leaf:
 - CWE-798: hard-coded credentials; and
 - CWE-862: missing authorization.
 
-The completed outcome-blind quality census contains 48 task units: 11
-CWE-200, 0 CWE-287, 5 CWE-306, 7 CWE-732, 10 CWE-798, and 15 CWE-862. Because
-the seven-source census is complete, 60 is no longer treated as an admission
-gate or a reason to manufacture, duplicate, or weaken tasks. The prospective
-family scope is all 48 quality-qualified units, with measurement support
-recorded separately: 17 already have qualified static profiles, 20 have
-audited task-specific source safety tests pending executable-Oracle
-qualification, and 11 remain contextual or lack a usable security test. The
-frozen identities and source-test audit are in
-`data/dataset-curation/identity-family-scope-v1.json`.
+The pre-successor census contained 48 task units, but the stricter final v5
+quality authority retains 29 in this family: 6 CWE-200, 0 CWE-287, 3 CWE-306,
+2 CWE-732, 8 CWE-798, and 10 CWE-862. Because the seven-source census is
+complete, 60 is not an admission gate or a reason to manufacture, duplicate,
+or weaken tasks. Measurement support remains a separate derived axis. The
+older identities and source-test audit in
+`data/dataset-curation/identity-family-scope-v1.json` are retained as
+pre-successor planning history and cannot override the v5 quality disposition.
 
 ### 2.4 Cryptography, randomness, and integrity
 
@@ -143,7 +141,7 @@ duplicate tasks, count variants as independent, or pool unrelated CWEs to hide
 the shortfall.
 
 For Identity, the third option has now been taken prospectively: the paper may
-claim coverage of the observed 48-task census, but not balanced six-leaf or
+claim coverage of the final-v5 29-task census, but not balanced six-leaf or
 60-task coverage. Oracle qualification still controls which stratum can enter
 a particular confirmatory estimate; it does not remove the other units from
 the quality-qualified data set.

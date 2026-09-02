@@ -31,10 +31,11 @@ evidence remains legacy-only.
 The author has separately approved at most CNY 100 for non-confirmatory
 preexperiment and role-qualification calls. This does not change
 `SPECIFIED_DRAFT`, authorize a formal experiment, or permit exploratory outputs
-to enter a confirmatory evidence package. The recommended CNY 1,000 formal cap
-remains unapproved. Provider credentials remain in the remote execution
-environment; neither the secret nor its value is copied into the repository or
-result artifacts.
+to enter a confirmatory evidence package. The current unapproved cap candidate
+is CNY 200 for the exact Core `K_A=5`, `K_I=3`, 100-Atomic/170-Pair envelope;
+CNY 300 covers the implemented Core+Expert+Random envelope. Provider
+credentials remain in the remote execution environment; neither the secret nor
+its value is copied into the repository or result artifacts.
 
 The 2026-09-02 exposed development regressions are now complete. The Flash
 Functional Judge passed 15/16 cases, and Prompt-contract response protocol v4 met
@@ -58,6 +59,14 @@ still missing. Consequently the acceptance attempt and provider-call ceilings
 remain zero. While preparing this boundary, a source/catalog audit found and
 fixed the generic strict-schema case in which a valid query has no required
 relation edges; no acceptance output was inspected or used.
+
+The final-v5 role-capacity reconciliation is recorded in
+`docs/experiments/2026-09-02-role-power-budget-decision-support.md`. In the
+current 21-CWE layer, 211 units are source-curated and unexposed; after the 56
+qualification candidates, only 155 remain for disjoint Discovery and
+Confirmation roles. This is below the rounded 170-unit Pair power candidate
+before allocating any Discovery unit, so a five-role formal freeze remains
+blocked by population capacity as well as independent gold.
 
 The sole executable study entry point is:
 

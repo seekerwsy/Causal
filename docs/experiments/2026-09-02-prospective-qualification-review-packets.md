@@ -84,3 +84,11 @@ Separately, the author-approved scientific parameters and power-qualified
 counts must determine all four prospective roles. Only then may one complete
 five-role `DataRoleManifest` and one integrated qualification plan be frozen.
 No `QUAL_ACCEPT` provider call is allowed before those conditions close.
+
+The subsequent final-v5 capacity reconciliation is recorded in
+`2026-09-02-role-power-budget-decision-support.md`. Under the current 21-CWE
+scope, 155 source-curated units remain after these two candidate reservations,
+which is fewer than the rounded 170-unit conservative Pair power candidate
+before any disjoint Discovery allocation. The role manifest therefore also
+requires an explicit capacity route; this candidate bundle alone does not make
+the study population-ready.

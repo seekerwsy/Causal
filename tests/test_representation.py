@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -57,6 +58,13 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
     assert budget["maximum_total_external_cost_microunits"] == 100_000_000
     assert budget["provider_calls_authorized_after_required_preflight"] is True
     assert budget["formal_experiment_authorized"] is False
+    assert budget["full_formal_budget_status"] == "UNAPPROVED"
+    assert budget["full_formal_budget_recommendation_cny"] == 200
+    assert budget["full_baseline_envelope_recommendation_cny"] == 300
+    assert budget["candidate_budget_envelope_id"] == (
+        "rq1_budget_envelope_"
+        "2271756bab8d848b339baa7c99a4bb3956b908906e9a4a734ccd4ff19af79ac0"
+    )
     cost_basis = provider["token_cost_basis"]
     for ceiling in provider["call_ceilings"].values():
         numerator = (
@@ -125,6 +133,10 @@ def test_frozen_python_source_population_replays_from_reviewer_bundle() -> None:
         row["task_unit_id"]: row
         for row in _jsonl(bundle / "readiness-worklist.jsonl")
     }
+    roles = {
+        row["task_unit_id"]: row
+        for row in _jsonl(bundle / "task-roles.jsonl")
+    }
     rule = decision["selection_rule"]
     task_ids = tuple(
         sorted(
@@ -143,6 +155,61 @@ def test_frozen_python_source_population_replays_from_reviewer_bundle() -> None:
         == "TECHNICALLY_READY_PENDING_METHOD_FREEZE"
         for task_unit_id in task_ids
     ) == decision["technical_readiness_diagnostic_count"]
+
+    policy = json.loads(
+        (
+            ROOT
+            / "data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    families_by_cwe = {
+        cwe: family["family_id"]
+        for family in policy["python_families"]
+        for cwe in family["cwes"]
+    }
+    current_layer = {
+        task_unit_id
+        for task_unit_id in task_ids
+        if readiness[task_unit_id]["primary_cwe"] in families_by_cwe
+    }
+    method_exposed = {
+        task_unit_id
+        for task_unit_id in current_layer
+        if roles[task_unit_id]["exposure_status"] == "METHOD_EXPOSED"
+    }
+    source_curated = current_layer - method_exposed
+    qualification_root = (
+        ROOT / "data/method/qwen37flash-qualification-source-review-candidates-v1"
+    )
+    qualification_candidates = set()
+    for name in ("qual-dev-selection.json", "qual-accept-selection.json"):
+        selection = json.loads((qualification_root / name).read_text(encoding="utf-8"))
+        qualification_candidates.update(selection["task_ids_in_review_order"])
+    residual = source_curated - qualification_candidates
+
+    assert len(current_layer) == 227
+    assert len(method_exposed) == 16
+    assert len(source_curated) == 211
+    assert len(qualification_candidates) == 56
+    assert qualification_candidates <= source_curated
+    assert len(residual) == 155
+    assert len(
+        {roles[task_id]["near_duplicate_group_id"] for task_id in residual}
+    ) == 155
+    assert sum(
+        readiness[task_id]["readiness_summary_status"]
+        == "TECHNICALLY_READY_PENDING_METHOD_FREEZE"
+        for task_id in residual
+    ) == 59
+    assert Counter(
+        families_by_cwe[readiness[task_id]["primary_cwe"]]
+        for task_id in residual
+    ) == {
+        "injection_and_interpreter": 64,
+        "file_parser_external_resource": 52,
+        "identity_authorization_permissions": 25,
+        "cryptography_randomness_integrity": 14,
+    }
 
 
 def _jsonl(path: Path) -> tuple[dict[str, object], ...]:

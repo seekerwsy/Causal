@@ -574,6 +574,37 @@ def test_rq1_budget_envelopes_use_one_model_dimension_and_reject_m_squared() -> 
     assert random["generation_call_upper_bound"] == 2240
     assert core["accidental_model_square_generation_calls"] == 2240
 
+    candidate = rq1_worst_case_budget_envelopes(
+        RQ1BudgetDimensions(
+            ("qwen3.7-flash-2026-07-15",),
+            atomic_top_k=5,
+            pair_top_k=3,
+            atomic_task_units_per_effect=100,
+            pair_task_units_per_effect=170,
+            atomic_global_realizations=2,
+            pair_global_realizations=2,
+            atomic_total_block_slots=8,
+            pair_total_block_slots=8,
+        )
+    )
+    assert candidate["budget_envelope_id"] == (
+        "rq1_budget_envelope_"
+        "2271756bab8d848b339baa7c99a4bb3956b908906e9a4a734ccd4ff19af79ac0"
+    )
+    assert [
+        (
+            row["materialization_call_upper_bound"],
+            row["generation_call_upper_bound"],
+            row["functional_judge_call_upper_bound"],
+            row["external_call_upper_bound"],
+        )
+        for row in candidate["scenarios"]
+    ] == [
+        (4040, 16160, 16160, 36360),
+        (6060, 24240, 24240, 54540),
+        (8080, 32320, 32320, 72720),
+    ]
+
     with pytest.raises(ValueError, match="cannot be crossed"):
         RQ1BudgetDimensions(
             ("model-a", "model-b"),

@@ -129,15 +129,16 @@ This closes data quality and source-population identity only. It does not
 approve the 101-task technical-readiness diagnostic subset, allocate roles,
 open `QUAL_ACCEPT`, or resolve any author decision below.
 
-The complete outcome-blind ledger contains 346 quality-qualified Python task units in the current
-21-CWE scope. After 28 exact legacy overlaps, its exact-unexposed ceiling is 318: 141 ready, 159
-pending Oracle support, 16 pending binding, and two pending independent review. Thus the 240 total
-can be reached without changing the CWE scope if enough missing measurement profiles qualify. The
-four equal 60-task family targets remain the hard data shortfall: the exact-unexposed ceilings are
-128 injection/interpreter, 91 file/parser/resource, 43 identity/authorization/permission, and 56
-cryptography/randomness/integrity. Retaining 60/60/60/60 therefore requires at least 17 genuinely
-new identity-family and four genuinely new cryptography-family task units, plus reserve for any
-later near-duplicate exclusions.
+The earlier `346/318` ledger was a pre-successor planning census and is superseded by the final v5
+source authority. The final bundle contains 381 quality-included Python task units, of which 227
+map to the current 21-CWE layer: 16 are method-exposed and 211 are source-curated only. The frozen
+source-only qualification candidate reservations consume 56 of those 211 without yet assigning a
+formal role, leaving 155 current-layer units for a future Discovery/Confirmation split. Their
+residual family capacities are 64 injection/interpreter, 52 file/parser/resource, 25
+identity/authorization/permission, and 14 cryptography/randomness/integrity. Only 59 of the 155 are
+currently technically ready under the existing measurement stack. These are role-capacity and
+workload facts, not an admission rule or a frozen split. See
+`../../experiments/2026-09-02-role-power-budget-decision-support.md`.
 
 ```yaml
 author_decision_status: PARTIALLY_DECIDED_PROVIDER_MODEL_AND_PREEXPERIMENT_BUDGET
@@ -215,14 +216,18 @@ The current evidence-based starting recommendation, still non-authorizing, is:
 the author-selected fixed `qwen3.7-flash-2026-07-15` snapshot for all external LLM roles with no
 replication or fallback model, `K_A <= 5`, `K_I <= 3`, alpha 0.05, minimum power 0.80, two global
 realizations, and two request slots per arm. The author approved the CNY 100 cap for the initial
-non-confirmatory preexperiment; CNY 1,000 remains only a recommendation for the full formal
-envelope and is not authorized. Flash must pass each role-specific qualification, including a fresh,
+non-confirmatory preexperiment. For the asymmetric 100-Atomic/170-Pair Core candidate, CNY 200 is
+the current formal-cap recommendation; CNY 300 covers the implemented Core+Expert+Random envelope.
+Neither is authorized, and the older CNY 1,000 suggestion is superseded. Flash must pass each
+role-specific qualification, including a fresh,
 role-disjoint functional-judge `QUAL_ACCEPT`, before formal use.
 This replaces the earlier 10/5 and one-slot planning suggestion because the implemented
 outcome-blind sensitivity calculation shows materially weaker Pair power and a much larger call
 envelope. See `rq1_worst_case_budget.md` under “Outcome-blind author-decision sensitivity.” The
-author must still approve the remaining scientific parameters and a separate formal monetary cap
-before a claim-bearing design can be frozen.
+final-v5 capacity audit also shows that the 155 residual current-layer units cannot supply a
+170-unit Pair-confirmation role plus any disjoint Discovery role. The author must still approve the
+remaining scientific parameters, the capacity route, and a separate formal monetary cap before a
+claim-bearing design can be frozen.
 
 After approval, the permitted sequence is mechanical: freeze the candidate assumption/profile
 grid; power-qualify role counts without target outcomes; either expand the population or seal one

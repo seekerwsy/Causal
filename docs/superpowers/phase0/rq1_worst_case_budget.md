@@ -230,23 +230,17 @@ example, at 120 tasks and a true effect of 0.20, power is 0.543 for Atomic `K=5`
 task units, but the sensitivity shows why one slot cannot be assumed adequate before the accepted
 power grid exists.
 
-The current 141-task unexposed census is a total pool that must be split across `QUAL_DEV`, one-shot
-`QUAL_ACCEPT`, `DISCOVERY`, and `CONFIRMATION`; it is not 141 confirmation tasks per hypothesis.
-Consequently this calculation does not support adopting the 141-unit pool as the default formal
-population. The conservative planning path is to retain the 240-task coverage target, qualify an
-exact role allocation and hypothesis-specific eligible-task counts, and acquire more unexposed
-units if the accepted Pair grid requires them.
-
-The complete current-scope ledger has 346 quality-qualified Python task units and an exact-unexposed
-ceiling of 318 after 28 legacy overlaps. Beyond the 141 ready units, 159 need Oracle support, 16
-need a binding, and two need independent review. Existing-corpus implementation work can therefore
-reach a 240 total without importing the separate priority-extension CWEs. It cannot satisfy the
-current equal-family target by itself: exact-unexposed family ceilings are 128
-injection/interpreter, 91 file/parser/resource, 43 identity/authorization/permission, and 56
-cryptography/randomness/integrity. A 60/60/60/60 freeze needs at least 17 new identity-family and
-four new cryptography-family task units, plus reserve for later near-duplicate exclusions. An
-unequal-family amendment could avoid that acquisition, but would change the target population and
-must be decided prospectively rather than inferred from these counts.
+The final v5 source authority supersedes the earlier 141-ready and 346/318 planning censuses. It
+contains 381 quality-included Python task units, but only 227 map to the current 21-CWE layer. Of
+those, 16 are method-exposed and 211 are source-curated only. The two 28-unit source-only
+qualification candidate reservations leave 155 current-layer units for Discovery and Confirmation.
+The remaining family capacities are 64 injection/interpreter, 52 file/parser/resource, 25
+identity/authorization/permission, and 14 cryptography/randomness/integrity; only 59 residual units
+are currently technically ready. Thus even the rounded 170-unit Pair design cannot receive a
+disjoint confirmation role plus a nonempty Discovery role from the current-layer residual pool.
+Capacity recovery, prospective acquisition/scope amendment, or a prospectively weaker design is
+required before the five-role manifest can be frozen. None of these totals guarantees a selected
+hypothesis's actual eligible-task count.
 
 For one model, Core selectors, two request slots per arm, and no overlap credit, the implemented
 budget function gives these exact call ceilings:
@@ -282,12 +276,22 @@ arm, one model, and no overlap credit, the selected Flash rates give:
 | 170 | 10,880 | 43,520 | 43,520 | 97,920 | CNY 338.72 |
 | 240 | 15,360 | 61,440 | 61,440 | 138,240 | CNY 478.19 |
 
+The asymmetric rounded power candidate uses 100 Atomic and 170 Pair task units per effect. Its exact
+envelopes are:
+
+| Scenario | Materialization | Generation | Functional judge | Total calls | Maximum list-price cost |
+|---|---:|---:|---:|---:|---:|
+| Core | 4,040 | 16,160 | 16,160 | 36,360 | CNY 125.77 |
+| Core + Expert | 6,060 | 24,240 | 24,240 | 54,540 | CNY 188.66 |
+| Core + Expert + Random | 8,080 | 32,320 | 32,320 | 72,720 | CNY 251.55 |
+
 A smaller exploratory Core design with `K_A=2`, `K_I=1`, 100 tasks per effect, and the same
-two-slot rule reserves 10,800 formal-stage calls at CNY 37.36. The current non-authorizing cap
-The author approved a CNY 100 ceiling for that initial non-confirmatory preexperiment, leaving room
-for role qualification and conservative request-size variance. CNY 1,000 remains a recommendation,
-not an authorization, for the full formal envelope. Preexperiment spending cannot be promoted into
-formal evidence or charged against a later formal cap without a new freeze.
+two-slot rule reserves 10,800 formal-stage calls at CNY 37.36. The author approved a CNY 100 ceiling
+for the initial non-confirmatory preexperiment, leaving room for role qualification and conservative
+request-size variance. For the exact asymmetric candidate, CNY 200 is the current non-authorizing
+Core cap recommendation and CNY 300 covers Core + Expert + Random. The older CNY 1,000 suggestion
+is superseded rather than silently copied into a freeze. Preexperiment spending cannot be promoted
+into formal evidence or charged against a later formal cap without a new freeze.
 
 Historical factorial records contain no provider token-usage ledger, so their byte lengths cannot
 be converted into an exact bill. The observed maximum serialized generation request/response

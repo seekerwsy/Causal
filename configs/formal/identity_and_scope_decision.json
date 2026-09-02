@@ -96,7 +96,10 @@
       "provider_calls_authorized_after_required_preflight": true,
       "formal_experiment_authorized": false,
       "full_formal_budget_status": "UNAPPROVED",
-      "full_formal_budget_recommendation_cny": 1000
+      "full_formal_budget_recommendation_basis": "core_k5_k3_atomic100_pair170_two_slots_no_overlap_credit_v1",
+      "full_formal_budget_recommendation_cny": 200,
+      "full_baseline_envelope_recommendation_cny": 300,
+      "candidate_budget_envelope_id": "rq1_budget_envelope_2271756bab8d848b339baa7c99a4bb3956b908906e9a4a734ccd4ff19af79ac0"
     }
   },
   "prospective_source_population": {
