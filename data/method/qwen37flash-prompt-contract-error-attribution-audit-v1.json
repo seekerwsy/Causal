@@ -1,0 +1,274 @@
+{
+    "arms_or_outcomes_used": false,
+    "artifact_kind": "prompt_contract_qual_dev_error_attribution_audit",
+    "evidence_snapshot_commit": "31d526e",
+    "audit_method": {
+        "human_external_review": false,
+        "inference_tiers_are_gold_labels": false,
+        "mechanical_signals": "Recomputed from archived raw proposer/reviewer states, compiled consensus contracts, and independent qualification case results.",
+        "provider_calls": 0,
+        "root_agent_added_or_changed_qualification_gold": false,
+        "scope": "The 11 mismatches in the frozen 28-case v1 QUAL_DEV run plus the three repeated v3-v5 canary cases.",
+        "tier_assignments": "Development-only root-agent attribution of the highest reasoning tier needed to apply the existing source gold rationale; not a replacement for independent semantic gold."
+    },
+    "case_attributions": [
+        {
+            "attribution_codes": [
+                "UNANIMOUS_SEMANTIC_FALSE_NEGATIVE",
+                "CROSS_RUN_CLASSIFICATION_INSTABILITY",
+                "ONTOLOGY_BOUNDARY"
+            ],
+            "dominant_layer": "METHOD_MODEL_INTERFACE",
+            "expected_context": "present",
+            "expected_realization_id": "cwe22_archive_extraction",
+            "inference_tier": "E2_DOMAIN_CONVENTION",
+            "observed_context": "absent",
+            "task_id": "semantic_cluster_deb850f606d7e753dfcb3dad41395d2b0e84c5150a17d5a83d2927efed6e9c7d"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT"
+            ],
+            "dominant_layer": "MODEL_SEMANTIC_CLASSIFICATION",
+            "expected_context": "present",
+            "expected_realization_id": "cwe295_requests_certificate_validation",
+            "inference_tier": "E1_DETERMINISTIC_INTERFACE_DERIVATION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_e863417e9cc9a081767caf299da4852af4634412960b822e8c97f771fd8edccb"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_SHARED_ABSTENTION",
+                "EVIDENCE_VALIDATION_DEMOTION"
+            ],
+            "dominant_layer": "MODEL_AND_EVIDENCE_INTERFACE",
+            "expected_context": "present",
+            "expected_realization_id": "cwe502_yaml_deserialization",
+            "inference_tier": "E1_DETERMINISTIC_INTERFACE_DERIVATION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_a269591d0d6910a551a915e66acaa992e69d040a957411ad976cf42de71fb34c"
+        },
+        {
+            "attribution_codes": [
+                "EVIDENCE_VALIDATION_DEMOTION"
+            ],
+            "dominant_layer": "EVIDENCE_INTERFACE",
+            "expected_context": "present",
+            "expected_realization_id": "cwe89_sql_values",
+            "inference_tier": "E1_DETERMINISTIC_INTERFACE_DERIVATION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_521696d2df0fb257a78804b342668d7353835acbf68009015104e62dc3e98aa5"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT",
+                "MODEL_SHARED_ABSTENTION"
+            ],
+            "dominant_layer": "MODEL_SEMANTIC_CLASSIFICATION",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E0_EXPLICIT_SURFACE_OR_TYPE",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_b96c5629066e76f013b4d7a222daa20d19c98513ce0724aba5b4588bf55c741f"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT"
+            ],
+            "dominant_layer": "MODEL_SEMANTIC_CLASSIFICATION",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E1_DETERMINISTIC_INTERFACE_DERIVATION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_6841cc983786b1d08ecb89662fc7cd9855a7b24b95a2985a9d6332d6bba0f83a"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT"
+            ],
+            "dominant_layer": "MODEL_SEMANTIC_CLASSIFICATION",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E0_EXPLICIT_SURFACE_OR_TYPE",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_0dca24617bd3e8dfe4d01040bb7dc27f3eb466329abae76f929f48f4451d4e61"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT",
+                "EVIDENCE_VALIDATION_DEMOTION",
+                "ONTOLOGY_BOUNDARY"
+            ],
+            "dominant_layer": "METHOD_MODEL_INTERFACE",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E2_DOMAIN_CONVENTION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_eb8765732dd9deb1e6d03f193d15aec7dbdeb01954f12de9cbde3415b34cca75"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT",
+                "MODEL_SHARED_ABSTENTION",
+                "ONTOLOGY_BOUNDARY"
+            ],
+            "dominant_layer": "METHOD_MODEL_INTERFACE",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E2_DOMAIN_CONVENTION",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_57d2f4d67e6f90d661e9cbc9131e7479ec7390f8567b4f97471d71802bda0fb8"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT",
+                "EVIDENCE_VALIDATION_DEMOTION"
+            ],
+            "dominant_layer": "MODEL_AND_EVIDENCE_INTERFACE",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E0_EXPLICIT_SURFACE_OR_TYPE",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_193bb77bcdac921dd7355fccd3e8022c5da1d3538c193cac037155b459447ca1"
+        },
+        {
+            "attribution_codes": [
+                "MODEL_CLASSIFICATION_DISAGREEMENT"
+            ],
+            "dominant_layer": "MODEL_SEMANTIC_CLASSIFICATION",
+            "expected_context": "absent",
+            "expected_realization_id": null,
+            "inference_tier": "E0_EXPLICIT_SURFACE_OR_TYPE",
+            "observed_context": "unresolved",
+            "task_id": "semantic_cluster_3027f69c43a683524c00ea7aa0a6505b9274ac6e758bcf4706b8daf127a84ca7"
+        }
+    ],
+    "claim_boundary": "This audit localizes observed representation failures. It does not qualify the extractor, authorize QUAL_ACCEPT or formal roles, validate the causal-discovery/RD stages, or provide scientific effect evidence.",
+    "conclusion": {
+        "current_blocker": "The remaining v5 canary failure is semantic test-retest instability at an under-specified method-model boundary: whether caller-supplied archive structure operationally entails an untrusted archive-member source.",
+        "downstream_method_implicated": false,
+        "evidence_aggregation_remains_primary_current_blocker": false,
+        "method_or_model": "Both contribute, but at different levels: the observed response change is a model reliability failure; the ability of that change to redefine the study population is a method operationalization failure.",
+        "provider_transport_remains_primary_current_blocker": false,
+        "recommended_next_action": "Freeze an ontology-boundary adjudication protocol before changing the active extractor. Permit deterministic derivation only from independently defined E0/E1 primitive facts; keep E2/E3 cases unresolved unless a separately frozen expert rule supports them."
+    },
+    "cross_run_canary": [
+        {
+            "expected_context": "present",
+            "states": {
+                "v3": "absent",
+                "v4": "present",
+                "v5": "absent"
+            },
+            "task_id": "semantic_cluster_deb850f606d7e753dfcb3dad41395d2b0e84c5150a17d5a83d2927efed6e9c7d"
+        },
+        {
+            "expected_context": "present",
+            "states": {
+                "v3": "present",
+                "v4": "unresolved",
+                "v5": "present"
+            },
+            "task_id": "semantic_cluster_a269591d0d6910a551a915e66acaa992e69d040a957411ad976cf42de71fb34c"
+        },
+        {
+            "expected_context": "present",
+            "states": {
+                "v3": "unresolved",
+                "v4": "unresolved",
+                "v5": "present"
+            },
+            "task_id": "semantic_cluster_521696d2df0fb257a78804b342668d7353835acbf68009015104e62dc3e98aa5"
+        }
+    ],
+    "full_qual_dev_v1": {
+        "exact_context_accuracy": 0.607143,
+        "false_positive_present": 0,
+        "matched_task_units": 17,
+        "mismatched_task_units": 11,
+        "present_recall": 0.428571,
+        "status": "QUALIFICATION_FAILED",
+        "task_units": 28,
+        "wrong_realization": 0
+    },
+    "inference_tier_definitions": {
+        "E0_EXPLICIT_SURFACE_OR_TYPE": "The source text directly names the relevant operation, protocol, type, or exclusion.",
+        "E1_DETERMINISTIC_INTERFACE_DERIVATION": "The conclusion follows from a frozen, reviewable composition of explicit interface facts without a threat-model assumption.",
+        "E2_DOMAIN_CONVENTION": "The conclusion depends on a security-domain convention, trust interpretation, or required-versus-possible implementation policy.",
+        "E3_EXTERNAL_ENVIRONMENT_OR_THREAT_MODEL": "The conclusion requires facts outside the source Prompt or an unstated deployment/threat model."
+    },
+    "input_bindings": {
+        "catalog": {
+            "path": "data/method/prompt-tsg-catalog-v1.json",
+            "sha256": "d4996be11f68e82abe8085b6fcb28cf306fafefddf90243352769cedf9ec744b"
+        },
+        "source_gold": {
+            "manifest_sha256": "4854c62c2651001e144b79d547cdac489e9b84d2e84a53ffe277cec19bc5579f",
+            "path": "data/method/qwen37flash-qualification-source-gold-v1"
+        },
+        "v1_extraction": {
+            "manifest_sha256": "04bd573d45353ca601196ec6de408ff2d11b3b7989bc85d4d29f3c67a6e12f4f",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v1-qual-dev-run"
+        },
+        "v1_qualification": {
+            "manifest_sha256": "8baea1b58c5cec70203fc44402f921ba85593e60efc832656976209d9587bd7b",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v1-qualification-run"
+        },
+        "v3_qualification": {
+            "manifest_sha256": "78c33c7fd0f17657a1d9f133b9b16a4fec8191f3f943845f4c0b6cb13bec36d8",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v3-canary-qualification"
+        },
+        "v4_extraction": {
+            "manifest_sha256": "5c166071421a98fc60a928962217285ae10d064af461ce0d17cdaa6ee40c1a7e",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v4-canary-run"
+        },
+        "v4_qualification": {
+            "manifest_sha256": "face5364f2e70052f778cf06e631f34e4a4ef54a0ce9ff4063a782a7f1174c0c",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v4-canary-qualification"
+        },
+        "v5_extraction": {
+            "manifest_sha256": "0ee9505b61a4870c7bfcdaaf7db32e3186a040a7f5a9d2535da4706b88efe42c",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v5-canary-run"
+        },
+        "v5_qualification": {
+            "manifest_sha256": "2dc1d985661a29715d25553e1b149867b49dc0580d4eb7caa80903f5bd8c3dd1",
+            "path": "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1/v5-canary-qualification"
+        }
+    },
+    "mechanical_signal_summary": {
+        "cases_with_evidence_validation_demotion": 4,
+        "cases_with_model_classification_disagreement": 8,
+        "cases_with_model_shared_abstention": 3,
+        "cases_with_unanimous_semantic_false_negative": 1,
+        "dominant_layer_counts": {
+            "EVIDENCE_INTERFACE": 1,
+            "METHOD_MODEL_INTERFACE": 3,
+            "MODEL_AND_EVIDENCE_INTERFACE": 2,
+            "MODEL_SEMANTIC_CLASSIFICATION": 5
+        },
+        "inference_tier_counts": {
+            "E0_EXPLICIT_SURFACE_OR_TYPE": 4,
+            "E1_DETERMINISTIC_INTERFACE_DERIVATION": 4,
+            "E2_DOMAIN_CONVENTION": 3,
+            "E3_EXTERNAL_ENVIRONMENT_OR_THREAT_MODEL": 0
+        },
+        "observed_query_or_binding_replay_divergence": 0
+    },
+    "request_identity_check": {
+        "automatic_retry_ceiling": 0,
+        "model_id": "qwen3.7-flash-2026-07-15",
+        "proposer_prompt_sha256": "6fba72d180836651346ed958d6c7f2f613556ddea788fe782712b74f6962fb38",
+        "proposer_seed": 81370,
+        "archive_case_response_format_sha256": "ef207c5924639424563e9971bfc9559e6bfc543539c079d756cf8096485353aa",
+        "reviewer_prompt_sha256": "a18e8d12585a6742052c11ecd01563d8251e52e04578b5aeb118fde148798173",
+        "reviewer_seed": 81371,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "v4_and_v5_task_request_files_byte_identical": true,
+        "v4_task_requests_sha256": "11329fd095505edcd61057c0974328ee4f0865bd06c60d10081cf26657af6503",
+        "v5_task_requests_sha256": "11329fd095505edcd61057c0974328ee4f0865bd06c60d10081cf26657af6503"
+    },
+    "schema_version": "1.0",
+    "scientific_claim_allowed": false,
+    "status": "ZERO_NETWORK_ERROR_ATTRIBUTION_COMPLETE_NON_AUTHORIZING"
+}

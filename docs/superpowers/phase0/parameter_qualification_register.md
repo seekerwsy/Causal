@@ -124,6 +124,12 @@ across `QUAL_DEV`, one-shot `QUAL_ACCEPT`, `DISCOVERY`, and `CONFIRMATION`; it e
 `LEGACY_ONLY` and does not replace hypothesis-specific power analysis. The current outcome-blind
 census contains 141 unexposed ready task units.
 
+The zero-network error-attribution audit at
+`docs/experiments/2026-09-02-prompt-contract-error-attribution-audit.md` binds all 11 v1
+mismatches and the v3-v5 canary history to archived raw responses. It attributes the current
+critical-path failure to semantic test-retest instability at an under-specified method/model
+boundary; it is development evidence only and does not alter A-SUP-03 or authorize a new design.
+
 The completed all-task review now supplies a separately frozen upstream source
 population: 381 `QUALITY_INCLUDED` Python task units from reviewer bundle
 `33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`,

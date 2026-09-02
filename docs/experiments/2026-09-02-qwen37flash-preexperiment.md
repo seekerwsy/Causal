@@ -126,6 +126,15 @@ or scientific effect claim occurred. The evidence-aware representation candidate
 **not ready** for formal use, and no automatic prompt or consensus iteration is
 authorized.
 
+A subsequent zero-network [error-attribution audit](2026-09-02-prompt-contract-error-attribution-audit.md)
+recomputed the v1 raw-state failures and v3-v5 canary history. Among the 11 v1
+mismatches, eight contain a proposer/reviewer semantic disagreement, three contain
+shared abstention, four contain a unanimous-present evidence demotion, and one is a
+unanimous semantic false negative; categories overlap. The audit localizes the current
+v5 blocker to semantic test-retest instability at an under-specified ontology boundary,
+not provider transport, evidence aggregation, or observed query/binding replay drift.
+It consumed no provider calls and changed no qualification label or active method.
+
 ## Prospective cost and evidence closure
 
 Prospective `QUAL_DEV` used 83 calls with a conservative cost of CNY `0.408028`.

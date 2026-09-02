@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -597,6 +598,168 @@ def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
     )
     assert ledger["qualification_accept_provider_calls"] == 0
     assert ledger["status"] == "PROSPECTIVE_REDESIGN_CANARY_FAILED_NOT_READY"
+
+
+@pytest.mark.reviewer
+def test_prompt_contract_error_attribution_replays_archived_signals() -> None:
+    root = Path(__file__).parents[1]
+    audit = read_json(
+        root / "data/method/qwen37flash-prompt-contract-error-attribution-audit-v1.json"
+    )
+    assert audit["status"] == "ZERO_NETWORK_ERROR_ATTRIBUTION_COMPLETE_NON_AUTHORIZING"
+    assert audit["audit_method"]["provider_calls"] == 0
+    assert audit["audit_method"]["root_agent_added_or_changed_qualification_gold"] is False
+    assert audit["scientific_claim_allowed"] is False
+    assert audit["arms_or_outcomes_used"] is False
+
+    for name, binding in audit["input_bindings"].items():
+        path = root / binding["path"]
+        if name == "catalog":
+            assert file_sha256(path) == binding["sha256"]
+        else:
+            verify_bundle(path)
+            assert file_sha256(path / "manifest.json") == binding["manifest_sha256"]
+
+    archive = root / "data/method/qwen37flash-prospective-qual-dev-development-evidence-v1"
+    case_results = read_json(archive / "v1-qualification-run/case-results.json")
+    mismatches = {row["task_id"]: row for row in case_results if not row["matched"]}
+    attributed = {row["task_id"]: row for row in audit["case_attributions"]}
+    assert set(attributed) == set(mismatches)
+    assert len(case_results) == audit["full_qual_dev_v1"]["task_units"] == 28
+    assert len(mismatches) == audit["full_qual_dev_v1"]["mismatched_task_units"] == 11
+    assert sum(row["matched"] for row in case_results) == 17
+    for task_id, row in attributed.items():
+        source = mismatches[task_id]
+        assert row["expected_context"] == source["expected_context"]
+        assert row["expected_realization_id"] == source["expected_realization_id"]
+        assert row["observed_context"] == source["actual_context"]
+
+    responses = {
+        row["task_id"]: row
+        for row in read_json(archive / "v1-qual-dev-run/responses.json")
+    }
+    contracts = {
+        row["task_id"]: row
+        for row in read_json(archive / "v1-qual-dev-run/contracts.json")
+    }
+    disagreement = set()
+    shared_abstention = set()
+    evidence_demotion = set()
+    unanimous_false_negative = set()
+    for task_id, result in mismatches.items():
+        response = responses[task_id]
+        proposer = json.loads(response["proposer_response_text"])["semantic_decisions"]
+        reviewer = json.loads(response["reviewer_response_text"])["semantic_decisions"]
+        consensus = {
+            row["semantic_id"]: row for row in contracts[task_id]["semantic_decisions"]
+        }
+        pairs = {
+            semantic_id: (proposer[semantic_id]["state"], reviewer[semantic_id]["state"])
+            for semantic_id in consensus
+        }
+        if any(left != right for left, right in pairs.values()):
+            disagreement.add(task_id)
+        if any(left == right == "unresolved" for left, right in pairs.values()):
+            shared_abstention.add(task_id)
+        if any(
+            left == right == "present" and consensus[semantic_id]["state"] == "unresolved"
+            for semantic_id, (left, right) in pairs.items()
+        ):
+            evidence_demotion.add(task_id)
+        if (
+            result["expected_context"] == "present"
+            and result["actual_context"] == "absent"
+            and any(left == right == "absent" for left, right in pairs.values())
+        ):
+            unanimous_false_negative.add(task_id)
+
+    code_sets = {
+        code: {
+            row["task_id"]
+            for row in audit["case_attributions"]
+            if code in row["attribution_codes"]
+        }
+        for code in (
+            "MODEL_CLASSIFICATION_DISAGREEMENT",
+            "MODEL_SHARED_ABSTENTION",
+            "EVIDENCE_VALIDATION_DEMOTION",
+            "UNANIMOUS_SEMANTIC_FALSE_NEGATIVE",
+        )
+    }
+    assert code_sets["MODEL_CLASSIFICATION_DISAGREEMENT"] == disagreement
+    assert code_sets["MODEL_SHARED_ABSTENTION"] == shared_abstention
+    assert code_sets["EVIDENCE_VALIDATION_DEMOTION"] == evidence_demotion
+    assert code_sets["UNANIMOUS_SEMANTIC_FALSE_NEGATIVE"] == unanimous_false_negative
+    summary = audit["mechanical_signal_summary"]
+    assert summary["cases_with_model_classification_disagreement"] == len(disagreement) == 8
+    assert summary["cases_with_model_shared_abstention"] == len(shared_abstention) == 3
+    assert summary["cases_with_evidence_validation_demotion"] == len(evidence_demotion) == 4
+    assert summary["cases_with_unanimous_semantic_false_negative"] == (
+        len(unanimous_false_negative)
+    ) == 1
+
+    assert summary["dominant_layer_counts"] == dict(
+        sorted(Counter(row["dominant_layer"] for row in attributed.values()).items())
+    )
+    tier_counts = {tier: 0 for tier in audit["inference_tier_definitions"]}
+    tier_counts.update(Counter(row["inference_tier"] for row in attributed.values()))
+    assert summary["inference_tier_counts"] == tier_counts
+
+    cross_run = {row["task_id"]: row for row in audit["cross_run_canary"]}
+    for version in ("v3", "v4", "v5"):
+        version_results = read_json(
+            archive / f"{version}-canary-qualification/case-results.json"
+        )
+        assert {
+            row["task_id"]: row["actual_context"] for row in version_results
+        } == {
+            task_id: row["states"][version] for task_id, row in cross_run.items()
+        }
+
+    identity = audit["request_identity_check"]
+    v4_requests = archive / "v4-canary-run/requests.json"
+    v5_requests = archive / "v5-canary-run/requests.json"
+    assert v4_requests.read_bytes() == v5_requests.read_bytes()
+    assert file_sha256(v4_requests) == identity["v4_task_requests_sha256"]
+    assert file_sha256(v5_requests) == identity["v5_task_requests_sha256"]
+    for version in ("v4", "v5"):
+        plan = read_json(
+            root
+            / f"data/method/prompt-contract-qwen37flash-prospective-qual-dev-{version}-plan.json"
+        )
+        assert plan["model_policy"]["fixed_snapshot_model_id"] == identity["model_id"]
+        assert plan["automatic_retry_ceiling"] == identity["automatic_retry_ceiling"]
+        assert file_sha256(root / plan["inputs"]["proposer_prompt"]["path"]) == identity[
+            "proposer_prompt_sha256"
+        ]
+        assert file_sha256(root / plan["inputs"]["reviewer_prompt"]["path"]) == identity[
+            "reviewer_prompt_sha256"
+        ]
+        proposer_evaluator = read_json(root / plan["inputs"]["proposer_evaluator"]["path"])
+        reviewer_evaluator = read_json(root / plan["inputs"]["reviewer_evaluator"]["path"])
+        assert proposer_evaluator["temperature"] == reviewer_evaluator["temperature"] == identity[
+            "temperature"
+        ]
+        assert proposer_evaluator["top_p"] == reviewer_evaluator["top_p"] == identity[
+            "top_p"
+        ]
+        assert proposer_evaluator["seed"] == identity["proposer_seed"]
+        assert reviewer_evaluator["seed"] == identity["reviewer_seed"]
+        assert proposer_evaluator["max_attempts"] == reviewer_evaluator["max_attempts"] == 1
+    v4_responses = read_json(archive / "v4-canary-run/responses.json")
+    v5_responses = read_json(archive / "v5-canary-run/responses.json")
+    archive_task_id = next(
+        task_id
+        for task_id, row in attributed.items()
+        if "UNANIMOUS_SEMANTIC_FALSE_NEGATIVE" in row["attribution_codes"]
+    )
+    for responses_for_version in (v4_responses, v5_responses):
+        archive_response = next(
+            row for row in responses_for_version if row["task_id"] == archive_task_id
+        )
+        assert archive_response["response_format_sha256"] == identity[
+            "archive_case_response_format_sha256"
+        ]
 
 
 @pytest.mark.reviewer
