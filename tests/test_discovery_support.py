@@ -293,6 +293,20 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
     assert source_population["formal_role_assigned_count"] == 0
     assert source_population["role_assignment_frozen"] is False
 
+    review_candidates = manifest["qualification_source_review_candidates"]
+    review_root = ROOT / review_candidates["bundle_path"]
+    verify_bundle(review_root)
+    assert hashlib.sha256((review_root / "manifest.json").read_bytes()).hexdigest() == (
+        review_candidates["bundle_manifest_sha256"]
+    )
+    assert review_candidates["task_unit_disjoint"] is True
+    assert review_candidates["near_duplicate_group_disjoint"] is True
+    assert review_candidates["qual_accept_method_exposure_history_empty"] is True
+    assert review_candidates["formal_role_assignment_frozen"] is False
+    assert review_candidates["independent_gold_complete"] is False
+    assert review_candidates["qualification_accept_attempts_authorized"] == 0
+    assert review_candidates["provider_calls_authorized"] == 0
+
     bindings = manifest["bindings"]
     assert [binding["data_id"] for binding in bindings] == sorted(
         binding["data_id"] for binding in bindings

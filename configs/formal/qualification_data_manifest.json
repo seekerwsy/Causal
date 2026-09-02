@@ -56,6 +56,32 @@
     "formal_use_authorized": false,
     "functional_judge_qualification_status": "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
   },
+  "qualification_source_review_candidates": {
+    "status": "SOURCE_ONLY_REVIEW_PACKETS_READY_FORMAL_ROLE_MANIFEST_AND_GOLD_PENDING",
+    "bundle_path": "data/method/qwen37flash-qualification-source-review-candidates-v1",
+    "bundle_manifest_sha256": "1912f9c5cad5d43ddfdc44aff688c3eee62891184dc39aa6bb7e1a61ab4860ff",
+    "producer_commit": "2d66fccb4f29946f9ed0b94b4dcf53bba853d92f",
+    "eligible_unexposed_python_task_units": 152,
+    "candidate_reservations": {
+      "QUAL_DEV": {
+        "data_id": "qualification_dataset_candidate_d8b912c9cc198d6b25e3cdb50aadded653cd33a9b323879e394a52745bfde8fa",
+        "task_unit_count": 28,
+        "task_manifest_sha256": "849c4a9731c4cb9575a2e9188aca582f80d455b9f6f813fffc7193f0f52a353a"
+      },
+      "QUAL_ACCEPT": {
+        "data_id": "qualification_dataset_candidate_5ea2042a6e1c7c99383b4090a4f8524049dc1ad2e41d2b19d61786f0213989d4",
+        "task_unit_count": 28,
+        "task_manifest_sha256": "81ed85317291d585a2ff67383c045e7e6c2ada013613099339caeb817b786707"
+      }
+    },
+    "task_unit_disjoint": true,
+    "near_duplicate_group_disjoint": true,
+    "qual_accept_method_exposure_history_empty": true,
+    "formal_role_assignment_frozen": false,
+    "independent_gold_complete": false,
+    "qualification_accept_attempts_authorized": 0,
+    "provider_calls_authorized": 0
+  },
   "bindings": [
     {
       "data_id": "legacy-prompt-tsg-external-qualification-v5",
@@ -253,10 +279,10 @@
     "outcome_data_read": false
   },
   "blocking_conditions": [
-    "The 381-task quality-included Python source population is frozen, but its representation profile, qualification thresholds, and outcome-blind eligibility rule are not accepted.",
+    "The 381-task quality-included Python source population and two 28-task qualification review candidate reservations are frozen, but the candidate reservations are not a complete formal DataRoleManifest and their independent source-only gold is incomplete.",
     "Power-qualified counts for QUAL_DEV, QUAL_ACCEPT, DISCOVERY, and CONFIRMATION have not been selected, so no prospective role is assigned.",
-    "A one-shot QUAL_ACCEPT subset has not been independently sealed from the frozen source population.",
+    "The one-shot QUAL_ACCEPT candidate membership is sealed and method-unexposed, but it has not been independently labelled, formally assigned, or authorized for a provider call.",
     "Qwen3.7-Flash and a CNY 100 non-confirmatory preexperiment cap are author-approved, but role-specific qualification, practical margins, K ceilings, familywise alpha, target power, request slots, and the full formal provider-cost cap remain unapproved."
   ],
-  "next_gate": "Complete the remaining joint author decision, qualify the fixed Qwen3.7-Flash snapshot for each assigned role, freeze the representation qualification plan and its outcome-blind eligibility rule, then power-qualify and freeze one complete DataRoleManifest before opening QUAL_ACCEPT or generating formal Prompt TSGs."
+  "next_gate": "Complete independent source-only labels without extractor output access; approve and power-qualify all role counts; then freeze one complete five-role DataRoleManifest and the integrated qualification plan before opening QUAL_ACCEPT or generating formal Prompt TSGs."
 }

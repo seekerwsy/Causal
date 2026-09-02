@@ -46,6 +46,19 @@ opened, and no randomized preexperiment has started. Exact attempt and artifact
 hashes are recorded in `data/method/qwen37flash-preexperiment-ledger-v1.json` and
 summarized in `docs/experiments/2026-09-02-qwen37flash-preexperiment.md`.
 
+The next source-only boundary is also prepared but not opened. The tracked
+candidate bundle `data/method/qwen37flash-qualification-source-review-candidates-v1`
+contains disjoint 28-task `QUAL_DEV` and 28-task `QUAL_ACCEPT` candidate
+reservations, blind reviewer packets, and deliberately incomplete gold
+templates. Its manifest SHA-256 is
+`1912f9c5cad5d43ddfdc44aff688c3eee62891184dc39aa6bb7e1a61ab4860ff`.
+These are candidate reservations, not a formal five-role manifest: independent
+source-only labels, power-qualified role counts, and the integrated plan are
+still missing. Consequently the acceptance attempt and provider-call ceilings
+remain zero. While preparing this boundary, a source/catalog audit found and
+fixed the generic strict-schema case in which a valid query has no required
+relation edges; no acceptance output was inspected or used.
+
 The sole executable study entry point is:
 
 ```text
