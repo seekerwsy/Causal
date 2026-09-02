@@ -47,16 +47,23 @@ opened, and no randomized preexperiment has started. Exact attempt and artifact
 hashes are recorded in `data/method/qwen37flash-preexperiment-ledger-v1.json` and
 summarized in `docs/experiments/2026-09-02-qwen37flash-preexperiment.md`.
 
-The next source-only boundary is also prepared but not opened. The tracked
+The next source-only boundary is prepared and its independent labels are now
+closed without opening extractor output. The tracked
 candidate bundle `data/method/qwen37flash-qualification-source-review-candidates-v1`
 contains disjoint 28-task `QUAL_DEV` and 28-task `QUAL_ACCEPT` candidate
 reservations, blind reviewer packets, and deliberately incomplete gold
 templates. Its manifest SHA-256 is
 `1912f9c5cad5d43ddfdc44aff688c3eee62891184dc39aa6bb7e1a61ab4860ff`.
-These are candidate reservations, not a formal five-role manifest: independent
-source-only labels, power-qualified role counts, and the integrated plan are
-still missing. Consequently the acceptance attempt and provider-call ceilings
-remain zero. While preparing this boundary, a source/catalog audit found and
+Two isolated subagents independently reviewed all 56 cases; they agreed on 52,
+and a third isolated subagent blindly decided the four disagreements without
+seeing the first two decisions. The qualification-ready source-gold bundle is
+`data/method/qwen37flash-qualification-source-gold-v1`, with manifest SHA-256
+`4854c62c2651001e144b79d547cdac489e9b84d2e84a53ffe277cec19bc5579f`.
+Its receipt records `human_external_review=false`; no human-expert claim is
+made. These remain candidate reservations, not a formal five-role manifest:
+power-qualified role counts and the integrated plan are still missing.
+Consequently the acceptance attempt and provider-call ceilings remain zero.
+While preparing this boundary, a source/catalog audit found and
 fixed the generic strict-schema case in which a valid query has no required
 relation edges; no acceptance output was inspected or used.
 
@@ -66,7 +73,8 @@ current 21-CWE layer, 211 units are source-curated and unexposed; after the 56
 qualification candidates, only 155 remain for disjoint Discovery and
 Confirmation roles. This is below the rounded 170-unit Pair power candidate
 before allocating any Discovery unit, so a five-role formal freeze remains
-blocked by population capacity as well as independent gold.
+blocked by population capacity, although the independent source-gold gate is
+now closed.
 
 The sole executable study entry point is:
 

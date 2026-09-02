@@ -13,6 +13,10 @@ from prompt_mechanism_study.datasets import (
     prepare_dedup_candidates,
 )
 from prompt_mechanism_study.qualification_data import prepare_qualification_source_review
+from prompt_mechanism_study.source_gold_review import (
+    finalize_source_gold_review,
+    prepare_source_gold_adjudication,
+)
 
 pytestmark = pytest.mark.extended
 
@@ -259,6 +263,121 @@ def test_source_only_qualification_review_candidates_are_disjoint_and_blind(
     ):
         assert forbidden not in serialized
     assert packet["status"] == "AWAITING_EXTERNAL_INDEPENDENT_REVIEW"
+
+
+@pytest.mark.reviewer
+def test_independent_subagent_source_gold_requires_blind_third_review(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[1]
+    candidates = (
+        root / "data/method/qwen37flash-qualification-source-review-candidates-v1"
+    )
+    decisions: dict[str, list[dict[str, object]]] = {
+        "reviewer-a": [],
+        "reviewer-b": [],
+    }
+    first_key: tuple[str, str] | None = None
+    first_realization: str | None = None
+    for role, prefix in (("QUAL_DEV", "qual-dev"), ("QUAL_ACCEPT", "qual-accept")):
+        packet = read_json(candidates / f"{prefix}-review-packet.json")
+        for case in packet["cases"]:
+            key = (role, case["task_id"])
+            if first_key is None:
+                first_key = key
+                first_realization = case["candidate_realizations"][0]["realization_id"]
+            for slot in decisions:
+                decisions[slot].append(
+                    {
+                        "proposed_data_role": role,
+                        "task_id": case["task_id"],
+                        "expected_context": "absent_or_unresolved",
+                        "expected_realization_id": None,
+                        "rationale": "The source-only fixture does not assert the target context.",
+                    }
+                )
+    assert first_key is not None and first_realization is not None
+    decisions["reviewer-b"][0]["expected_context"] = "present"
+    decisions["reviewer-b"][0]["expected_realization_id"] = first_realization
+    decisions["reviewer-b"][0]["rationale"] = "The source-only fixture asserts the target context."
+
+    attestation = {
+        "forked_without_prior_turns": True,
+        "only_exact_review_packets_read": True,
+        "prohibited_inputs_read": False,
+        "arms_or_outcomes_used": False,
+    }
+    decision_paths = {}
+    for slot, cases in decisions.items():
+        path = tmp_path / f"{slot}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "protocol_id": "isolated_dual_source_gold_review_with_blind_third_decision_v1",
+                    "reviewer_slot": slot,
+                    "independence_attestation": attestation,
+                    "cases": cases,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        decision_paths[slot] = path
+
+    adjudication = tmp_path / "adjudication"
+    report = prepare_source_gold_adjudication(
+        candidates,
+        decision_paths["reviewer-a"],
+        decision_paths["reviewer-b"],
+        adjudication,
+    )
+    assert report["agreements"] == 55
+    assert report["disagreements"] == 1
+    third_path = tmp_path / "reviewer-c.json"
+    third_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "protocol_id": "isolated_dual_source_gold_review_with_blind_third_decision_v1",
+                "reviewer_slot": "reviewer-c",
+                "independence_attestation": attestation,
+                "cases": [
+                    {
+                        "proposed_data_role": first_key[0],
+                        "task_id": first_key[1],
+                        "expected_context": "absent",
+                        "expected_realization_id": None,
+                        "rationale": "The source-only fixture does not require the target context.",
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    final = tmp_path / "final"
+    final_report = finalize_source_gold_review(
+        tmp_path,
+        candidates,
+        decision_paths["reviewer-a"],
+        decision_paths["reviewer-b"],
+        adjudication,
+        third_path,
+        final,
+    )
+    verify_bundle(final)
+    assert final_report["independent_gold_complete"] is True
+    assert final_report["blind_third_review_count"] == 1
+    assert final_report["formal_role_assignment_frozen"] is False
+    assert read_json(final / "qual-dev-gold.json")["cases"][0][
+        "expected_context"
+    ] == "absent"
+    receipt = read_json(final / "review-execution-receipt.json")
+    assert receipt["human_external_review"] is False
+    assert receipt["root_agent_made_semantic_decisions"] is False
+    assert read_json(final / "reviewer-c-decisions.json")["reviewer_slot"] == "reviewer-c"
 
 
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:

@@ -77,13 +77,14 @@ closed `relation_decisions` object while still requiring every semantic key and
 rejecting additional relation keys. Existing relation-bearing v4 requests are
 byte-semantically unchanged.
 
-## Remaining gate
+## Gate at packet preparation
 
-An external independent reviewer must complete both source-only gold files.
-Separately, the author-approved scientific parameters and power-qualified
-counts must determine all four prospective roles. Only then may one complete
-five-role `DataRoleManifest` and one integrated qualification plan be frozen.
-No `QUAL_ACCEPT` provider call is allowed before those conditions close.
+At packet preparation time, independent review of both source-only gold files
+was still missing. Separately, author-approved scientific parameters and
+power-qualified counts still had to determine all four prospective roles. Only
+then could one complete five-role `DataRoleManifest` and one integrated
+qualification plan be frozen. No `QUAL_ACCEPT` provider call is allowed before
+those remaining conditions close.
 
 The subsequent final-v5 capacity reconciliation is recorded in
 `2026-09-02-role-power-budget-decision-support.md`. Under the current 21-CWE
@@ -92,3 +93,26 @@ which is fewer than the rounded 170-unit conservative Pair power candidate
 before any disjoint Discovery allocation. The role manifest therefore also
 requires an explicit capacity route; this candidate bundle alone does not make
 the study population-ready.
+
+## Independent subagent review closure
+
+The author subsequently approved an isolated agent-review interpretation of
+the independence requirement. Two fresh Codex collaboration subagents, started
+without prior turns, independently labelled all 56 source-only cases. They
+agreed on 52 task-context coordinates. A third fresh subagent received only the
+four disagreeing source cases, without either prior decision, and supplied the
+four terminal blind decisions. The root agent performed schema validation,
+hashing, and deterministic merge only; it made no semantic decision.
+
+The tracked closure is
+`data/method/qwen37flash-qualification-source-gold-v1`, with manifest SHA-256
+`4854c62c2651001e144b79d547cdac489e9b84d2e84a53ffe277cec19bc5579f`.
+It archives both complete reviews, the source-only third-review packet, the
+third decisions, qualification-ready gold, and an execution receipt. The
+receipt truthfully records `human_external_review=false`: this is independent
+blind subagent gold, not external human-expert gold. No provider call, arm,
+Oracle/Judge result, or experimental outcome entered the review.
+
+This closes the independent source-gold gate only. The candidate reservations
+remain non-formal, `QUAL_ACCEPT` remains unopened, and the five-role manifest is
+still blocked by the power/capacity decision described above.
