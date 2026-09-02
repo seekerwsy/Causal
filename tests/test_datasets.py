@@ -14,6 +14,7 @@ from prompt_mechanism_study.datasets import (
     prepare_dedup_candidates,
 )
 from prompt_mechanism_study.qualification_data import prepare_qualification_source_review
+from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.source_gold_review import (
     finalize_source_gold_review,
     prepare_source_gold_adjudication,
@@ -760,6 +761,76 @@ def test_prompt_contract_error_attribution_replays_archived_signals() -> None:
         assert archive_response["response_format_sha256"] == identity[
             "archive_case_response_format_sha256"
         ]
+
+
+@pytest.mark.reviewer
+def test_archive_boundary_stability_diagnostic_inputs_are_frozen() -> None:
+    root = Path(__file__).parents[1]
+    bundle = root / "data/method/archive-boundary-stability-diagnostic-v1-inputs"
+    verify_bundle(bundle)
+    tasks = read_json(bundle / "diagnostic-tasks.json")
+    selection = read_json(bundle / "diagnostic-selection.json")
+    design = read_json(bundle / "diagnostic-design.json")
+    assert selection["task_ids"] == [row["task_id"] for row in tasks]
+    assert selection["source_tasks_sha256"] == file_sha256(
+        bundle / "diagnostic-tasks.json"
+    )
+    assert design["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert design["scientific_claim_allowed"] is False
+    assert design["arms_or_outcomes_used"] is False
+    assert design["execution"] == {
+        "adaptive_retry_allowed": False,
+        "calls_per_run": 8,
+        "calls_per_task": 2,
+        "maximum_provider_calls": 24,
+        "replicate_runs": 3,
+        "run_order": ["replicate-1", "replicate-2", "replicate-3"],
+        "task_order": "diagnostic-selection order",
+        "task_workers": 1,
+        "within_task_order": "proposer_then_reviewer",
+    }
+    variants = {row["task_id"]: row for row in design["variants"]}
+    assert set(variants) == set(selection["task_ids"])
+    for task in tasks:
+        assert variants[task["task_id"]]["prompt_content_sha256"] == content_hash(
+            task["prompt"]
+        )
+
+    original = next(row for row in tasks if row["diagnostic_variant_id"] == "original_ambiguous")
+    prior_tasks = read_json(
+        root / "data/method/qwen37flash-prospective-qual-dev-v5-inputs/canary-tasks.json"
+    )
+    prior_archive = next(row for row in prior_tasks if row["cwe"] == "CWE-22")
+    assert original["prompt"] == prior_archive["prompt"]
+    external_untrusted = next(
+        row for row in tasks if row["diagnostic_variant_id"] == "explicit_external_untrusted"
+    )
+    external_trusted = next(
+        row for row in tasks if row["diagnostic_variant_id"] == "explicit_external_trusted"
+    )
+    internal_trusted = next(
+        row for row in tasks if row["diagnostic_variant_id"] == "explicit_internal_trusted"
+    )
+    assert "externally supplied and must be treated as untrusted" in external_untrusted["prompt"]
+    assert "externally supplied" in external_trusted["prompt"]
+    assert "do not treat the members as untrusted" in external_trusted["prompt"]
+    assert "generated internally from fixed trusted files" in internal_trusted["prompt"]
+
+    diagnostic_evaluators = [
+        read_json(
+            root
+            / f"data/method/prompt-contract-{role}-qwen37flash-archive-boundary-diagnostic-v1.json"
+        )
+        for role in ("proposer", "reviewer")
+    ]
+    v5_evaluators = [
+        read_json(root / f"data/method/prompt-contract-{role}-qwen37flash-v5.json")
+        for role in ("proposer", "reviewer")
+    ]
+    for diagnostic, v5 in zip(diagnostic_evaluators, v5_evaluators, strict=True):
+        assert {
+            key: value for key, value in diagnostic.items() if key != "candidate_id"
+        } == {key: value for key, value in v5.items() if key != "candidate_id"}
 
 
 @pytest.mark.reviewer
