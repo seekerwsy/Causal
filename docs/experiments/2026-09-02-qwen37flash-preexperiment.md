@@ -149,3 +149,19 @@ attempt and budget ledger is
 `data/method/qwen37flash-prospective-qual-dev-execution-ledger-v1.json`. The
 repository remains `SPECIFIED_DRAFT`, and formal provider execution remains
 disabled.
+
+## Archive-boundary diagnostic closure
+
+A separately frozen three-replicate archive-boundary diagnostic was then opened
+to distinguish ontology ambiguity from model test-retest instability. Its first
+replicate used all eight scheduled calls, but the explicit-external-untrusted
+positive anchor failed post-provider contract validation: both roles classified
+the target semantic as present while adding the out-of-catalog `untrusted`
+attribute. The frozen fail-stop rule therefore closed the diagnostic as
+`FAILED_CLOSED_INCOMPLETE_EXECUTION` before replicates 2 and 3.
+
+This adds 8 calls and CNY `0.039328` conservative spend. Cumulative preexperiment
+spend is CNY `1.420724`, with at least CNY `98.579276` remaining and zero
+`QUAL_ACCEPT` calls. The partial raw states do not establish stability or authorize
+a method change. Full details are in the
+[archive-boundary diagnostic record](2026-09-02-archive-boundary-stability-diagnostic.md).

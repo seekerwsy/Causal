@@ -588,10 +588,21 @@ def test_prospective_qual_dev_failure_archive_and_budget_close() -> None:
     attempt_cost = sum(
         attempt["actual_conservative_cost_microunits"] for attempt in ledger["attempts"]
     )
+    diagnostic_calls = sum(
+        attempt["actual_provider_calls"] for attempt in ledger["diagnostic_attempts"]
+    )
+    diagnostic_cost = sum(
+        attempt["actual_conservative_cost_microunits"]
+        for attempt in ledger["diagnostic_attempts"]
+    )
     assert attempt_calls == ledger["prospective_actual_provider_calls"]
     assert attempt_cost == ledger["prospective_conservative_spend_microunits"]
+    assert diagnostic_calls == ledger["diagnostic_actual_provider_calls"]
+    assert diagnostic_cost == ledger["diagnostic_conservative_spend_microunits"]
     assert ledger["conservative_cumulative_spend_microunits"] == (
-        ledger["pre_prospective_conservative_spend_microunits"] + attempt_cost
+        ledger["pre_prospective_conservative_spend_microunits"]
+        + attempt_cost
+        + diagnostic_cost
     )
     assert ledger["minimum_remaining_microunits"] == (
         ledger["authorized_total_microunits"]
@@ -872,6 +883,104 @@ def test_archive_boundary_stability_diagnostic_plan_closes_budget() -> None:
         accounting["authorized_total_microunits"]
         - accounting["cumulative_maximum_after_plan_microunits"]
     )
+
+
+@pytest.mark.reviewer
+def test_archive_boundary_stability_diagnostic_failed_closed_replay() -> None:
+    root = Path(__file__).parents[1]
+    archive = root / "data/method/archive-boundary-stability-diagnostic-v1-evidence"
+    index = read_json(archive / "archive-index.json")
+    assert index["status"] == "FAILED_CLOSED_INCOMPLETE_EXECUTION"
+    assert index["formal_use_authorized"] is False
+    assert index["qualification_accept_consumed"] is False
+    assert index["scientific_claim_allowed"] is False
+    assert len(index["bundles"]) == 1
+    bundle_root = archive / index["bundles"][0]["path"]
+    verify_bundle(bundle_root)
+    assert file_sha256(bundle_root / "manifest.json") == index["bundles"][0][
+        "manifest_sha256"
+    ]
+
+    result = read_json(
+        root / "data/method/archive-boundary-stability-diagnostic-v1-result.json"
+    )
+    plan = read_json(root / result["plan_path"])
+    design = read_json(root / plan["inputs"]["diagnostic_design"]["path"])
+    report = read_json(bundle_root / "report.json")
+    requests = {row["task_id"]: row for row in read_json(bundle_root / "requests.json")}
+    responses = {
+        row["task_id"]: row for row in read_json(bundle_root / "responses.json")
+    }
+    variants = {row["task_id"]: row for row in design["variants"]}
+
+    assert result["status"] == "FAILED_CLOSED_INCOMPLETE_EXECUTION"
+    assert result["decision"]["ordered_rule_index"] == 1
+    assert result["decision"]["terminal_result"] == (
+        "FAILED_CLOSED_INCOMPLETE_EXECUTION"
+    )
+    assert result["formal_use_authorized"] is False
+    assert result["qualification_accept_consumed"] is False
+    assert result["scientific_claim_allowed"] is False
+    assert result["plan_sha256"] == file_sha256(root / result["plan_path"])
+    assert result["evidence"]["replicate_1_manifest_sha256"] == file_sha256(
+        bundle_root / "manifest.json"
+    )
+    assert result["evidence"]["replicate_1_report_sha256"] == file_sha256(
+        bundle_root / "report.json"
+    )
+
+    # Independently apply the first frozen rule instead of trusting the receipt.
+    complete_replicates = int(
+        report["status"] == "PROMPT_CONTRACT_EXTRACTION_COMPLETE"
+        and report["provider_calls"] == design["execution"]["calls_per_run"]
+        and report["contracts"] == len(design["variants"])
+        and report["graphs"] == len(design["variants"])
+        and report["failed_task_unit_count"] == 0
+    )
+    assert complete_replicates == 0
+    independently_replayed_result = (
+        "FAILED_CLOSED_INCOMPLETE_EXECUTION"
+        if complete_replicates != design["execution"]["replicate_runs"]
+        else "LATER_ORDERED_RULE_REQUIRED"
+    )
+    assert independently_replayed_result == result["decision"]["terminal_result"]
+    assert report["provider_calls"] == result["budget"]["actual_provider_calls"] == 8
+    assert result["budget"]["actual_conservative_cost_microunits"] == 8 * 4916
+
+    raw_observations = []
+    target_semantic_id = design["decision_rule"]["target_semantic_id"]
+    for task_id, response in responses.items():
+        proposer = json.loads(response["proposer_response_text"])
+        reviewer = json.loads(response["reviewer_response_text"])
+        proposer_target = proposer["semantic_decisions"][target_semantic_id]
+        reviewer_target = reviewer["semantic_decisions"][target_semantic_id]
+        raw_observations.append(
+            {
+                "task_id": task_id,
+                "variant_id": variants[task_id]["variant_id"],
+                "proposer_state": proposer_target["state"],
+                "proposer_attributes": proposer_target["attributes"],
+                "reviewer_state": reviewer_target["state"],
+                "reviewer_attributes": reviewer_target["attributes"],
+            }
+        )
+    assert sorted(raw_observations, key=lambda row: row["task_id"]) == sorted(
+        result["partial_raw_observations"], key=lambda row: row["task_id"]
+    )
+
+    failed = report["failed_task_units"]
+    assert len(failed) == 1
+    failed_task_id = failed[0]["task_id"]
+    assert failed_task_id == result["failure_attribution"]["failed_task_id"]
+    assert failed[0]["error_message"] == (
+        result["failure_attribution"]["error_message"]
+    )
+    allowed = set(requests[failed_task_id]["allowed_attributes"])
+    failed_response = responses[failed_task_id]
+    for role in ("proposer", "reviewer"):
+        parsed = json.loads(failed_response[f"{role}_response_text"])
+        attributes = set(parsed["semantic_decisions"][target_semantic_id]["attributes"])
+        assert attributes - allowed == {"untrusted"}
 
 
 @pytest.mark.reviewer
