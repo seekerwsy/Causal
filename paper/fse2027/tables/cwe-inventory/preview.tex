@@ -1,0 +1,12 @@
+% Standalone asset preview. The manuscript entry point remains main.tex.
+% Compile from the paper project root, or select this file in Overleaf.
+\documentclass[acmsmall,screen,review,anonymous]{acmart}
+\settopmatter{printacmref=false}
+\setcopyright{none}
+\usepackage{booktabs,multirow,tabularx,longtable}
+\begin{document}
+\pagestyle{plain}
+\input{tables/cwe-inventory/cwe-main.tex}
+\clearpage
+\input{tables/cwe-inventory/cwe-appendix.tex}
+\end{document}

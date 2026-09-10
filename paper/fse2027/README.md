@@ -16,6 +16,9 @@ This directory contains the FSE 2027 paper draft for Prompt Mechanism Study.
 - `sections/`: one file per top-level manuscript section, imported by
   `main.tex` in reading order.
 - `references.bib`: bibliography shared by the section files.
+- `tables/cwe-inventory/`: the selected 20-CWE table and full 117-label
+  appendix, stored for later use and **not included in the manuscript**.
+  See its [preview and provenance instructions](tables/cwe-inventory/README.md).
 
 ## Compile
 
@@ -27,6 +30,12 @@ latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out main.tex
 
 The generated manuscript is `out/main.pdf`. The source can also be uploaded to
 Overleaf and compiled with `main.tex` as the main file.
+
+The connected Overleaf Git project is
+`https://git.overleaf.com/6a8c0a50bbdf197f5de0d0ae`. Its separate local checkout
+is under `paper/tmp/overleaf-sync/`; the research repository's `origin` points
+to GitHub. Fetch the Overleaf project's latest revision before syncing, and
+preserve any uncommitted manuscript edits in an existing sync checkout.
 
 ## Current Scope
 
