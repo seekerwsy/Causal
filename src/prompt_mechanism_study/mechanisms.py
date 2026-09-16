@@ -11,6 +11,7 @@ from typing import Any
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     FeatureScope,
+    requirement_owned_nodes,
     PromptTSGError,
     QueryState,
     feature_state,
@@ -190,6 +191,7 @@ def bind_task_hypothesis(
             feature_state(graph, feature, target_operation_node_id).value
             for feature in factor_feature_ids
         )
+    target_requirements = requirement_owned_nodes(graph, target_requirements)
     nodes |= target_requirements
     if factor_scopes:
         edges |= {
@@ -296,17 +298,27 @@ def render_task_hypothesis(
             if len(requirements) != 1:
                 raise MechanismRegistryError("removal needs one identifiable source requirement")
             node = requirements[0]
+            owned = requirement_owned_nodes(graph, {node.node_id})
             allowed_targets = {operation.node_id, *scope.subject_node_ids}
             if any(edge.source_id == node.node_id and edge.target_id not in allowed_targets for edge in graph.edges):
                 raise MechanismRegistryError("removal would change a requirement on another object")
             if binding.factor_scopes and any(item.feature_id == feature and item.scope != scope
                     and node.node_id in item.requirement_node_ids for item in graph.scoped_feature_assessments):
                 raise MechanismRegistryError("removal would change a requirement assessed at another scope; needs a reviewed neutral rewrite")
-            if any(other.node_id not in {node.node_id} and other.semantic_id != "task.root"
+            if any(other.node_id not in owned and other.semantic_id != "task.root"
                    and max(node.evidence_start, other.evidence_start) < min(node.evidence_end, other.evidence_end)
                    for other in graph.nodes):
                 raise MechanismRegistryError("removal overlaps non-target source evidence")
-            removals.append((node.evidence_start, node.evidence_end))
+            start, end = node.evidence_start, node.evidence_end
+            # Removing the final/initial policy also removes its now-unused
+            # separator, so the resulting source remains a valid trimmed input.
+            if end == len(prompt):
+                while start and prompt[start - 1].isspace():
+                    start -= 1
+            if start == 0:
+                while end < len(prompt) and prompt[end].isspace():
+                    end += 1
+            removals.append((start, end))
     variant = prompt
     for start, end in sorted(set(removals), reverse=True):
         variant = variant[:start] + variant[end:]
@@ -314,7 +326,8 @@ def render_task_hypothesis(
         for operation_id in dict.fromkeys(key for key, _ in instructions):
             operation = by_id[operation_id]
             operation_text = prompt[operation.evidence_start:operation.evidence_end]
-            variant += "\n\nFor the operation described by " + json.dumps(operation_text, ensure_ascii=False) + ":\n"
+            variant += ("\n\nFor the runtime task as a whole:\n" if operation.node_type == "task" else
+                        "\n\nFor the operation described by " + json.dumps(operation_text, ensure_ascii=False) + ":\n")
             variant += "\n".join("- " + text for key, text in instructions if key == operation_id)
     result = {"binding_id": binding.binding_id, "task_id": binding.task_id, "policy_id": binding.policy_id,
             "source_tsg_id": binding.source_tsg_id, "target_operation_node_id": binding.target_operation_node_id,
@@ -387,7 +400,7 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
         for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)
         for key in scoped_feature_assessment(graph, feature, scope).requirement_node_ids
     }
-    preserved = set(old) - targeted_requirements
+    preserved = set(old) - requirement_owned_nodes(graph, targeted_requirements)
     if (
         not preserved <= set(node_map)
         or set(node_map) - set(old)
@@ -420,9 +433,24 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     if source_edges != target_edges:
         raise MechanismRegistryError("neutral rewrite changed non-target relation structure")
 
+    old_root = next(node.node_id for node in graph.nodes if node.semantic_id == "task.root")
+    new_root = next(node.node_id for node in target.nodes if node.semantic_id == "task.root")
+    boundary_map = {**node_map, old_root: new_root}
+    old_structures = {(node_map[key], kind, tuple(sorted(node_map[child] for child in members)))
+                      for key, kind, members in graph.requirement_structures
+                      if key in preserved and set(members) <= preserved}
+    new_structures = {(key, kind, members) for key, kind, members in target.requirement_structures
+                      if key in retained and set(members) <= retained}
+    old_scopes = {(node_map[key], kind, tuple(sorted(boundary_map[b] for b in boundaries)), target_class)
+                  for key, kind, boundaries, target_class in graph.requirement_scopes if key in preserved}
+    new_scopes = {(key, kind, boundaries, target_class)
+                  for key, kind, boundaries, target_class in target.requirement_scopes if key in retained}
+    if old_structures != new_structures or old_scopes != new_scopes:
+        raise MechanismRegistryError("neutral rewrite changed non-target composition or scope")
+
     def mapped_scope(scope):
         return FeatureScope(
-            node_map[scope.operation_node_id],
+            boundary_map[scope.operation_node_id],
             tuple(sorted(node_map[key] for key in scope.subject_node_ids)),
             tuple(sorted(node_map[key] for key in scope.condition_node_ids)),
         )
@@ -456,7 +484,7 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     covered = (
         retained
         | set(neutral_nodes.values())
-        | {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids}
+        | requirement_owned_nodes(target, {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids})
     )
     if set(new) - covered:
         raise MechanismRegistryError("neutral rewrite introduces an unaccounted source node")

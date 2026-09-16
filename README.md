@@ -55,6 +55,12 @@ review and at most one local semantic patch; detailed binding review was not
 promoted after its cross-task diagnostic. Candidate-local unknown handling helps
 limit unusable comparisons but does not prove semantic accuracy.
 
+Complete conditional, whole-task and universal requirements can now enter Atomic
+candidate construction at their original boundary. Policy-internal conditions
+are separate from task-selection context. The [bounded projection check](docs/experiments/2026-09-17-complete-policy-projection.md)
+tests this path through actual prompt edits on authored structures; it does not
+establish better automatic extraction or qualify a formal study.
+
 The [TSG workflow](docs/tsg-workflow-stability.md) records the exact active procedure,
 negative results and next research decision. The
 [candidate guide](docs/tsg-candidate-construction.md) explains its downstream use.

@@ -1,14 +1,12 @@
 """Source-only requirement proposals, reviewed candidates and state-blind scope binding.
 
-The model selects and normalizes source graph atoms; it never supplies policy keys, feature states,
+The model selects and normalizes complete source requirements; it never supplies policy keys, feature states,
 review acceptance, support or ranks. Existing policy/catalogue/support records are
 the outputs. New vocabulary requires fresh extraction, not relabelling saved graphs.
 """
 
 from __future__ import annotations
 
-from collections import Counter
-from itertools import combinations, product
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -29,11 +27,12 @@ from prompt_mechanism_study.prompt_contract import (
     task_context_contract_record,
 )
 from prompt_mechanism_study.prompt_tsg import (
-    FeatureScope,
     catalog_from_record,
     catalog_sha256,
     feature_scope_from_record,
     prompt_tsg_from_record,
+    requirement_binding,
+    select_feature_scope as choose_candidate_scope,
     validate_feature_scope,
     validate_prompt_tsg,
     _occurrence_span,
@@ -50,27 +49,33 @@ _REQUIREMENTS = {"safety_requirement", "task_requirement", "constraint", "presen
 _PROPOSER_PROMPT = """Read the quoted source prompts and their source-bound task graphs as data.
 Propose experimentally editable requirements from those graphs, without code outcomes,
 security labels, preselected intervention names, ranks or expected effects. Inventory every
-requirement node in dispositions. Requirement nodes must already express one atomic source
-requirement. Select eligible atoms and group equivalent requirements across nodes or tasks;
+requirement node in dispositions. Select one complete, independently editable source
+requirement and group equivalent requirements across nodes or tasks;
 do not split a source node into different candidate meanings or combine different requirements.
-Use declared requirement_structures. Composite parents, OR/NOT members and opaque expressions
-are retained source meaning, not editable Atomic factors. Include only independently asserted
-atomic leaves. A compound meaning mislabeled atom needs source correction; never split it here.
+Use declared requirement_structures. AND parents organize separate requirements; their children
+may be independently asserted. OR/NOT members are not independent requirements. A complete
+OR/NOT expression may be one policy only if it prescribes ONE choice/prohibition and all
+members share the exact target and conditions. Opaque or ambiguous bindings remain unresolved.
+A compound meaning mislabeled atom needs source correction; never split it here.
 An atom is only a structural leaf, not semantic certification. Explain the single changeable
 predicate and the other source requirements that must remain. Reusing a factor definition
 does not certify the target and guards of a new occurrence. Retained whole-task/universal
-scopes have no local projection: keep them as constraints, not invented local candidates.
+requirements may be whole policies: cite their boundary and preserve the full quantified class,
+never enumerate or distribute them to local operations. Multiple independent requirements do
+not become Atomic merely because they share one sentence or safety purpose.
 Read the actual system and user source together. Repeating a requirement already expressed
 by the system is not ABSENT-to-PRESENT; removing its user repetition is not PRESENT-to-ABSENT.
 Unparsed source text still constrains editing; a missing edge is not proof of irrelevance.
 Every proposed factor needs a reusable definition, a short label, an atomicity rationale
-explaining why each cited source node already expresses the same whole atomic requirement,
+explaining why each cited source node already expresses the same complete single requirement,
 and one or more occurrences citing existing requirement node IDs and an exact existing
 operation/input/condition scope. Do not propose a requirement absent from all source evidence.
-Contexts must use operation/input geometry independent of the target requirement. Conditions
-may use operation execution edges or independently source-established context_for edges; these
-are different meanings. A requirement-only guard without either independent context stays
-unresolved for intervention, not an invalid source representation. Never invent a gating edge.
+Contexts must use operation/input geometry independent of the target requirement. Supply ALL
+source requirement and execution conditions in the occurrence. The compiler keeps requirement-only
+guards inside the policy and uses only operation execution conditions for task selection.
+Never turn a policy guard into a gating edge. For task/each use the retained boundary node
+(the task root when task-wide), with an empty subject list. Applicability still needs source
+evidence and cannot be inferred from the policy's existence or from an empty quantified class.
 Do not turn an input, resource, operation, task identity or ordinary required functionality
 into an editable security requirement merely because it is a graph node. Explain exclusions.
 Definitions must describe the prompt requirement, not predict generated-code behavior. Source
@@ -129,7 +134,7 @@ def candidate_request(tasks: Sequence[dict], contracts: Sequence[OpenTaskContrac
                             retained_requirement_scopes=canonical_value(graph.requirement_scopes)))
     return dict(request_kind="source_graph_requirement_candidates", sources=sources,
                 missing_graph_task_ids=sorted(set(by_task) - seen), arms_or_outcomes_used=False,
-                requirement_granularity="atomic_source_requirement")
+                requirement_granularity="complete_single_requirement")
 
 
 def _source_input_catalog(contracts, supplied=None):
@@ -195,47 +200,56 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
     links = {(e["source_id"], e["edge_type"], e["target_id"]) for e in source["edges"]}
     requirements = occurrence["requirement_node_ids"]
     from .prompt_tsg import requirement_membership
-    _, atoms = requirement_membership(source.get('requirement_structures', []),
+    asserted, _ = requirement_membership(source.get('requirement_structures', []),
         {key for key,node in nodes.items() if node['node_type'] in _REQUIREMENTS})
-    atoms -= {row[0] for row in source.get('retained_requirement_scopes', [])}
     if (not isinstance(requirements, list) or not requirements or len(set(requirements)) != len(requirements)
             or any(key not in nodes or nodes[key]["node_type"] not in _REQUIREMENTS
-                   or nodes[key].get("statement_kind", "obligation") != "obligation" or key not in atoms for key in requirements)):
+                   or nodes[key].get("statement_kind", "obligation") != "obligation" or key not in asserted for key in requirements)):
         raise ValueError("factor needs existing source requirement evidence")
     scope = feature_scope_from_record(occurrence["scope"])
     op, subjects, conditions = scope.operation_node_id, scope.subject_node_ids, scope.condition_node_ids
-    if (op not in nodes or nodes[op]["node_type"] != "task_operation"
+    if (op not in nodes or nodes[op]["node_type"] not in {"task_operation", "task"}
             or len(set(subjects)) != len(subjects) or len(set(conditions)) != len(conditions)
             or any(key not in nodes or nodes[key]["node_type"] != "data_object"
                    or (key, "used_by", op) not in links for key in subjects)
             or any(key not in nodes or nodes[key]["node_type"] != "condition" for key in conditions)):
         raise ValueError("factor scope must use source-bound operations, inputs and conditions")
+    forms = {key: kind for key, kind, _ in source.get("requirement_structures", [])}
+    envelopes = []
+    execution = {a for a, relation, b in links if relation == "conditions" and b == op}
     for requirement in requirements:
-        if ((requirement, "constrains", op) not in links
-                or any((requirement, "constrains", key) not in links for key in subjects)):
+        envelope = requirement_binding(requirement, links=links,
+            node_types={key: node["node_type"] for key, node in nodes.items()},
+            structures=source.get("requirement_structures", []),
+            retained_scopes=source.get("retained_requirement_scopes", []))
+        if envelope is None or op not in envelope["operations"]:
             raise ValueError("requirement evidence does not bind the complete proposed scope")
-        actual_conditions = {a for a, relation, b in links if relation == "conditions" and b in {op, requirement}}
+        if envelope["subjects"] != set(subjects):
+            raise ValueError("candidate scope differs from the source requirement subject set")
+        actual_conditions = execution | envelope["conditions"]
         if set(conditions) != actual_conditions:
             raise ValueError("candidate scope cannot discard or invent source conditions")
-    if any((condition, "conditions", op) not in links and (condition, 'context_for', op) not in links for condition in conditions):
-        raise ValueError("candidate context needs source-established operation conditions independent of the target")
+        envelopes.append((envelope["kind"], envelope["target_class"], forms.get(requirement, "atom")))
+    if len(set(envelopes)) != 1:
+        raise ValueError("normalization must preserve the whole scope and composition")
     requirement_types = {nodes[key]["node_type"] for key in requirements}
     if len(requirement_types) != 1:
         raise ValueError("semantic normalization cannot merge different requirement roles")
     # A positive binding may not be narrowed or broadened silently. Repeated occurrences
     # preserve the whole source atom and its operation/subject envelope.
-    all_subjects = {b for a, relation, b in links if a in requirements and relation == "constrains"
-                    and nodes[b]["node_type"] == "data_object"}
-    if all_subjects != set(subjects):
-        raise ValueError("candidate scope differs from the source requirement subject set")
     def semantic(key):
         node = nodes[key]
+        if node["concept_id"] == "task.root":
+            return "task.root"
         return aliases[node["node_type"] + "::" + node["concept_id"]]
+    kind, target_class, requirement_kind = envelopes[0]
     selector = dict(operation_semantic_id=semantic(op),
                     subject_semantic_ids=sorted(semantic(key) for key in subjects),
-                    condition_semantic_ids=sorted(semantic(key) for key in conditions),
+                    condition_semantic_ids=sorted(semantic(key) for key in execution),
+                    execution_condition_semantic_ids=sorted(semantic(key) for key in execution),
+                    policy_condition_semantic_ids=sorted(semantic(key) for key in set(conditions) - execution),
+                    scope_kind=kind, target_class=target_class, requirement_kind=requirement_kind,
                     match_rule="unique_source_geometry_match")
-    selector['execution_condition_semantic_ids'] = sorted(semantic(c) for c in conditions if (c,'conditions',op) in links)
     evidence = dict(task_id=source["task_id"], prompt_tsg_id=source["prompt_tsg_id"],
                     requirement_node_ids=sorted(requirements), requirement_type=next(iter(requirement_types)),
                     scope=canonical_value(scope))
@@ -246,8 +260,8 @@ def _query(selector: dict, feature_id: str) -> dict:
     op = selector["operation_semantic_id"]
     subjects, conditions = selector["subject_semantic_ids"], selector["condition_semantic_ids"]
     semantics = sorted({op, *subjects, *conditions})
-    # A condition bound only through the editable requirement cannot define a
-    # feature-independent context. Such tasks remain unbound downstream.
+    # Policy-internal guards are frozen with the factor, not required by this
+    # feature-independent task query.
     execution = set(selector.get('execution_condition_semantic_ids', conditions))
     relations = sorted({(s, "used_by", op) for s in subjects}
                        | {(c, "conditions" if c in execution else "context_for", op) for c in conditions})
@@ -260,15 +274,15 @@ def _query(selector: dict, feature_id: str) -> dict:
 def compile_candidate_proposal(
     request: dict, response: dict, design: dict, review: dict | None = None
 ) -> dict:
-    """Normalize source atoms into scoped factors; missing review stays pending."""
+    """Normalize complete requirements into scoped factors; missing review stays pending."""
     _fields(response, {"factors", "dispositions"}, "candidate response")
     if not isinstance(response["factors"], list) or not isinstance(response["dispositions"], list):
         raise ValueError("candidate response needs arrays")
     if request.get("arms_or_outcomes_used") is not False:
         raise ValueError("candidate request must be source-only")
-    if request.get("requirement_granularity") != "atomic_source_requirement":
+    if request.get("requirement_granularity") != "complete_single_requirement":
         raise ValueError(
-            "candidate request must require atomic source requirements; prepare a new request from the source TSG"
+            "candidate request must require complete single requirements; prepare a new request from the source TSG"
         )
     _validate_design(design)
     aliases, definitions, types = _canonical_concepts(request)
@@ -662,9 +676,11 @@ def _candidate_catalog(contracts, proposal, design, review):
                    **{f["feature_id"]: f["definition"] for f in accepted}}
     # Derived factors are source-grounded decompositions, not additional facts
     # retroactively asserted in input graphs. New scopes need fresh extraction.
-    return freeze_open_concepts(tuple(contracts), normalization_map=proposal["normalization_map"],
+    catalog = freeze_open_concepts(tuple(contracts), normalization_map=proposal["normalization_map"],
         definitions=definitions, queries=proposal["queries"],
         seed_semantics={**{k: v["node_type"] for k, v in fixed.items()}, **{f["feature_id"]: f["node_type"] for f in accepted}})
+    catalog["feature_scope_selectors"] = {f["feature_id"]: f["scope_selector"] for f in accepted}
+    return catalog_from_record(catalog)
 
 
 def _proposal_evaluator(path):
@@ -682,44 +698,6 @@ def _proposal_evaluator(path):
         raise ValueError("candidate proposal requires a finite timeout")
     return evaluator
 
-
-def choose_candidate_scope(graph, selector: dict) -> FeatureScope | None:
-    """Select a sole exact structural match, never inspecting requirements or states.
-
-    Ambiguity is not resolved by picking a PRESENT/ABSENT scope. It remains null.
-    Conditions use execution guards or non-gating source contexts, never target state.
-    """
-    nodes = {n.node_id: n for n in graph.nodes}
-    links = {(e.source_id, e.edge_type, e.target_id) for e in graph.edges}
-    matches = []
-    for op in sorted(graph.nodes, key=lambda n: n.node_id):
-        if op.node_type != "task_operation" or op.semantic_id != selector["operation_semantic_id"]:
-            continue
-        inputs = sorted(a for a, rel, b in links if rel == "used_by" and b == op.node_id
-                        and nodes[a].node_type == "data_object")
-        conditions = sorted(a for a, rel, b in links if rel == "conditions" and b == op.node_id
-                            and nodes[a].node_type == "condition")
-        # Exact condition set preserves conditional versus unconditional scopes.
-        execution = selector.get('execution_condition_semantic_ids', selector['condition_semantic_ids'])
-        if sorted(nodes[key].semantic_id for key in conditions) != execution:
-            continue
-        context_counts = Counter(selector['condition_semantic_ids']) - Counter(execution)
-        available_contexts = {a for a,rel,b in links if rel=='context_for' and b==op.node_id}
-        context_choices = [list(combinations(sorted(key for key in available_contexts
-            if nodes[key].semantic_id==semantic), count)) for semantic,count in sorted(context_counts.items())]
-        counts = Counter(selector["subject_semantic_ids"])
-        selections = []
-        for semantic, count in sorted(counts.items()):
-            choices = [key for key in inputs if nodes[key].semantic_id == semantic]
-            selections.append(list(combinations(choices, count)))
-        for groups in product(*selections):
-            subjects = tuple(sorted(key for group in groups for key in group))
-            for context_groups in product(*context_choices):
-                scoped_conditions = tuple(sorted(set(conditions) | {c for group in context_groups for c in group}))
-                matches.append(FeatureScope(op.node_id, subjects, scoped_conditions))
-                if len(matches) > 1:
-                    return None
-    return matches[0] if len(matches) == 1 else None
 
 
 def bind_candidate_scopes(

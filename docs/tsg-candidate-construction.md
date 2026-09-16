@@ -10,7 +10,7 @@ The chain is:
 ```text
 source records: requirements include composition, guards and target scope
   -> exposed development source graphs
-  -> source-only LLM selection and normalization of equivalent atoms
+  -> source-only selection and normalization of complete single requirements
   -> semantic review of the generated factors
   -> existing concept freeze, generated Atomic policy records
   -> fresh extraction using that catalogue
@@ -24,12 +24,12 @@ nodes. The [current TSG workflow](tsg-workflow-stability.md) specifies the bound
 review/repair policy and its development evidence. Historical repair comparisons
 retain their original outcomes.
 
-A structural `atom` is necessary source geometry, not a semantic or editability
-certificate. Existing factor review must justify the one changed predicate and
+A structural `atom` is neither sufficient nor universally necessary for eligibility.
+Existing factor review must justify the one changed requirement and
 the non-target meanings retained. Whole-task and explicitly universal requirements
 are preserved in `retained_requirement_scopes`; no finite local instance list is
-invented from them. Such unprojected requirements are not local Atomic candidates,
-and cannot establish local absence. This is a coverage limit, not source invalidity.
+invented from them. They may be whole policies at their task/function boundary;
+they do not imply a local instance policy or a local absence judgment.
 All editing reads the complete effective system/user input, including unresolved
 requirements. A requirement still expressed by the system cannot become absent by
 deleting its user repetition. Generic template wording is not automatically
@@ -53,8 +53,9 @@ intervention names are not model inputs. Missing graphs remain listed.
 The model inventories every requirement node as `included`, `not_actionable` or
 `unresolved`, with a reason. For each proposed factor it supplies a definition,
 atomicity rationale and source occurrences. An occurrence names existing
-requirement nodes and an exact operation/input/condition scope. Each source
-requirement used by a factor must already be an asserted atomic obligation.
+requirement nodes and an exact boundary/input/condition scope. Task-wide policies
+name the task root; universal policies name their retained task/function boundary,
+never a hand-picked instance. Each factor must be an asserted complete obligation.
 Construction records reliable atoms and finite composition, including shared guards.
 Atomicity alone does not establish independent editability. Source citations may overlap. Conditions, negations,
 quantifiers and thresholds must retain their full meaning, rather than being
@@ -66,15 +67,17 @@ force are not eligible editable requirements, even when represented as constrain
 nodes. The constructor enforces this distinction, rather than relying on the
 proposal model to exclude them.
 
-A correctly declared composite is retained with `not_actionable` or `unresolved`
-and a reason. The constructor follows conjunction only to already declared atoms;
-alternative and compound-negation members are not independent obligations. A wrongly
+A conjunction parent remains an organizer of separate requirements. A whole OR/NOT
+expression can be considered only when its members share one exact binding and a
+review confirms one choice/prohibition policy. Opaque expressions and compounds
+with differing member bindings remain unresolved, not forced into a simple leaf.
+Alternative and compound-negation members are not independent obligations. A wrongly
 declared atom requires source repair, never downstream splitting. One source node cannot be reused
 under different normalized requirement definitions. The same atomic meaning may
 still have multiple exact source scopes; those can produce different scoped factors.
 
-The compiler verifies requirement-to-operation and requirement-to-subject edges,
-input use, exact conditions and complete dispositions. It constructs stable
+The compiler verifies direct edges or retained boundary/class, input use, complete
+conditions and dispositions. It constructs stable
 feature IDs from the semantic definition, requirement role and structural scope
 selector. Identical definitions and scope signatures deduplicate; distinct scopes
 remain distinct factors. Source context concepts merge only when their type and
@@ -87,7 +90,7 @@ the truth of semantic atomicity or equivalence. `PENDING_SEMANTIC_REVIEW` produc
 policies. A review must bind the exact request and response and cover every
 generated factor, explicitly assessing source support, atomicity, normalization,
 context independence and preservation of task scope. `single_requirement` must
-confirm that every supporting source node already expresses one atomic requirement;
+confirm one independently editable requirement, including its conditions and scope;
 `normalization_valid` must confirm that the proposed definition preserves that
 whole meaning. A one-node/one-definition mapping alone cannot detect selecting
 only half of a composite requirement. Review can accept, reject or
@@ -105,14 +108,26 @@ generates both ADD and REMOVE `AtomicPolicyKey` records for each accepted factor
 Development exemplars can all express the requirement: the builder does not claim
 that any other task lacks it or that either operation has natural support.
 
-Scope selection uses only operation concepts, input-use edges, subject concepts
-and source-supported execution guards or non-gating `context_for` conditions. The
-selector records which conditions actually gate execution. There must be one exact structural match; multiple
-matches or missing structure return `null`, without choosing whichever scope has
-a convenient feature state. Requirement-only guards need independent source context
-before automatic binding. Otherwise the candidate remains unresolved while its
-source representation can still be correct; the compiler never turns that guard
-into an operation execution condition for convenience.
+New requests declare `requirement_granularity=complete_single_requirement`.
+Prepare a fresh request rather than changing the interpretation of a frozen one.
+The catalogue stores `feature_scope_selectors`: boundary kind, quantified class,
+expression kind, internal policy conditions and independent execution context.
+Scope selection reads only task/operation identity, input-use bindings and execution
+conditions. It never reads the requirement or its state; ambiguity returns `null`.
+Requirement-only guards remain part of the policy without becoming execution edges
+or additional task-selection prerequisites. They may disappear when that policy is
+removed. Positive expression requires their exact structural binding; a correct
+description cannot replace a missing guard. Applicability still requires source
+support for a meaningful, feasible comparison, not merely a root or an empty class.
+
+Fixed-scope assessment uses the same selector as binding. Its result remains one
+state per complete scoped policy; a binary variable does not erase the scope held
+in its identity. No extra covariates, FCI variables or interaction analysis are
+automatically introduced. A root-bound policy reads the whole effective input.
+Independent source review includes retained scope assertions. Reviewed edits check
+non-target composition and whole/universal scopes as well as ordinary edges.
+Only expression members and exclusively used guards inside the target citation can
+belong to its edit; shared context, operation and object evidence remains protected.
 
 After the vocabulary changes, extraction must run again under that exact frozen
 catalogue. Old graphs cannot be relabelled or have old unknowns converted into
@@ -185,113 +200,17 @@ remain the existing protocolization and measurement responsibilities.
 
 ## Development verification
 
-The candidate tests cover atomic source nodes, rejection of downstream splitting,
-equivalent occurrence grouping, the same atomic meaning at distinct scopes,
-source-only inputs, source/condition grounding, review boundaries, both operators,
-a complete file path into positivity, old-catalogue
-rejection, missing graphs, ambiguous bindings, empty universes and retained model
-failures. All responses are synthetic fixtures; they test implementation behavior
-without asserting model accuracy or natural candidate support.
+The active authored checks live in `tests/test_candidate_construction.py` and the
+existing source-inventory tests. They distinguish task/each/direct scope,
+policy-internal versus execution conditions, asserted whole alternatives versus
+unasserted members, and preserved versus changed non-target meanings. One complete
+policy test covers candidate construction, exact state assessment, both edit
+operators and independently authored post-edit graphs. Before/after predicates
+remain different factor definitions; the program does not prove open-text equivalence.
 
-`data/method/tsg-candidate-construction-development-v1/request` retains the predecessor zero-call
-request prepared from the already exposed seven-case v10 scope check. Six source
-graphs replayed and the seventh failed graph remains listed. Its original defects
-are not repaired or counted as qualification. Its earlier downstream-splitting
-instructions are not the active method. Current requests declare
-`requirement_granularity=atomic_source_requirement`; prepare a new request in a new
-directory to use the revised rule. Request preparation does not certify source
-atomicity. No natural model proposal, semantic
-acceptance, protected-task exposure or effect experiment was executed in this change.
-
-Before the atomic-source correction, the 2026-09-12 clean Python 3.12.13 verification passed all 311 selected reviewer
-tests (113 outside that selection), including the 17 candidate-construction tests.
-The seven-stage reviewer smoke and independent result verifier also passed,
-retaining all 80 simulated assignments. The exact environment, commands, input
-identities, implementation hashes and output locations are recorded in
-[`validation/report.json`](../data/method/tsg-candidate-construction-development-v1/validation/report.json).
-These results establish implementation behavior only, with zero provider calls.
-
-The atomic-source correction passed 315 selected reviewer tests (113 deselected)
-in the same clean Python 3.12.13 environment. The focused source-inventory and
-candidate checks passed all 31 cases, including two atomic requirements from one
-source clause, rejection of downstream splitting and preservation of the same
-atomic meaning across distinct operation scopes. The prior smoke package was
-independently reverified without changes. Exact commands and identities are in
-[`validation-atomic-source/report.json`](../data/method/tsg-candidate-construction-development-v1/validation-atomic-source/report.json).
-No real provider calls or new natural-task exposure occurred. Source atomicity
-remains a semantic review obligation; these fixture results do not qualify an LLM.
-
-The subsequent [program-ID/local-availability revision](experiments/2026-09-12-atomic-local-representation.md)
-removes first-response self-references and adds explicit source-impact decisions
-before fixed-scope assessment. It passed 320 reviewer tests and a six-case authored
-reference replay. The authorized real check is now closed: 13 calls produced six
-first inventories, three binding rejections and zero fully accepted cases. Only
-one of 20 reference scopes received a state answer; 19 remain unassessed. Candidate
-selection still cannot split source nodes, repair missing bindings or turn source
-impact declarations into independent qualification.
-
-The current [single-role revision](experiments/2026-09-12-single-role-representation.md)
-derives input/output incidence from one source-cited role declaration. Its new development
-reference retains all 20 expected scopes, explicitly allows four shorter equivalent anchors,
-and requires the return operation and selected-row binding without demanding an additional
-synonymous requirement node. Previous references and verdicts remain unchanged. Candidate
-selection still cannot repair missing or misclassified source atoms.
-The real six-case check is closed at 11 calls, zero full acceptance and 19 unassessed
-reference scopes. Role/incidence consistency holds, but source inventory omissions,
-semantic substitutions and corrections confined to prose remain. These results do
-not authorize natural candidate selection or another unbounded extraction iteration.
-
-## Existing-material feasibility after the atomic-source correction
-
-The 2026-09-12 local audit asks what the already exposed material can establish
-before another extraction run or a selector comparison. It reuses saved source
-reviews and inspects the predecessor candidate request; it does not assign new
-feature states, alter old verdicts or qualify old graphs under the new rule.
-The current implementation and test file hashes match the five hashes in
-`validation-atomic-source/report.json`. The saved 315-test result is therefore
-reused for those unchanged files; this audit did not rerun that suite.
-
-| Existing material | Observed evidence | Permitted use and remaining gap |
-| --- | --- | --- |
-| Thirty exposed natural task units in `open-tsg-effect-development-v1` | The selection record says “Previously source-supported ADD candidates”; fixed hash order was applied within 12 SQL, 10 command and 8 path selections. No outcomes or selector ranks were used. | Source and representation development. This selected sample cannot estimate natural two-state or Pair four-cell prevalence in the research population. Outcome blindness does not remove prior ADD-candidate selection. |
-| Original source review of those thirty units | Twelve ADD designs were supported under the old rules: 3 SQL, 8 command and 1 path. Six path requirements were already present; one command requirement was expressed or partial; ten operation contexts were unresolved; one task had a different endpoint. | Preserve all thirty identities and original judgments. These counts are historical source-review dispositions, not states of the new graph-derived factors, qualified support or evidence that the remaining eighteen sources are unusable. |
-| Three SQL source-reviewed reference graphs | The saved report explicitly records source review, zero provider calls and no automatic-extraction qualification. | Reference material for a new bounded source review. Check exact prepared inputs and atomic meanings before reuse; do not present these graphs as current automatic extraction or natural candidate discovery. |
-| Predecessor seven-case candidate request | Six graphs: two natural and four synthetic; one natural graph missing. Of 29 emitted requirement-type nodes, four are safety-requirement nodes, all in synthetic cases. | Inspect source defects and candidate plumbing. The emitted-node count does not establish completeness or absence of security requirements in the natural sources. Synthetic requirements cannot supply natural candidate/support evidence. The request lacks the current atomic-source declaration and remains archival. |
-| Closed three-case source-role check | Three actual first-inventory calls produced zero compiled graphs after invalid coverage references; raw-source review also found semantic omissions and substitutions. | Diagnose the exact first-response interface and semantic errors. This precedes the atomic-source correction and supplies neither a result for the corrected extractor nor downstream relation/scope evidence. |
-
-The predecessor request contains a concrete granularity defect in
-`synthetic.condition_and_prohibition`: node
-`tsg_node_a09ca5d3eb006cd2bf01df53838107a09b4bf6a1853746c8f0cf3f330dceb479`
-uses `feature.forbid_parameterization` to combine prohibiting parameter binding
-with requiring SQL construction by concatenation. Under the current rule, this
-needs separate source requirements with their original raw-mode condition and
-operation/input bindings preserved. It must remain unresolved in a candidate
-proposal made from that old graph. This observation does not modify the old
-graph, catalogue, scope judgments or acceptance result.
-
-The next development decision is consequently bounded: establish source-reviewed
-atomic meanings and their operation/input/condition bindings on the already
-exposed small reference set before producing a new candidate request. A
-source-authored reference can check the downstream implementation, but must stay
-distinct from a real model extraction. The first-response coverage-ID failure
-also remains unresolved by the atomicity instruction; repairing that interface
-and checking semantic fidelity are separate requirements for a future real run.
-Conditions or thresholds cannot disappear merely to make a scope bindable.
-
-No natural Full/RD-only or Full/No-Relation comparison can yet be reported from
-these materials under the current candidate path. The missing evidence is an
-accepted source-derived candidate set, extraction and qualification bound to its
-catalogue, and same-population natural support/folds. Existing synthetic smoke
-can exercise the computation, but cannot establish selector benefit or Yield@K.
-Neither this gap nor the thirty-task counts authorize state-guided acquisition,
-synthetic cell filling, lower support thresholds or replacement of failed cases.
-
-Audit sources: the original
-[`selection.json`](../data/method/open-tsg-effect-development-v1/exposure/selection.json),
-[`reviews.json`](../data/method/open-tsg-effect-development-v1/source-review/reviews.json),
-[`SQL reference report`](../data/method/open-tsg-sql-refinement-v1/reviewed-representation/report.json),
-[`predecessor request`](../data/method/tsg-candidate-construction-development-v1/request/request.json),
-and [`closed three-case summary`](../data/method/open-tsg-scope-development-v1/source-role-check/analysis/summary.json).
-The audit made zero provider calls and exposed no new natural task units. It
-added this reading of existing material only, with no new empirical or formal
-qualification result.
+Run `python -m pytest tests/test_candidate_construction.py -q` for the local path.
+The [2026-09-17 report](experiments/2026-09-17-complete-policy-projection.md) records
+this bounded check, the unchanged automatic API-probe failures and its limits.
+All these cases are exposed development or synthetic controls, not natural
+Discovery/Confirmation support. Earlier counts, qualification rules and outcomes
+remain in their original reports and Git history; they are not regraded here.

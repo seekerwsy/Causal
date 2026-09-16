@@ -87,6 +87,18 @@ of a compound obligation. Complete semantic bindings, not plausible description
 text, determine downstream meaning. Semantic atomicity does not prove independent
 editability. The [candidate guide](tsg-candidate-construction.md) specifies the bridge.
 
+Atomic means one complete editable requirement, not a requirement without internal
+conditions or quantification. Whole-task and universal requirements may be bound
+directly to their original boundary without local expansion. A complete alternative
+or prohibition with one common binding can be considered as one policy after
+semantic review; its members are not separate asserted factors. Independent
+requirements cannot be bundled to bypass the single-requirement restriction.
+The frozen factor records scope kind, quantified class and policy-internal guards.
+Task matching uses independent operation/subject/execution context; internal guards
+need not exist as separate task facts after the policy is removed. Unclear
+applicability, expression or editability remains unresolved. These changes do not
+activate Pair or context-modifier inference.
+
 Applicability and expression are distinct. Source-grounded local impacts limit
 unknown propagation to affected candidates; absent localization and shared
 constraints remain blocking. Required target endpoints cannot be waived. Preserve

@@ -306,3 +306,176 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
     assert len(extraction_request["fixed_template"]["nodes"]) == 5
     assert all(factor["feature_id"] not in {row["concept_id"] for row in template["concepts"]}
                for factor in read_json(output / "proposal.json")["factors"])
+
+
+def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
+                         catalog=None, feature=None, prompt=None):
+    """Authored structures isolate projection/editing, not automatic extraction quality."""
+    from dataclasses import replace
+    invariant = "The entire task must preserve the status format."
+    base = "Process the request and write the diagnostic log. Return status. " + invariant
+    task = dict(task_id="synthetic-complete-policy", language="python",
+                prompt=prompt if prompt is not None else base + (" " + text if present else ""))
+    rows = [("op", "task_operation", "processing", "Process the request and write the diagnostic log"),
+            ("return", "task_operation", "returning", "Return status"),
+            ("invariant", "task_requirement", "status_format", invariant)]
+    if present:
+        rows.append(("r", "safety_requirement", "policy", text))
+        if guard:
+            rows.append(("g", "condition", "failure", "If processing fails"))
+        if choice:
+            rows.extend((key, "safety_requirement", key, quote) for key, quote in
+                        (("redact", "redaction"), ("omit", "omission")))
+            if choice == "not":
+                rows.append(("both", "safety_requirement", "both", "redaction and omission"))
+    selected = "op" if kind in {"targets", "each_function"} else "task.root"
+    structures = ({"r": dict(kind="or" if choice else "atom", members=["redact", "omit"] if choice else [])}
+                  if present else {})
+    structures["invariant"] = dict(kind="atom", members=[])
+    if choice and present:
+        structures.update({key: dict(kind="atom", members=[]) for key in ("redact", "omit")})
+        if choice == "not":
+            structures.update(r=dict(kind="not", members=["both"]), both=dict(kind="and", members=["redact", "omit"]))
+    targets = ["redact", "omit"] if choice else ["r"]
+    links = ([(key, "constrains", "op") for key in targets] if present and kind == "targets" else [])
+    if present and guard:
+        links.append(("g", "conditions", "r"))
+    concepts = [dict(concept_id=concept, node_type=node_type, definition=quote)
+                for _, node_type, concept, quote in rows]
+    identities = {concept: concept for _, _, concept, _ in rows}
+    if catalog is not None:
+        identities = {concept: (feature if key == "r" else catalog["normalization_map"][node_type + "::" + concept])
+                      for key, node_type, concept, _ in rows}
+    supplied = dict(concepts=concepts if catalog is None else [],
+        nodes=[dict(local_id=key, concept_id=identities[concept], evidence_text=quote, occurrence=1)
+               for key, _, concept, quote in rows],
+        edges=[dict(source_node_local_id=a, edge_type=relation, target_node_local_id=b,
+                    evidence_text=task["prompt"], occurrence=1) for a, relation, b in links],
+        concept_states=[], feature_states=[], unresolved_notes=[])
+    supplied_catalog = catalog or open_concept_catalog()
+    contract = open_contract_from_response(supplied, task=task, catalog=supplied_catalog,
+        annotator_id="authored-projection-reference", review_status="development_exposed")
+    retained = {"invariant": dict(kind="task", boundaries=[], target_class=None)}
+    if present and kind != "targets":
+        retained["r"] = dict(kind="task" if kind == "task" else "each",
+                             boundaries=["op"] if kind == "each_function" else [],
+                             target_class=None if kind == "task" else "diagnostic log entries")
+    inventory = dict(source_units={"u": dict(evidence_text=task["prompt"], occurrence=1)},
+        coverage={"u": dict(status="represented", facts=[key for key, _, _, _ in rows], reason="Authored semantic contrast.")},
+        layers={key: "runtime" for key, _, _, _ in rows}, operation_roles=[],
+        requirement_structures=structures, requirement_scopes=retained)
+    contract = replace(contract, source_inventory=inventory)
+    graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=supplied_catalog)
+    return task, contract, graph, selected
+
+
+def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_conditions(record_property):
+    from dataclasses import replace
+    from prompt_mechanism_study.candidate_construction import _candidate_catalog, choose_candidate_scope
+    from prompt_mechanism_study.prompt_contract_extract import fixed_scope_request, apply_fixed_scope_response
+    from prompt_mechanism_study.prompt_tsg import requirement_owned_nodes, PromptTSGError
+    from prompt_mechanism_study.prompt_contract_qualification import open_graph_assertions
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
+    cases = [
+        ("conditional", "targets", "If processing fails, do not include access tokens in the diagnostic log.", True, False),
+        ("whole", "task", "The entire task must allocate at most 1 MB in total.", False, False),
+        ("universal", "each", "Every diagnostic log entry must redact access tokens.", False, False),
+        ("bounded_universal", "each_function", "Every diagnostic log entry in request processing must redact access tokens.", False, False),
+        ("choice", "targets", "Use redaction or omission for access tokens in the diagnostic log.", False, True),
+        ("compound_prohibition", "targets", "Do not combine redaction and omission for access tokens in the diagnostic log.", False, "not"),
+        ("before", "targets", "Redact access tokens before writing the diagnostic log.", False, False),
+        ("after", "targets", "Redact access tokens after writing the diagnostic log.", False, False),
+    ]
+    results, factors = [], {}
+    for name, kind, text, guard, choice in cases:
+        task, contract, graph, selected = _whole_policy_source(kind, text, guard=guard, choice=choice)
+        request = candidate_request([task], [contract])
+        by_meaning = {n["concept_id"]: n for n in request["sources"][0]["nodes"]}
+        scope = dict(operation_node_id=by_meaning["processing" if selected == "op" else "task.root"]["node_id"],
+                     subject_node_ids=[], condition_node_ids=[by_meaning["failure"]["node_id"]] if guard else [])
+        response = dict(factors=[dict(label=name, definition=text,
+            atomicity_rationale="One complete policy; conditions, boundary and alternatives are internal to this policy.",
+            occurrences=[dict(task_id=task["task_id"], requirement_node_ids=[by_meaning["policy"]["node_id"]], scope=scope)])],
+            dispositions=[dict(task_id=task["task_id"], requirement_node_id=node["node_id"],
+                status="included" if node["concept_id"] == "policy" else "not_actionable",
+                rationale="Whole policy only; choice members are not independently asserted.")
+                for node in request["sources"][0]["nodes"] if node["node_type"] in {"safety_requirement", "task_requirement"}])
+        draft = compile_candidate_proposal(request, response, _design())
+        reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
+        factor = reviewed["factors"][0]
+        feature, selector = factor["feature_id"], factor["scope_selector"]
+        factors[name] = feature
+        assert selector["policy_condition_semantic_ids"] or not guard
+        assert selector["condition_semantic_ids"] == []
+        assert len(reviewed["policies"]) == 2
+        catalog = _candidate_catalog([contract], reviewed, _design(), reviewed["review"])
+
+        def assessed(present, prompt=None):
+            fresh_task, fresh, fresh_graph, _ = _whole_policy_source(kind, text, present=present,
+                guard=guard, choice=choice, catalog=catalog, feature=feature, prompt=prompt)
+            req = fixed_scope_request(fresh, prompt=fresh_task["prompt"], catalog=catalog)
+            assert len(req["scopes"]) == 1 and not req["withheld_scopes"]
+            key, row = next(iter(req["scopes"].items()))
+            assert row["admissible_positive_requirements"] == (["r"] if present else [])
+            answer = dict(states={key: dict(applicability="applicable",
+                applicability_rationale="Authored reference: the unchanged task processes requests and writes logs; the whole-task resource comparison preserves both operations.",
+                expression="explicitly_required" if present else "not_expressed", requirements=["r"] if present else [])},
+                unresolved_notes=[])
+            applied = apply_fixed_scope_response(json.dumps(answer).encode(), request=req, contract=fresh, prompt=fresh_task["prompt"], catalog=catalog)
+            final = compile_task_context_contract(applied, prompt=fresh_task["prompt"], catalog=catalog)
+            state = final.scoped_feature_assessments[0]
+            assert state.state == ("present" if present else "absent")
+            assert not state.scope.condition_node_ids
+            return fresh_task, applied, final, state.scope
+
+        absent_task, absent, absent_graph, absent_scope = assessed(False)
+        present_task, present, present_graph, present_scope = assessed(True)
+        assert sum(a["kind"] == "requirement_scope" for a in open_graph_assertions(prompt_tsg_record(present_graph)).values()) == len(present_graph.requirement_scopes)
+        # Policy-only guard/choice nodes disappear without altering task selection.
+        assert choose_candidate_scope(absent_graph, selector) == absent_scope
+        assert choose_candidate_scope(present_graph, selector) == present_scope
+        if kind in {"task", "each"}:
+            assert next(n for n in present_graph.nodes if n.node_id == present_scope.operation_node_id).semantic_id == "task.root"
+            assert not any(e.source_id in present_graph.scoped_feature_assessments[0].requirement_node_ids
+                           and e.edge_type == "constrains" for e in present_graph.edges)
+        if guard:
+            broken = replace(present, relations=tuple(r for r in present.relations if r["edge_type"] != "conditions"))
+            with pytest.raises(PromptTSGError, match="complete policy binding"):
+                compile_task_context_contract(broken, prompt=present_task["prompt"], catalog=catalog)
+            for lost_state in ("absent", "not_applicable"):
+                contradicted = replace(broken, feature_states=tuple(dict(r, state=lost_state, requirements=[]) for r in broken.feature_states))
+                with pytest.raises(PromptTSGError, match="negative policy state"):
+                    compile_task_context_contract(contradicted, prompt=present_task["prompt"], catalog=catalog)
+        for source_present, operation in ((False, "add"), (True, "remove")):
+            source_task, source_graph, source_scope = ((present_task, present_graph, present_scope) if source_present else
+                                                       (absent_task, absent_graph, absent_scope))
+            binding = bind_task_hypothesis(policy_id="authored-policy", graph=source_graph, query=factor["query"],
+                factor_feature_ids=(feature,), factor_operations=(operation,), factor_scopes=(source_scope,))
+            rendered = render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
+                enabled=(True,), additions={feature: text})
+            assert (text in rendered["prompt"]) is (operation == "add")
+            assert "Process the request and write the diagnostic log. Return status." in rendered["prompt"]
+            _, _, target_graph, _ = assessed(not source_present, rendered["prompt"])
+            targets = source_graph.scoped_feature_assessments[0].requirement_node_ids
+            preserved = {n.node_id for n in source_graph.nodes if n.node_type != "task"} - requirement_owned_nodes(source_graph, targets)
+            mapped = {n.node_id: next(m.node_id for m in target_graph.nodes if m.semantic_id == n.semantic_id
+                      and rendered["prompt"][m.evidence_start:m.evidence_end] == source_task["prompt"][n.evidence_start:n.evidence_end])
+                      for n in source_graph.nodes if n.node_id in preserved}
+            variant = dict(binding_id=binding.binding_id, source_prompt_sha256=content_hash(source_task["prompt"]),
+                enabled=[True], prompt=rendered["prompt"], graph=prompt_tsg_record(target_graph), source_to_variant_nodes=mapped,
+                source_review=dict(outcomes_used=False, reviewer_id="authored-reference", rationale="Whole fixed policy changed; both original operations preserved."))
+            checked = render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
+                enabled=(True,), additions={}, reviewed_variant=variant)
+            assert checked["prompt"] == rendered["prompt"]
+            if name == "whole":
+                invariant_id = next(n.node_id for n in target_graph.nodes if n.node_type == "task_requirement")
+                corrupted = replace(target_graph, requirement_scopes=tuple(
+                    (key, "each", boundaries, "diagnostic log entries") if key == invariant_id else (key, k, boundaries, cls)
+                    for key, k, boundaries, cls in target_graph.requirement_scopes))
+                with pytest.raises(MechanismRegistryError, match="non-target composition or scope"):
+                    render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
+                        enabled=(True,), additions={}, reviewed_variant=dict(variant, graph=prompt_tsg_record(corrupted)))
+        results.append(dict(case=name, projection=True, add=True, remove=True))
+    assert factors["before"] != factors["after"]
+    assert len(set(factors.values())) == len(cases)
+    record_property("authored_policy_checks", json.dumps(results))

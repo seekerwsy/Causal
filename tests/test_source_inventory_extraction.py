@@ -897,8 +897,8 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     subject = next(n['node_id'] for n in source['nodes'] if n['concept_id']==subject_meaning)
     occurrence = dict(task_id=task['task_id'], requirement_node_ids=[sorted(atoms)[0]],
         scope=dict(operation_node_id=op,subject_node_ids=[subject],condition_node_ids=[guard]))
-    with pytest.raises(ValueError, match='independent of the target'):
-        _occurrence(source,occurrence,aliases)
+    selector, _ = _occurrence(source,occurrence,aliases)
+    assert selector['policy_condition_semantic_ids'] and selector['condition_semantic_ids'] == []
     # Explicit non-gating context can survive removing the target requirement.
     composite['operations'][0]['scope_conditions'] = deepcopy(parent['conditions'])
     comp = compile_composite(composite)
@@ -906,11 +906,12 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     source = candidate['sources'][0]
     selector, _ = _occurrence(source,occurrence,aliases)
     assert selector['execution_condition_semantic_ids'] == []
-    assert any(edge[1]=='context_for' for edge in _query(selector,'test-feature')['required_relations'])
+    assert not any(edge[1]=='context_for' for edge in _query(selector,'test-feature')['required_relations'])
     graph = compile_task_context_contract(comp,prompt=task['prompt'],catalog=catalog)
     # Use source meanings for this low-level selector test (normalization is separate).
     by_id={n.node_id:n.semantic_id for n in graph.nodes}
-    selector.update(operation_semantic_id=by_id[op],subject_semantic_ids=[by_id[subject]],condition_semantic_ids=[by_id[guard]])
+    selector.update(operation_semantic_id=by_id[op],subject_semantic_ids=[by_id[subject]],
+                    policy_condition_semantic_ids=[by_id[guard]])
     assert choose_candidate_scope(graph,selector) is not None
     from dataclasses import replace
     removed = replace(graph,nodes=tuple(n for n in graph.nodes if n.node_id not in asserted),

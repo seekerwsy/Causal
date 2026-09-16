@@ -1,6 +1,6 @@
 # Minimal scientific test suite
 
-The maintained suite has **101 representative cases in 81 test functions**.
+The maintained suite has **102 representative cases in 82 test functions**.
 `python -m pytest -q` runs all of them. There is no hidden extended suite or
 reviewer marker filter. This is the minimum maintained coverage for the current
 seven-stage method, not exhaustive coverage of every supported implementation.
@@ -61,6 +61,12 @@ New tests require a concrete scientific error that these checks cannot detect.
 Prefer updating the representative case for that boundary. Do not grow a second
 suite or use test totals as research progress. Actual model checks remain separately
 scoped experiments; passing these offline tests does not establish TSG quality.
+
+The 2026-09-17 revision adds one cross-stage whole-policy case: eight authored
+contrasts run through candidate construction, fixed-scope states and ADD/REMOVE
+with non-target scope preservation. It covers policy-only guards, task-wide and
+universal boundaries, one complete alternative and before/after predicates.
+Existing source-binding tests now distinguish policy guards from task context.
 
 ## Verification, 2026-09-16
 

@@ -711,6 +711,9 @@ def open_graph_assertions(graph: dict | None, *, contract: dict | None = None) -
     statements += [("concept_absence", row) for row in graph.get("absent_semantics", [])]
     statements += [("requirement_structure", dict(requirement=key, kind=kind, members=members))
                    for key,kind,members in graph.get('requirement_structures', [])]
+    statements += [("requirement_scope", dict(requirement=key, kind=kind,
+                    boundaries=boundaries, target_class=target_class))
+                   for key, kind, boundaries, target_class in graph.get("requirement_scopes", [])]
     if contract is not None:
         if (contract.get("task_id") != graph["task_id"]
             or contract.get("prompt_sha256") != graph["prompt_sha256"]):
@@ -818,6 +821,12 @@ def evaluate_open_semantic_case(graph: dict | None, *, prompt: str, expected: di
         # when an extra assertion has no dedicated source-reference node row.
         operations = {n['node_id'] for n in (graph or {}).get('nodes', [])
                       if n['node_type']=='task_operation' and n['node_id'] in needed_nodes}
+        roots = {n['node_id'] for n in (graph or {}).get('nodes', []) if n['node_type']=='task'}
+        if roots & needed_nodes:
+            operations.update(n['node_id'] for n in graph['nodes'] if n['node_type']=='task_operation')
+        for requirement, _, boundaries, _ in (graph or {}).get('requirement_scopes', []):
+            if set(boundaries) & (operations | roots):
+                needed_nodes.add(requirement)
         links = (graph or {}).get('edges', [])
         needed_nodes |= {endpoint for e in links if e['edge_type']!='contains'
             and {e['source_id'],e['target_id']} & operations for endpoint in (e['source_id'],e['target_id'])}

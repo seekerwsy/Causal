@@ -29,7 +29,7 @@ They are not an alternative active workflow.
    required participants, roles, results and explicit execution guards. Each atomic
    requirement contains its complete predicate, modality, targets and conditions.
    Composite records preserve and/or/compound-not/opaque member structure. Only
-   asserted atomic obligations can support independent factors; conjunction carries
+   asserted complete requirements can support independent factors; conjunction carries
    its shared guards to members, while alternative/negated members stay non-independent.
    Requirements preserve thresholds, negations, exact result formats and variable names.
    In open development, the program assigns new concept identities from exact full
@@ -44,8 +44,10 @@ They are not an alternative active workflow.
    AND/OR/NOT parents use `composite`, carry shared guards and preserve member
    structure without adding a separate target obligation. Leaves retain exact targets.
    Whole-task/universal scopes survive in contract and graph `requirement_scopes`.
-   They cannot certify a local candidate or a local negative until a source-supported
-   projection exists. This narrower usable subset is a reported coverage limit.
+   They may support a whole-boundary policy after semantic review, without a local
+   instance projection. They cannot certify an unrelated local candidate or local
+   negative. Complete OR/NOT policies require a common member binding and a reviewed
+   single policy meaning; opaque or differing member bindings remain unresolved.
    A nested requirement guard produces only condition-to-requirement edges. It cannot
    also gate an operation unless the model separately asserts an execution condition.
    Source-supported `scope_conditions` instead produce non-gating `context_for` edges;
@@ -97,6 +99,13 @@ They are not an alternative active workflow.
    Unknown participation is not represented as definite `input_unspecified` use.
    `atom` establishes a structural leaf only; factor review must justify the single
    changeable predicate, its source-bound target/guards and preserved requirements.
+   Frozen `feature_scope_selectors` retain scope kind, universal class, expression
+   kind and policy-internal guards. Task matching reads only independent geometry;
+   a policy-only guard does not become an additional source-context prerequisite.
+   Scope assessment checks the complete policy at that boundary, including exact
+   positive guard bindings and independent applicability. Root existence or a
+   vacuously empty class is no applicability proof. Whole scopes and composition
+   enter assertion review and non-target edit checks, not merely the visualizer.
    A reused factor definition does not certify each new occurrence. Editing continues
    to read the complete original input, including unresolved text. Factor expression
    is judged over effective system and user messages together: repetition/removing a
@@ -272,5 +281,7 @@ Each frozen development batch includes inputs, exact execution source, provider
 requests/responses and retained failures. The record trace permits exact mechanical
 replay including review and patch. Independent source references and assertion review
 remain necessary to judge the resulting semantics. The current Atomic default suite
-has 101 cases in 81 functions; historical counts above retain their original meaning.
-Update relevant boundary fixtures instead of expanding it.
+has 102 cases in 82 functions. One whole-policy projection/edit case adds eight
+authored semantic contrasts; historical counts above retain their original meaning.
+See the [bounded projection check](experiments/2026-09-17-complete-policy-projection.md).
+These are implementation checks, not automatic-extraction accuracy or natural coverage.

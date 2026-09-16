@@ -552,8 +552,9 @@ def open_contract_from_response(
                       for row in value["concept_states"]]
     feature_states = []
     for row in value["feature_states"]:
-        target = aliases.get(row.get("target"))
-        if target is None or by_local[target]["node_type"] != "task_operation":
+        policy = catalog.get("feature_scope_selectors", {}).get(row.get("concept_id"))
+        target = "task.root" if policy and row.get("target") == "task.root" else aliases.get(row.get("target"))
+        if target is None or target != "task.root" and by_local[target]["node_type"] != "task_operation":
             notes.append("unbound_feature_target: an operation assessment has no source-bound target.")
             continue
         row = dict(row, target=target)
@@ -573,12 +574,12 @@ def open_contract_from_response(
             links = {(edge["source"], edge["edge_type"], edge["target"]) for edge in bound_relations}
             operation_requirements = {source for source, relation, sink in links
                                       if relation == "constrains" and sink == target}
-            if (any((subject, "used_by", target) not in links for subject in row["subjects"])
+            if not policy and (any((subject, "used_by", target) not in links for subject in row["subjects"])
                 or any(not any((condition, "conditions", sink) in links
                                for sink in operation_requirements | {target}) for condition in row["conditions"])):
                 notes.append("unbound_feature_scope: required input or condition relation is unresolved; no assessment asserted.")
                 continue
-            if row.get("state") == "present" and (not row["requirements"] or any(
+            if not policy and row.get("state") == "present" and (not row["requirements"] or any(
                     by_local[key]["semantic_id"] != row.get("concept_id")
                     or (key, "constrains", target) not in links
                     or any((key, "constrains", subject) not in links for subject in row["subjects"])
@@ -798,7 +799,9 @@ def compile_open_task_contract(
         if set(row) != basic and not scoped:
             raise PromptTSGError("operation feature assessment fields are invalid")
         target, concept, state = row["target"], row["concept_id"], row["state"]
-        if target not in by_local or concept not in derived["semantics"]:
+        boundary = (scoped and target == "task.root"
+                    and concept in derived.get("feature_scope_selectors", {}))
+        if (target not in by_local and not boundary) or concept not in derived["semantics"]:
             raise PromptTSGError("operation feature assessment is outside the graph")
         require_text(row["rationale"], "feature assessment rationale")
         if scoped:

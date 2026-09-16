@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from collections import Counter
+from itertools import combinations, product
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -177,6 +179,86 @@ def graph_requirement_membership(graph):
         {n.node_id for n in graph.nodes if n.node_type in REQUIREMENT_TYPES})
 
 
+def requirement_binding(requirement, *, links, node_types, structures=(), retained_scopes=()):
+    """Read a whole expression's binding, without distributing OR/NOT or quantifiers.
+
+    A compound choice/prohibition has a usable envelope only when every member
+    has the same envelope. AND parents remain containers of separate requirements.
+    This is structural eligibility, never certification of one editable policy.
+    """
+    forms = {key: (kind, members) for key, kind, members in structures}
+    retained = {key: (kind, boundaries, target_class)
+                for key, kind, boundaries, target_class in retained_scopes}
+
+    def read(key, *, nested=False):
+        kind, members = forms.get(key, ("atom", ()))
+        guards = {a for a, rel, b in links if rel == "conditions" and b == key}
+        if kind == "opaque" or kind == "and" and not nested:
+            return None
+        if kind in {"and", "or", "not"}:
+            children = [read(child, nested=True) for child in members]
+            if not children or any(child is None for child in children):
+                return None
+            first = children[0]
+            if any(child != first for child in children[1:]):
+                return None
+            return dict(first, conditions=first["conditions"] | guards)
+        if key in retained:
+            scope_kind, boundaries, target_class = retained[key]
+            return dict(kind=scope_kind, operations=set(boundaries), subjects=set(),
+                        conditions=guards, target_class=target_class)
+        return dict(kind="targets", target_class=None, conditions=guards,
+                    operations={b for a, rel, b in links if a == key and rel == "constrains"
+                                and node_types.get(b) == "task_operation"},
+                    subjects={b for a, rel, b in links if a == key and rel == "constrains"
+                              and node_types.get(b) == "data_object"})
+    return read(requirement)
+
+
+def requirement_matches_policy(graph, requirement, scope, selector):
+    """Match the complete frozen policy, including guards outside task selection."""
+    nodes = {node.node_id: node for node in graph.nodes}
+    links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+    binding = requirement_binding(requirement, links=links,
+        node_types={key: node.node_type for key, node in nodes.items()},
+        structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
+    kind = {key: kind for key, kind, _ in graph.requirement_structures}.get(requirement, "atom")
+    execution = {a for a, rel, b in links if rel == "conditions" and b == scope.operation_node_id}
+    return (binding is not None and kind == selector["requirement_kind"]
+            and binding["kind"] == selector["scope_kind"]
+            and binding["target_class"] == selector["target_class"]
+            and scope.operation_node_id in binding["operations"]
+            and binding["subjects"] == set(scope.subject_node_ids)
+            and set(scope.condition_node_ids) == execution
+            and sorted(nodes[key].semantic_id for key in binding["conditions"] - execution)
+                == selector["policy_condition_semantic_ids"])
+
+
+def requirement_owned_nodes(graph, requirements):
+    """Expression members and exclusively attached guards belong to the whole edit.
+
+    Shared/execution guards and any object/operation always remain non-target.
+    """
+    owned = set(requirements)
+    children = {key: members for key, _, members in graph.requirement_structures}
+    pending = list(owned)
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in owned:
+                owned.add(child)
+                pending.append(child)
+    for node in graph.nodes:
+        if node.node_type != "condition":
+            continue
+        uses = [(e.edge_type, e.target_id) for e in graph.edges if e.source_id == node.node_id]
+        within_policy = any(parent.node_id in owned and parent.node_type in REQUIREMENT_TYPES
+                            and parent.evidence_start <= node.evidence_start <= node.evidence_end <= parent.evidence_end
+                            for parent in graph.nodes)
+        if within_policy and uses and all(kind == "conditions" and target in owned for kind, target in uses):
+            owned.add(node.node_id)
+    return owned
+
+
 def load_catalog(path: Path) -> dict[str, Any]:
     """Load one closed, versioned Prompt TSG ontology and query catalog."""
 
@@ -215,6 +297,8 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
             required.add("feature_subject_properties")
         if "source_name_terms" in value:
             required.add("source_name_terms")
+        if "feature_scope_selectors" in value:
+            required.add("feature_scope_selectors")
     if not isinstance(value, dict) or set(value) != required or value["schema_version"] not in {"1.0", "2.0"}:
         raise PromptTSGError("Prompt TSG catalog envelope is invalid")
     if value["schema_version"] == "2.0" and value["concept_policy"] not in {"DEVELOPMENT_OPEN", "FROZEN"}:
@@ -308,6 +392,37 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
             or any(not isinstance(domain, str) or domain not in {"operation", "subjects"}
                    for domain in domains.values())):
             raise PromptTSGError("feature scope domains must declare operation or subjects for every queried feature")
+    if "feature_scope_selectors" in value:
+        selectors = value["feature_scope_selectors"]
+        if not isinstance(selectors, dict) or set(selectors) != {q["actionable_feature_id"] for q in queries}:
+            raise PromptTSGError("candidate selectors must bind every frozen feature")
+        for selector in selectors.values():
+            fields = {"operation_semantic_id", "subject_semantic_ids", "condition_semantic_ids",
+                      "execution_condition_semantic_ids", "match_rule", "scope_kind", "target_class",
+                      "policy_condition_semantic_ids", "requirement_kind"}
+            if (not isinstance(selector, dict) or set(selector) != fields
+                or selector["scope_kind"] not in {"targets", "task", "each"}
+                or selector["requirement_kind"] not in {"atom", "or", "not"}
+                or selector["match_rule"] != "unique_source_geometry_match"
+                or semantics.get(selector["operation_semantic_id"]) not in {"task", "task_operation"}
+                or selector["scope_kind"] == "task" and selector["operation_semantic_id"] != "task.root"
+                or selector["scope_kind"] == "targets" and selector["operation_semantic_id"] == "task.root"
+                or selector["scope_kind"] != "targets" and selector["subject_semantic_ids"]
+                or (selector["scope_kind"] == "each") != isinstance(selector["target_class"], str)
+                or selector["scope_kind"] == "each" and not selector["target_class"].strip()
+                or selector["scope_kind"] != "each" and selector["target_class"] is not None):
+                raise PromptTSGError("candidate policy boundary is invalid")
+            for name, kind in (("subject_semantic_ids", "data_object"), ("condition_semantic_ids", "condition"),
+                               ("execution_condition_semantic_ids", "condition"), ("policy_condition_semantic_ids", "condition")):
+                ids = selector[name]
+                if not isinstance(ids, list) or any(not isinstance(key, str) or not key for key in ids):
+                    raise PromptTSGError("candidate scope concepts must be strings")
+                if name != "subject_semantic_ids":
+                    _unique_strings(ids, "candidate scope concepts")
+                if list(ids) != sorted(ids) or any(semantics.get(key) != kind for key in ids):
+                    raise PromptTSGError("candidate scope concepts must preserve their declared roles")
+            if selector["execution_condition_semantic_ids"] != selector["condition_semantic_ids"]:
+                raise PromptTSGError("policy guards must not be used as task-selection conditions")
     if "feature_role_domains" in value:
         rules = value["feature_role_domains"]
         callers = _unique_strings(value["caller_supplied_concepts"], "caller-supplied concepts")
@@ -634,7 +749,7 @@ def build_prompt_tsg(
         tuple(sorted((local_nodes[target].node_id, feature, state)
                      for target, feature, state in feature_assessments)),
         tuple(sorted((ScopedFeatureAssessment(
-            FeatureScope(local_nodes[row["target"]].node_id,
+            FeatureScope((root if row["target"] == "task.root" else local_nodes[row["target"]]).node_id,
                 tuple(sorted(local_nodes[key].node_id for key in row["subjects"])),
                 tuple(sorted(local_nodes[key].node_id for key in row["conditions"]))),
             row["concept_id"], row["state"],
@@ -742,9 +857,12 @@ def validate_prompt_tsg(
             or len({(item.scope, item.feature_id) for item in scoped}) != len(scoped)):
             raise PromptTSGError("scoped feature assessments must be ordered and unique")
         for item in scoped:
-            if item.state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==item.feature_id for k in retained):
+            selector = catalog.get("feature_scope_selectors", {}).get(item.feature_id)
+            if not selector and item.state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==item.feature_id for k in retained):
                 raise PromptTSGError('unprojected requirement cannot establish a local negative')
             validate_feature_scope(graph, item.scope)
+            if node_by_id[item.scope.operation_node_id].node_type == "task" and not selector:
+                raise PromptTSGError("a whole-task feature scope needs a frozen policy selector")
             domain = catalog.get("feature_scope_domains", {}).get(item.feature_id)
             if item.state != "unresolved" and (
                 domain == "subjects" and not item.scope.subject_node_ids
@@ -757,9 +875,30 @@ def validate_prompt_tsg(
                 or item.requirement_node_ids != tuple(sorted(set(item.requirement_node_ids)))
                 or (item.state == "present") != bool(item.requirement_node_ids)):
                 raise PromptTSGError("scoped feature state or evidence is invalid")
-            if set(item.requirement_node_ids) - atomic_requirements:
+            allowed_requirements = asserted_requirements if selector else atomic_requirements
+            if set(item.requirement_node_ids) - allowed_requirements:
                 raise PromptTSGError("scoped presence needs an asserted atomic requirement, not a composite member")
             links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+            if selector:
+                # A state assessment is about a complete policy at a state-blind
+                # boundary. Its internal guards need not exist in an ABSENT graph.
+                if select_feature_scope(graph, selector) != item.scope:
+                    raise PromptTSGError("feature assessment differs from its frozen candidate boundary")
+                for key in item.requirement_node_ids:
+                    if (node_by_id[key].semantic_id != item.feature_id
+                        or not requirement_matches_policy(graph, key, item.scope, selector)):
+                        raise PromptTSGError("scoped presence lacks the complete policy binding")
+                if item.state in {"absent", "not_applicable"}:
+                    for node in graph.nodes:
+                        if node.semantic_id != item.feature_id:
+                            continue
+                        envelope = requirement_binding(node.node_id, links=links,
+                            node_types={k: n.node_type for k, n in node_by_id.items()},
+                            structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
+                        if (envelope is None or item.scope.operation_node_id in envelope["operations"]
+                            or roots[0].node_id in envelope["operations"]):
+                            raise PromptTSGError("negative policy state contradicts a source expression at this boundary")
+                continue
             if item.state in {"absent", "not_applicable"}:
                 for requirement in graph.nodes:
                     key = requirement.node_id
@@ -862,8 +1001,10 @@ def validate_feature_scope(graph: PromptTSG, scope: FeatureScope) -> None:
     """Check local coordinates without inferring a semantic assessment from topology."""
     nodes = {node.node_id: node for node in graph.nodes}
     links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
-    if scope.operation_node_id not in nodes or nodes[scope.operation_node_id].node_type != "task_operation":
-        raise PromptTSGError("feature scope requires one operation instance")
+    if scope.operation_node_id not in nodes or nodes[scope.operation_node_id].node_type not in {"task_operation", "task"}:
+        raise PromptTSGError("feature scope requires one operation or the whole task boundary")
+    if nodes[scope.operation_node_id].node_type == "task" and (scope.subject_node_ids or scope.condition_node_ids):
+        raise PromptTSGError("task boundary cannot masquerade as local input or execution bindings")
     for keys in (scope.subject_node_ids, scope.condition_node_ids):
         if keys != tuple(sorted(set(keys))):
             raise PromptTSGError("feature scope coordinates must be sorted and unique")
@@ -879,6 +1020,45 @@ def validate_feature_scope(graph: PromptTSG, scope: FeatureScope) -> None:
                        for target in requirements | {scope.operation_node_id})
                     or (key, "context_for", scope.operation_node_id) in links)):
             raise PromptTSGError("feature condition must have a source-bound relation to this operation")
+
+
+def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
+    """Select a sole exact structural match, never inspecting requirements or states.
+
+    Ambiguity is not resolved by picking a PRESENT/ABSENT scope. It remains null.
+    Conditions use execution guards or non-gating source contexts, never target state.
+    """
+    nodes = {n.node_id: n for n in graph.nodes}
+    links = {(e.source_id, e.edge_type, e.target_id) for e in graph.edges}
+    matches = []
+    for op in sorted(graph.nodes, key=lambda n: n.node_id):
+        if op.node_type not in {"task_operation", "task"} or op.semantic_id != selector["operation_semantic_id"]:
+            continue
+        inputs = sorted(a for a, rel, b in links if rel == "used_by" and b == op.node_id
+                        and nodes[a].node_type == "data_object")
+        conditions = sorted(a for a, rel, b in links if rel == "conditions" and b == op.node_id
+                            and nodes[a].node_type == "condition")
+        # Exact condition set preserves conditional versus unconditional scopes.
+        execution = selector.get('execution_condition_semantic_ids', selector['condition_semantic_ids'])
+        if sorted(nodes[key].semantic_id for key in conditions) != execution:
+            continue
+        context_counts = Counter(selector['condition_semantic_ids']) - Counter(execution)
+        available_contexts = {a for a,rel,b in links if rel=='context_for' and b==op.node_id}
+        context_choices = [list(combinations(sorted(key for key in available_contexts
+            if nodes[key].semantic_id==semantic), count)) for semantic,count in sorted(context_counts.items())]
+        counts = Counter(selector["subject_semantic_ids"])
+        selections = []
+        for semantic, count in sorted(counts.items()):
+            choices = [key for key in inputs if nodes[key].semantic_id == semantic]
+            selections.append(list(combinations(choices, count)))
+        for groups in product(*selections):
+            subjects = tuple(sorted(key for group in groups for key in group))
+            for context_groups in product(*context_choices):
+                scoped_conditions = tuple(sorted(set(conditions) | {c for group in context_groups for c in group}))
+                matches.append(FeatureScope(op.node_id, subjects, scoped_conditions))
+                if len(matches) > 1:
+                    return None
+    return matches[0] if len(matches) == 1 else None
 
 
 def scoped_feature_assessment(

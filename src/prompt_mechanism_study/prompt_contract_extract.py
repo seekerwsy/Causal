@@ -33,6 +33,10 @@ from prompt_mechanism_study.prompt_tsg import (
     load_catalog,
     prompt_tsg_record,
     requirement_covers_scope,
+    requirement_matches_policy,
+    select_feature_scope,
+    FeatureScope,
+    _occurrence_span,
 )
 from prompt_mechanism_study.records import content_hash, canonical_json
 from prompt_mechanism_study.task_input import prepare_task_input, generation_template_facts
@@ -2055,16 +2059,35 @@ def fixed_scope_request(
     explicitly enumerated full input set are assessed separately. Other subsets
     remain unassessed, not absent. Conditions come from source graph bindings.
     """
-    compile_task_context_contract(contract, prompt=prompt, catalog=catalog)
+    graph = compile_task_context_contract(contract, prompt=prompt, catalog=catalog)
     facts = {row["local_id"]: row for row in contract.facts}
     from .prompt_tsg import requirement_membership, REQUIREMENT_TYPES
     structures = (contract.source_inventory or {}).get('requirement_structures', {})
-    _, atomic_requirements = requirement_membership(
+    asserted_requirements, atomic_requirements = requirement_membership(
         [(key, row['kind'], row['members']) for key,row in structures.items()],
         {key for key,row in facts.items() if row['node_type'] in REQUIREMENT_TYPES})
     links = {(row["source"], row["edge_type"], row["target"]) for row in contract.relations}
+    selectors = catalog.get("feature_scope_selectors", {})
+    graph_nodes = {(node.semantic_id, node.evidence_start, node.evidence_end): node.node_id for node in graph.nodes}
+    local_to_node = {key: graph_nodes[(row["semantic_id"], *_occurrence_span(prompt, row["evidence_text"], row["occurrence"]))]
+                     for key, row in facts.items()}
+    root = next(node for node in graph.nodes if node.semantic_id == "task.root")
+    local_to_node["task.root"] = root.node_id
+    node_to_local = {value: key for key, value in local_to_node.items()}
+    if any(s["operation_semantic_id"] == "task.root" for s in selectors.values()):
+        facts["task.root"] = dict(local_id="task.root", semantic_id="task.root", node_type="task",
+                                  evidence_text=prompt, occurrence=1)
     candidates = set()
     for query in catalog["queries"]:
+        selector = selectors.get(query["actionable_feature_id"])
+        if selector:
+            selected = select_feature_scope(graph, selector)
+            if selected is not None:
+                candidates.add((node_to_local[selected.operation_node_id],
+                    tuple(sorted(node_to_local[key] for key in selected.subject_node_ids)),
+                    tuple(sorted(node_to_local[key] for key in selected.condition_node_ids)),
+                    query["actionable_feature_id"]))
+            continue
         operations = {key for key in query["required_semantics"]
                       if catalog["semantics"][key] == "task_operation"}
         for op, fact in facts.items():
@@ -2104,7 +2127,20 @@ def fixed_scope_request(
         for scope in scopes.values():
             scope["subject_domain"] = catalog["feature_scope_domains"][scope["concept_id"]]
     for scope in scopes.values():
-        scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
+        selector = selectors.get(scope["concept_id"])
+        if selector:
+            coordinate = FeatureScope(local_to_node[scope["target"]],
+                tuple(sorted(local_to_node[key] for key in scope["subjects"])),
+                tuple(sorted(local_to_node[key] for key in scope["conditions"])))
+            scope["policy_scope"] = selector
+            scope["policy_conditions"] = [dict(concept_id=key, definition=catalog["semantic_guidance"][key])
+                                           for key in selector["policy_condition_semantic_ids"]]
+            scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
+                if fact["semantic_id"] == scope["concept_id"] and key in asserted_requirements
+                and (contract.source_inventory or {}).get("statement_kinds", {}).get(key, "obligation") == "obligation"
+                and requirement_matches_policy(graph, local_to_node[key], coordinate, selector))
+        else:
+            scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
             if fact["semantic_id"] == scope["concept_id"]
             and key in atomic_requirements
             and (contract.source_inventory or {}).get("statement_kinds", {}).get(key, "obligation") == "obligation"
@@ -2120,8 +2156,13 @@ def fixed_scope_request(
         if derived is not None:
             scope["role_domain_check"] = derived
     inventory_status = _inventory_status(contract)
-    blockers = {key: _scope_blockers(contract, inventory_status, row["target"]) for key, row in scopes.items()}
+    blockers = {key: sorted({reason for target in
+                ([fact_id for fact_id, fact in facts.items() if fact["node_type"] == "task_operation"]
+                 if row["target"] == "task.root" else [row["target"]])
+                for reason in _scope_blockers(contract, inventory_status, target)}) for key, row in scopes.items()}
     for key, row in scopes.items():
+        if row["concept_id"] in selectors:
+            continue  # Whole-policy matching above does not require a local projection.
         blockers[key] += ['unprojected_requirement:'+fact_id
             for fact_id in (contract.source_inventory or {}).get('requirement_scopes', {})
             if facts[fact_id]['semantic_id']==row['concept_id']]
@@ -2152,6 +2193,18 @@ def fixed_scope_request(
         "request_kind": "source_only_fixed_scope_states",
         "assessment_question": "Answer subject_property_questions once from source value-kind evidence when supplied. Only subject_property scope rows ask for expression and requirements alone. All other rows require full applicability and its source rationale, even with a role_domain_check. Separately judge whether source_prompt expresses the requirement. Neither question predicts properties of future generated code.",
         "binding_consistency": "Use complete definitions and source-supported bound_subject_roles. role_domain_check is only a necessary role prerequisite, not a final applicability judgment. The program cannot promote it to applicability. Verify operation context, caller origin when required, and all other definition premises directly from the source. An upstream claim unsupported by the source leaves the affected scope unresolved and needs upstream correction. A fixed concept ID or an unexpressed requirement alone proves no applicability.",
+        "whole_policy_semantics": (
+            "When policy_scope is supplied, assess the COMPLETE frozen policy at that boundary. "
+            "policy_conditions are internal to the policy, not additional task-selection facts; "
+            "their absence from the source is not by itself an unresolved context. They must be "
+            "preserved in a positive requirement's structural guards. task means one overall runtime "
+            "contract; each means a universal rule over target_class, never a finite instance list. "
+            "Verify from the unchanged task that the policy is meaningful and feasible. A root node, "
+            "the policy's presence, or a vacuously empty class proves no applicability. Relevant "
+            "operations, objects, interfaces and non-target obligations must remain unchanged. "
+            "Only whole OR/NOT expressions may be positive, never their unasserted members. "
+            "Preserve ordered predicates such as before/after in the complete definition; reversed "
+            "order is not equivalent. No condition or qualifier may be recovered only from a label."),
         "domain_evidence_policy": (
             "When no subject_property is supplied, identify EVERY semantic prerequisite in the exact "
             "feature definition, including the subject's type, measurement unit and operation context. "
