@@ -199,6 +199,9 @@ def record_annotation(request, canonical):
             targets = [e['target_node_local_id'] for e in canonical['edges'] if e['edge_type']=='constrains' and e['source_node_local_id']==key]
             row.update(modality='obligation', structure=deepcopy(canonical.get('requirement_structures', {}).get(key, dict(kind='atom', members=[]))),
                 scope_kind='implementation' if facts[key].get('layer')=='generation' else 'targets',
-                operations=[t for t in targets if types.get(t)=='task_operation'], subjects=[t for t in targets if types.get(t)=='data_object'], conditions=guards)
+                operations=[t for t in targets if types.get(t)=='task_operation'], subjects=[t for t in targets if types.get(t)=='data_object'], conditions=guards,
+                target_class=None)
+            if row['structure']['kind'] in {'and','or','not'}:
+                row.update(scope_kind='composite',operations=[],subjects=[])
             result['requirements'].append(row)
     return result

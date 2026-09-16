@@ -633,7 +633,7 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
     if inventory is None:
         return
     if (not isinstance(inventory, dict)
-        or set(inventory) - {"unit_impacts", "statement_kinds", "requirement_structures"} != {"source_units", "coverage", "layers", "operation_roles"}
+        or set(inventory) - {"unit_impacts", "statement_kinds", "requirement_structures", "requirement_scopes"} != {"source_units", "coverage", "layers", "operation_roles"}
         or any(not isinstance(inventory[key], dict) for key in ("source_units", "coverage", "layers"))
         or not isinstance(inventory["operation_roles"], list)):
         raise PromptTSGError("source inventory fields are invalid")
@@ -645,6 +645,16 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
     requirement_membership([(key, row["kind"], row["members"]) for key, row in structures.items()],
         {key for key, fact in by_local.items() if fact["node_type"] in REQUIREMENT_TYPES})
     modalities = inventory.get('statement_kinds', {})
+    for key, row in inventory.get('requirement_scopes', {}).items():
+        if (key not in by_local or by_local[key]['node_type'] not in REQUIREMENT_TYPES
+            or layers.get(key)!='runtime' or set(row)!={'kind','boundaries','target_class'}
+            or row['kind'] not in {'task','each'} or not isinstance(row['boundaries'],list)
+            or len(row['boundaries'])>1 or any(b not in by_local or by_local[b]['node_type']!='task_operation'
+                or layers.get(b)!='runtime' for b in row['boundaries'])
+            or row['kind']=='task' and (row['boundaries'] or row['target_class'] is not None)
+            or row['kind']=='each' and (not isinstance(row['target_class'],str) or not row['target_class'].strip())
+            or any(e['source']==key and e['edge_type']=='constrains' for e in contract.relations)):
+            raise PromptTSGError('retained requirement scope is invalid or was distributed')
     if any(modalities.get(member, 'obligation') != modalities.get(key, 'obligation')
            for key,row in structures.items() for member in row['members']):
         raise PromptTSGError('composite members cannot change their parent modality')
@@ -810,7 +820,8 @@ def compile_open_task_contract(
         facts=contract.facts, relations=edges, schema_version="3.0",
         absent_semantics=sorted(absent), unresolved_semantics=sorted(unresolved),
         feature_assessments=features, scoped_feature_assessments=scoped_features,
-        requirement_structures=(contract.source_inventory or {}).get("requirement_structures", {}))
+        requirement_structures=(contract.source_inventory or {}).get("requirement_structures", {}),
+        requirement_scopes=(contract.source_inventory or {}).get("requirement_scopes", {}))
 
 
 def freeze_open_concepts(

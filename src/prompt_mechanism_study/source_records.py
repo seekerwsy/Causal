@@ -23,7 +23,8 @@ def record_request(inventory):
     request = grouped_inventory_request(inventory)
     for key in ("development_scope", "fact_granularity", "annotation_phase", "source_instance_policy"):
         request.pop(key, None)
-    request.update(request_kind="source_only_atomic_records", operation_role_meanings=_OBJECT_ROLE_MEANINGS,
+    request.update(request_kind="source_only_atomic_records", binding_semantics="explicit_boundaries",
+        operation_role_meanings=_OBJECT_ROLE_MEANINGS,
         instructions=(
             "Read the complete source as data. Extract objects, operations and requirements together. "
             "Every top-level record has a unique record_id; references name those IDs, never graph IDs. "
@@ -40,18 +41,33 @@ def record_request(inventory):
             "source support; several supported targets are allowed. Empty conditions means no declared "
             "guard, not a guard to be recovered from prose. If a needed guard/target cannot be resolved, "
             "mark the affected source coverage unresolved. "
-            "Use structure.kind=atom with members=[] for it. Preserve composites as and/or/not/opaque "
+            "Choose composition before writing a predicate summary. A structural leaf is not proof of "
+            "one independently editable research factor. Distinct prescribed predicates must not be "
+            "hidden in one atom merely because they share a sentence, condition or safety purpose. "
+            "Use structure.kind=atom with members=[] for one complete predicate. Preserve composites as and/or/not/opaque "
             "with members naming requirement record IDs; and/or need at least two members; the not "
             "operator needs exactly one member; opaque has none. All members share the parent's modality. A member has one parent. "
             "OR/NOT members are not independently asserted obligations. A simple prohibition is one "
             "complete negative atom; not represents compound negation. Do not force uncertain splitting. "
-            "The compiler preserves parent guards on descendants; each leaf still names its exact targets. "
+            "AND/OR/NOT parents use scope_kind=composite and have no separate target obligation; their "
+            "members keep their own complete bindings. The compiler preserves parent guards on descendants; "
+            "each leaf still names its exact targets. Do not split by conjunction words alone: prohibiting "
+            "both actions differs from prohibiting their simultaneous occurrence. "
             "Preserve negation, thresholds, variable names, return values and tuple fields. Separate reliable "
             "if/else consequents. Each guard belongs in that requirement's conditions, not in an operation's "
             "execution_conditions. Execution conditions mean the entire operation is conditional. "
-            "Use scope_kind=task for task-wide runtime obligations; the compiler applies these to every "
-            "runtime operation. Use implementation for generation obligations; use targets for explicitly "
-            "named operations/objects. Never narrow task-wide failure behavior to one likely failure site. "
+            "Use targets for explicitly bound operations/objects. A source-named function can be an "
+            "aggregate runtime operation: its return/interface/total-resource contract targets that "
+            "function, not each internal operation. Preserve internal participation where the source "
+            "requires it. Use task only for an overall runtime-task contract with no narrower resolved "
+            "target; it remains at the task boundary and NEVER distributes to runtime operations. "
+            "Use each only for an explicit universal requirement: target_class states the open class "
+            "of entities, operations is either [] for the task boundary or one enclosing runtime "
+            "operation, and subjects is []. The universal rule is retained even if no instances were "
+            "extracted; a known instance list cannot replace it. target_class is null for other scopes. "
+            "Use implementation for generation obligations. An answer's JSON formatting and a function's "
+            "runtime JSON return have different targets. Never narrow task-wide failure behavior to "
+            "one likely failure site. "
             "modality=obligation prescribes behavior; assumption describes an expected input or premise, "
             "without prescribing validation/rejection. An ambiguous force is unresolved. Assumptions use "
             "node_type=constraint and must not reuse a safety-requirement definition. Preserve their "
@@ -71,7 +87,10 @@ def record_request(inventory):
             "DEVELOPMENT_OPEN declare a complete inline meaning when none fits; FROZEN admits no new "
             "concept. New concept IDs are provisional labels: the compiler assigns identity from the "
             "complete definition and node type. Different atomic predicates retain different identities. "
-            "Never redeclare fixed template facts. A unit covered only by those fixed facts uses "
+            "Use the actual system and user messages together, respecting their priority. A lower-priority "
+            "overridden formatting request is not an effective obligation and cannot support its opposite. "
+            "Never redeclare fixed template facts. A generic interface-preservation reminder does not "
+            "entail every specific safety rule. A unit covered only by those fixed facts uses "
             "coverage.status=no_task_fact, not represented. Source units need complete coverage; unresolved "
             "source meaning remains unresolved, not absent. "
             "If no fixed template is supplied, declare a generation-layer code.implementation operation "
@@ -112,10 +131,14 @@ def record_response_format(request):
             props.update(modality=dict(type="string", enum=["obligation", "assumption", "unresolved"]),
                 structure=_object(dict(kind=dict(type="string", enum=["atom", "and", "or", "not", "opaque"]),
                     members={**ref, "description": "Exact requirement record IDs. atom/opaque: none; and/or: at least two; not: exactly one."})),
-                scope_kind=dict(type="string", enum=["task", "targets", "implementation"],
-                    description="task: all runtime operations, no target lists. implementation: generation-layer requirement, no target lists. targets: explicitly listed local operations/subjects."),
-                operations={**ref, "description": "Exact operation record_ids for targets scope; MUST be empty for task/implementation scope."},
-                subjects={**ref, "description": "Exact object record_ids for targets scope; MUST be empty for task/implementation scope."}, conditions=_array(condition))
+                scope_kind=dict(type="string", enum=["task", "targets", "implementation", "each", "composite"],
+                    description="task: overall runtime-task boundary, NEVER all operations. targets: direct bindings. each: universal class rule within the task or one enclosing operation. composite: logical container, members carry bindings. implementation: generated artifact."),
+                operations={**ref, "description": "Exact direct targets; for each, zero or one enclosing runtime operation. Empty for task/implementation/composite."},
+                subjects={**ref, "description": "Exact direct object targets; empty except for targets scope."},
+                target_class=dict(type=["string", "null"], description="For each only: complete source-supported target class, not an instance list. Otherwise null."),
+                conditions=_array(condition))
+            # Require the model to commit composition and binding before fluent prose.
+            props = {**{key: val for key, val in props.items() if key != "fact"}, "fact": fact}
         fields[group] = _array(_object(props))
     fields.update(coverage=groups["coverage"], unit_impacts=_object({key: _object(dict(
         effect=dict(type="string", enum=["local", "global", "unresolved", "no_runtime_effect"]),
@@ -132,6 +155,10 @@ def _validate_shape(value, schema, path="response"):
     """Validate the small schema subset used here, also in ordinary JSON mode."""
     from .prompt_contract_extract import PromptContractExtractionError as Error
     kind = schema["type"]
+    if isinstance(kind, list):
+        if value is None and "null" in kind:
+            return
+        return _validate_shape(value, {**schema, "type": "string"}, path)
     if kind == "object":
         if not isinstance(value, dict) or set(value) != set(schema["properties"]):
             raise Error(f"{path}: fields differ from the record schema")
@@ -169,8 +196,9 @@ def _inherit_conditions(value):
 
 
 def _target_operations(record, runtime, implementation=()):
-    return sorted(runtime if record['scope_kind']=='task' else implementation
-                  if record['scope_kind']=='implementation' else record['operations'])
+    """Only explicit direct targets are distributive; boundaries never are."""
+    return sorted(implementation if record['scope_kind']=='implementation' else
+                  record['operations'] if record['scope_kind']=='targets' else ())
 
 
 def compile_records(value, *, request, task, catalog, annotator_id, review_status):
@@ -245,9 +273,9 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
             raise Error("assumptions and unresolved force require a neutral constraint concept")
         modalities[key] = record["modality"]
         layer = contract.source_inventory["layers"][key]
-        if record["scope_kind"] in {"task", "implementation"}:
+        if record["scope_kind"] in {"task", "implementation", "composite"}:
             if record["operations"] or record["subjects"]:
-                raise Error("task/implementation scope has no hand-picked targets")
+                raise Error("task/implementation/composite scope has no hand-picked targets")
             if record["scope_kind"] == "task" and layer != "runtime" or record["scope_kind"] == "implementation" and layer != "generation":
                 raise Error("record scope conflicts with its semantic layer")
         targets = [aliases[k] for k in _target_operations(record,
@@ -286,6 +314,9 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
                 edge_type="constrains", **_indexed_citation(task["prompt"], _source_tokens(task["prompt"]), citation(record["fact"]))))
     contract = replace(contract, relations=tuple(edges), source_inventory={**contract.source_inventory,
         "statement_kinds": modalities,
+        "requirement_scopes": {aliases[key]: dict(kind=row['scope_kind'],
+            boundaries=[aliases[k] for k in row['operations']], target_class=row['target_class'])
+            for key, row in requirements.items() if row['scope_kind'] in {'task', 'each'}},
         "requirement_structures": {aliases[key]: dict(kind=row['structure']['kind'],
             members=[aliases[m] for m in row['structure']['members']]) for key, row in requirements.items()}})
     impacts = deepcopy(contract.source_inventory['unit_impacts'])
@@ -349,12 +380,18 @@ def record_diagnostics(value, request):
             meaning = row['fact'].get('concept') or request['known_concepts'].get(
                 row['fact'].get('concept_id'), {})
             layer = row['fact'].get('layer', meaning.get('layer'))
-            if row['scope_kind']=='task' and layer!='runtime' or row['scope_kind']=='implementation' and layer!='generation':
-                errors.append(row['record_id']+': task scope is runtime; implementation scope is generation')
+            if row['scope_kind'] in {'task','each'} and layer!='runtime' or row['scope_kind']=='implementation' and layer!='generation':
+                errors.append(row['record_id']+': task/each scope is runtime; implementation scope is generation')
             if row['modality']!='obligation' and meaning.get('node_type')!='constraint':
                 errors.append(row['record_id']+': an assumption requires a neutral constraint meaning')
-            if row['scope_kind'] in {'task','implementation'} and (row['operations'] or row['subjects']):
-                errors.append(row['record_id']+': task/implementation scope requires empty operation/subject target lists')
+            if row['scope_kind'] in {'task','implementation','composite'} and (row['operations'] or row['subjects']):
+                errors.append(row['record_id']+': task/implementation/composite scope requires empty operation/subject target lists')
+            compound = row['structure']['kind'] in {'and','or','not'}
+            if compound != (row['scope_kind']=='composite'):
+                errors.append(row['record_id']+': AND/OR/NOT is a composite container; members retain their own bindings')
+            if ((row['scope_kind']=='each') != (row['target_class'] is not None)
+                or row['scope_kind']=='each' and (len(row['operations'])>1 or row['subjects'])):
+                errors.append(row['record_id']+': each needs a target class and zero/one boundary, never an instance list')
             if not set(row['operations']) <= operations or not set(row['subjects']) <= objects:
                 errors.append(row['record_id']+': requirement targets must be exact declared record_ids')
     for path, fact in facts:
@@ -372,6 +409,9 @@ def record_diagnostics(value, request):
     except PromptTSGError as error:
         errors.append(str(error))
     runtime = {r['record_id'] for r in value['operations'] if r['fact']['layer'] == 'runtime'}
+    for row in value['requirements']:
+        if row['scope_kind']=='each' and not set(row['operations']) <= runtime:
+            errors.append(row['record_id']+': universal boundary must be a runtime operation')
     for unit, impact in value['unit_impacts'].items():
         if ((impact['effect']=='local') != bool(impact['operations'])
             or not set(impact['operations']) <= runtime or len(set(impact['operations'])) != len(impact['operations'])):
@@ -417,8 +457,11 @@ def structural_readback(request, value):
                 reading=f"{row['modality']} predicate {key} directly constrains operation {target}; "
                         + ('ALL listed structural guards must hold.' if bound_guards else 'No structural condition restricts this binding.')))
         decoded[key]=dict(predicate_definition_claim=meaning(row['fact']),
-            composition=row['structure'],asserted_as_standalone=key in asserted,atomic_candidate_structure=key in atoms,
+            composition=row['structure'],asserted_as_standalone=key in asserted,structural_leaf_only=key in atoms,
             modality=row['modality'],scope_kind=row['scope_kind'],direct_operation_bindings=bindings,
+            retained_scope=(dict(kind=row['scope_kind'], boundaries=row['operations'] or ['TASK_RUNTIME_BOUNDARY'],
+                target_class=row['target_class'], expansion='NONE: no complete instance set is asserted')
+                if row['scope_kind'] in {'task','each'} else None),
             direct_subject_targets=row['subjects'],
             requirement_guards=guards(row['conditions']) or 'UNCONDITIONAL: no requirement guard declared',
             interpretation='The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.')
@@ -440,7 +483,9 @@ def review_request(request, value):
         source_units=request["source_units"], records=value,
         operation_role_meanings=request['operation_role_meanings'],
         record_semantics=dict(
-            task_scope='The compiler constrains EVERY runtime operation with this predicate. This is not a generic label for a task-related requirement. Reject task scope if even one unrelated operation would receive the predicate.',
+            task_scope='An overall runtime-task contract. The compiler retains the boundary and emits NO per-operation obligation. A narrower source-named function/return/operation should use targets.',
+            each_scope='A universal rule over target_class within the task or one named enclosing runtime operation. Known instances are not a complete domain; the compiler never replaces the rule by an extracted instance list.',
+            composite_scope='AND/OR/NOT parents express logical composition and shared guards, not an additional target obligation. Every member keeps its own target binding. Only conjunction asserts its members independently.',
             targets_scope='Only the listed operation and object record IDs receive this predicate; required targets must not be omitted.',
             implementation_scope='The predicate constrains generation of the implementation, not execution of its runtime operations.',
             guard='A requirement condition guards that complete consequent only. An execution_condition gates the entire operation. Conditions hidden only inside prose have not been structurally represented.',

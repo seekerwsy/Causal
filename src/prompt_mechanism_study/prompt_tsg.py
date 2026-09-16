@@ -94,6 +94,8 @@ class PromptTSG:
     scoped_feature_assessments: tuple[ScopedFeatureAssessment, ...] = ()
     # Complete requirement expressions; membership alone never asserts an OR/NOT leaf.
     requirement_structures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
+    # Whole-task and universal contracts remain explicit, never inferred local edges.
+    requirement_scopes: tuple[tuple[str, str, tuple[str, ...], str | None], ...] = ()
 
     @property
     def tsg_id(self) -> str:
@@ -102,6 +104,8 @@ class PromptTSG:
             payload.pop("scoped_feature_assessments")  # Keep frozen graph identities.
         if not self.requirement_structures:
             payload.pop("requirement_structures")
+        if not self.requirement_scopes:
+            payload.pop("requirement_scopes")
         if self.schema_version != "3.0":
             payload.pop("absent_semantics")
             payload.pop("feature_assessments")
@@ -358,6 +362,8 @@ def prompt_tsg_record(graph: PromptTSG) -> dict[str, Any]:
         payload.pop("scoped_feature_assessments")
     if not graph.requirement_structures:
         payload.pop("requirement_structures")
+    if not graph.requirement_scopes:
+        payload.pop("requirement_scopes")
     if graph.schema_version != "3.0":
         payload.pop("absent_semantics")
         payload.pop("feature_assessments")
@@ -390,6 +396,8 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
             expected.add("scoped_feature_assessments")
         if "requirement_structures" in value:
             expected.add("requirement_structures")
+        if "requirement_scopes" in value:
+            expected.add("requirement_scopes")
     if set(value) != expected:
         raise PromptTSGError("Prompt TSG serialized fields are invalid")
     try:
@@ -452,6 +460,8 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
                 item["feature_id"], item["state"], tuple(item["requirement_node_ids"]))
                 for item in value.get("scoped_feature_assessments", ())),
             tuple((key, kind, tuple(members)) for key, kind, members in value.get("requirement_structures", ())),
+            tuple((key, kind, tuple(boundaries), target_class)
+                  for key, kind, boundaries, target_class in value.get("requirement_scopes", ())),
         )
     except (KeyError, TypeError, ValueError):
         raise PromptTSGError("Prompt TSG serialized values are invalid") from None
@@ -475,6 +485,7 @@ def build_prompt_tsg(
     feature_assessments: Sequence[Sequence[str]] = (),
     scoped_feature_assessments: Sequence[Mapping[str, Any]] = (),
     requirement_structures: Mapping[str, Mapping[str, Any]] | None = None,
+    requirement_scopes: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PromptTSG:
     """Validate evidence-bound facts and deterministically commit one Prompt TSG."""
 
@@ -632,6 +643,9 @@ def build_prompt_tsg(
         tuple(sorted((local_nodes[key].node_id, row["kind"],
             tuple(sorted(local_nodes[member].node_id for member in row["members"])))
             for key, row in (requirement_structures or {}).items())),
+        tuple(sorted((local_nodes[key].node_id, row['kind'],
+            tuple(sorted(local_nodes[k].node_id for k in row['boundaries'])) or (root.node_id,),
+            row['target_class']) for key, row in (requirement_scopes or {}).items())),
     )
     validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
     return graph
@@ -678,6 +692,18 @@ def validate_prompt_tsg(
         raise PromptTSGError("Prompt TSG task root is invalid")
     semantics = catalog["semantics"]
     asserted_requirements, atomic_requirements = graph_requirement_membership(graph)
+    retained = set()
+    for key, kind, boundaries, target_class in graph.requirement_scopes:
+        if (key in retained or key not in node_by_id or node_by_id[key].node_type not in REQUIREMENT_TYPES
+            or kind not in {'task','each'} or len(boundaries) != 1
+            or boundaries[0] not in node_by_id or node_by_id[boundaries[0]].node_type not in {'task','task_operation'}
+            or kind=='task' and (boundaries != (roots[0].node_id,) or target_class is not None)
+            or kind=='each' and (not isinstance(target_class,str) or not target_class.strip())
+            or any(e.source_id==key and e.edge_type=='constrains' for e in graph.edges)):
+            raise PromptTSGError('retained scope must not be replaced by direct target obligations')
+        retained.add(key)
+    if graph.requirement_scopes != tuple(sorted(graph.requirement_scopes)):
+        raise PromptTSGError('retained requirement scopes must be ordered')
     if graph.requirement_structures != tuple(sorted(graph.requirement_structures)):
         raise PromptTSGError("requirement structures must be ordered")
     guard_owners = {}
@@ -698,6 +724,8 @@ def validate_prompt_tsg(
         if len(keys) != len(set(keys)):
             raise PromptTSGError("operation feature assessments are duplicated")
         for target, feature, state in graph.feature_assessments:
+            if state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==feature for k in retained):
+                raise PromptTSGError('unprojected requirement cannot establish a local negative')
             if (target not in node_by_id or node_by_id[target].node_type != "task_operation"
                 or feature not in semantics or state not in {"present", "absent", "unresolved", "not_applicable"}):
                 raise PromptTSGError("operation feature assessment is invalid")
@@ -714,6 +742,8 @@ def validate_prompt_tsg(
             or len({(item.scope, item.feature_id) for item in scoped}) != len(scoped)):
             raise PromptTSGError("scoped feature assessments must be ordered and unique")
         for item in scoped:
+            if item.state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==item.feature_id for k in retained):
+                raise PromptTSGError('unprojected requirement cannot establish a local negative')
             validate_feature_scope(graph, item.scope)
             domain = catalog.get("feature_scope_domains", {}).get(item.feature_id)
             if item.state != "unresolved" and (

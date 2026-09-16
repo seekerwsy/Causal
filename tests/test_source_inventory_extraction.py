@@ -803,10 +803,10 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     concept['definition'] = 'Redefined known meaning.'
     diagnostics = record_diagnostics(invalid, diagnostic_request)
     assert any('cannot change a supplied meaning' in problem for problem in diagnostics)
-    assert any('task scope is runtime' in problem for problem in diagnostics)
+    assert any('task/each scope is runtime' in problem for problem in diagnostics)
     check = review_request(request, records)
     assert check['operation_role_meanings'] == request['operation_role_meanings']
-    assert 'EVERY runtime operation' in check['record_semantics']['task_scope']
+    assert 'NO per-operation obligation' in check['record_semantics']['task_scope']
     from prompt_mechanism_study.source_records import structural_readback, review_response_format
     readback=structural_readback(request,records)['requirements']['binding']
     assert readback['direct_operation_bindings'][0]['target_operation']=='q'
@@ -865,7 +865,8 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     )
     composite = deepcopy(records)
     parent = deepcopy(composite['requirements'][0])
-    parent.update(record_id='both', structure=dict(kind='and', members=['binding','length']))
+    parent.update(record_id='both', structure=dict(kind='and', members=['binding','length']),
+        scope_kind='composite',operations=[],subjects=[])
     parent['fact']['concept'].update(concept_id='both', definition='Require both binding and the length limit.')
     composite['requirements'].append(parent)
     for leaf in composite['requirements'][:2]:
@@ -956,7 +957,23 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     assert compiled.source_inventory['statement_kinds']['fact.4'] == 'assumption'
     assert len({f['semantic_id'] for f in compiled.facts if f['local_id'] in {'fact.3','fact.4'}}) == 2
     links = {(r['source'],r['edge_type'],r['target']) for r in compiled.relations}
-    assert ('fact.3','constrains','fact.2') in links
+    assert ('fact.3','constrains','fact.2') not in links
+    assert compiled.source_inventory['requirement_scopes']['fact.3']['kind']=='task'
+    retained_graph=compile_task_context_contract(compiled,prompt=task['prompt'],catalog=catalog)
+    assert prompt_tsg_from_record(prompt_tsg_record(retained_graph))==retained_graph
+    assert retained_graph.requirement_scopes[0][1]=='task'
+    # An explicit universal rule survives without claiming a complete instance list.
+    universal=deepcopy(records)
+    universal['requirements'][0].update(scope_kind='each',target_class='database queries')
+    universal_contract=compile_composite(universal)
+    universal_graph=compile_task_context_contract(universal_contract,prompt=task['prompt'],catalog=catalog)
+    assert universal_graph.requirement_scopes[0][1:] == ('each',retained_graph.requirement_scopes[0][2],'database queries')
+    assert prompt_tsg_from_record(prompt_tsg_record(universal_graph))==universal_graph
+    assert not structural_readback(request,universal)['requirements']['binding']['direct_operation_bindings']
+    illegal=deepcopy(universal)
+    illegal['requirements'][0]['operations']=['q','q']
+    with pytest.raises(PromptContractExtractionError,match='zero/one boundary'):
+        compile_composite(illegal)
     assert ('fact.5','conditions','fact.3') in links and ('fact.5','conditions','fact.2') not in links
     from prompt_mechanism_study.candidate_construction import candidate_request, _occurrence
     source = candidate_request([task], [compiled], input_catalog=catalog)['sources'][0]

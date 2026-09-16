@@ -56,6 +56,13 @@ do not split a source node into different candidate meanings or combine differen
 Use declared requirement_structures. Composite parents, OR/NOT members and opaque expressions
 are retained source meaning, not editable Atomic factors. Include only independently asserted
 atomic leaves. A compound meaning mislabeled atom needs source correction; never split it here.
+An atom is only a structural leaf, not semantic certification. Explain the single changeable
+predicate and the other source requirements that must remain. Reusing a factor definition
+does not certify the target and guards of a new occurrence. Retained whole-task/universal
+scopes have no local projection: keep them as constraints, not invented local candidates.
+Read the actual system and user source together. Repeating a requirement already expressed
+by the system is not ABSENT-to-PRESENT; removing its user repetition is not PRESENT-to-ABSENT.
+Unparsed source text still constrains editing; a missing edge is not proof of irrelevance.
 Every proposed factor needs a reusable definition, a short label, an atomicity rationale
 explaining why each cited source node already expresses the same whole atomic requirement,
 and one or more occurrences citing existing requirement node IDs and an exact existing
@@ -118,7 +125,8 @@ def candidate_request(tasks: Sequence[dict], contracts: Sequence[OpenTaskContrac
         sources.append(dict(task_id=graph.task_id, source_prompt=prompt,
                             prompt_sha256=graph.prompt_sha256, prompt_tsg_id=graph.tsg_id,
                             nodes=nodes, edges=canonical_value(sorted(graph.edges, key=lambda e: e.edge_id)),
-                            requirement_structures=canonical_value(graph.requirement_structures)))
+                            requirement_structures=canonical_value(graph.requirement_structures),
+                            retained_requirement_scopes=canonical_value(graph.requirement_scopes)))
     return dict(request_kind="source_graph_requirement_candidates", sources=sources,
                 missing_graph_task_ids=sorted(set(by_task) - seen), arms_or_outcomes_used=False,
                 requirement_granularity="atomic_source_requirement")
@@ -189,6 +197,7 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
     from .prompt_tsg import requirement_membership
     _, atoms = requirement_membership(source.get('requirement_structures', []),
         {key for key,node in nodes.items() if node['node_type'] in _REQUIREMENTS})
+    atoms -= {row[0] for row in source.get('retained_requirement_scopes', [])}
     if (not isinstance(requirements, list) or not requirements or len(set(requirements)) != len(requirements)
             or any(key not in nodes or nodes[key]["node_type"] not in _REQUIREMENTS
                    or nodes[key].get("statement_kind", "obligation") != "obligation" or key not in atoms for key in requirements)):

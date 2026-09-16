@@ -35,8 +35,17 @@ They are not an alternative active workflow.
    In open development, the program assigns new concept identities from exact full
    definitions and node types; provisional model labels cannot merge different atoms.
    Exact unique known meanings retain their supplied IDs. Frozen concepts are unchanged.
-   `scope_kind=task` applies a runtime requirement to all runtime operations;
-   `implementation` binds generation requirements; `targets` names exact local targets.
+   `scope_kind=task` retains an overall runtime-task boundary without producing
+   per-operation obligations. `targets` names direct local targets, including a
+   source-supported aggregate function when the requirement concerns its return,
+   interface or total resource use. `each` retains an explicit universal rule with
+   an open `target_class` and zero/one enclosing operation; it never treats extracted
+   instances as the complete domain. `implementation` binds generation requirements.
+   AND/OR/NOT parents use `composite`, carry shared guards and preserve member
+   structure without adding a separate target obligation. Leaves retain exact targets.
+   Whole-task/universal scopes survive in contract and graph `requirement_scopes`.
+   They cannot certify a local candidate or a local negative until a source-supported
+   projection exists. This narrower usable subset is a reported coverage limit.
    A nested requirement guard produces only condition-to-requirement edges. It cannot
    also gate an operation unless the model separately asserts an execution condition.
    Source-supported `scope_conditions` instead produce non-gating `context_for` edges;
@@ -79,13 +88,19 @@ They are not an alternative active workflow.
    verdict is not an independent guarantee.
 5. **Compile without another semantic interpretation.** Record references produce
    input/output edges, requirement targets, owned guards and stated precedence.
-   Task-wide scope is expanded mechanically. Preview compilation checks the draft;
+   Task-wide scope is never broadcast. Preview compilation checks the draft;
    only the completed graph attempt can reach downstream assessment. Repair or review
    failure retains the failed task and any partial graph, without assessing its scopes.
 6. **Assess candidate scopes separately.** The existing scope call consumes immutable
    source facts/relations. Operation context, required input origin and boundary
    premises must all be supported; a compatible role alone proves no applicability.
    Unknown participation is not represented as definite `input_unspecified` use.
+   `atom` establishes a structural leaf only; factor review must justify the single
+   changeable predicate, its source-bound target/guards and preserved requirements.
+   A reused factor definition does not certify each new occurrence. Editing continues
+   to read the complete original input, including unresolved text. Factor expression
+   is judged over effective system and user messages together: repetition/removing a
+   user repetition does not establish an absent-to-present/present-to-absent change.
    Each source unit declares source-cited `unit_impacts`, checked in the same review.
    Incomplete local units block affected operations; global/unlocalized uncertainty
    remains global. Recorded dependencies expand the affected set as a lower bound.

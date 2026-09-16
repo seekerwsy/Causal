@@ -24,6 +24,17 @@ nodes. The [current TSG workflow](tsg-workflow-stability.md) specifies the bound
 review/repair policy and its development evidence. Historical repair comparisons
 retain their original outcomes.
 
+A structural `atom` is necessary source geometry, not a semantic or editability
+certificate. Existing factor review must justify the one changed predicate and
+the non-target meanings retained. Whole-task and explicitly universal requirements
+are preserved in `retained_requirement_scopes`; no finite local instance list is
+invented from them. Such unprojected requirements are not local Atomic candidates,
+and cannot establish local absence. This is a coverage limit, not source invalidity.
+All editing reads the complete effective system/user input, including unresolved
+requirements. A requirement still expressed by the system cannot become absent by
+deleting its user repetition. Generic template wording is not automatically
+equivalent to a specific policy. Source definition reuse does not certify new binds.
+
 Graph construction now returns an inspectable source graph before any candidate
 state call. `_assess_candidate_scopes` consumes that graph, applies the frozen
 candidate domains and judges applicability/expression. It cannot add, split or

@@ -1947,6 +1947,13 @@ def _represented_unit_operations(contract: OpenTaskContract) -> dict[str, set[st
     for edge in contract.relations:
         if edge["edge_type"] in {"constrains", "conditions", "context_for"} and edge["source"] in runtime:
             links[edge["source"]].add(edge["target"])
+    for key, scope in inventory.get('requirement_scopes', {}).items():
+        # Influence is not a direct obligation: an unprojected global rule can
+        # still affect local edits and must not disappear from unknown handling.
+        links[key].update(scope['boundaries'] or operations)
+    for key, expression in inventory.get('requirement_structures', {}).items():
+        if key in runtime:
+            links[key].update(member for member in expression['members'] if member in runtime)
     result = {}
     for key, coverage in inventory["coverage"].items():
         seen, pending = set(), set(coverage["facts"]) & runtime
@@ -2115,6 +2122,9 @@ def fixed_scope_request(
     inventory_status = _inventory_status(contract)
     blockers = {key: _scope_blockers(contract, inventory_status, row["target"]) for key, row in scopes.items()}
     for key, row in scopes.items():
+        blockers[key] += ['unprojected_requirement:'+fact_id
+            for fact_id in (contract.source_inventory or {}).get('requirement_scopes', {})
+            if facts[fact_id]['semantic_id']==row['concept_id']]
         # A mentioned alternative is neither an independently expressed factor nor
         # evidence of its absence. Keep these coordinates explicitly withheld.
         if not row['admissible_positive_requirements']:
@@ -2183,6 +2193,7 @@ def fixed_scope_request(
         "scopes": {key: row for key, row in scopes.items() if key not in withheld},
         "withheld_scopes": withheld,
         "scope_blockers": {key: reasons for key, reasons in blockers.items() if reasons},
+        "retained_requirement_scopes": (contract.source_inventory or {}).get('requirement_scopes', {}),
         "unit_impacts": {} if contract.source_inventory is None else contract.source_inventory.get("unit_impacts", {}),
         "source_inventory_status": inventory_status,
         "operation_roles": [] if contract.source_inventory is None else contract.source_inventory["operation_roles"],
