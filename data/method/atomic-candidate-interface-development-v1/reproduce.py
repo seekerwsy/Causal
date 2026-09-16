@@ -98,14 +98,16 @@ def edit_probe(task, contract, graph, node, scope, reviewed_edit=None):
             prompt=reviewed_edit["prompt"], catalog=reviewed_edit["input_catalog"])
         before = local_nodes(contract, assessed, task["prompt"])
         after = local_nodes(target_contract, target_graph, reviewed_edit["prompt"])
+        local_map = reviewed_edit.get("source_to_variant_local_nodes",
+            {key: key for key in before.keys() & after.keys()})
         binding = bind_task_hypothesis(assessed, query=query, policy_id="diagnostic_remove",
             factor_feature_ids=(node.semantic_id,), factor_operations=("remove",),
             factor_scopes=(scope,))
         realization = dict(binding_id=binding.binding_id,
             source_prompt_sha256=content_hash(task["prompt"]), enabled=[True],
             prompt=reviewed_edit["prompt"], graph=prompt_tsg_record(target_graph),
-            source_to_variant_nodes={before[key].node_id: after[key].node_id
-                                     for key in before.keys() & after.keys()},
+            source_to_variant_nodes={before[key].node_id: after[target].node_id
+                                     for key, target in local_map.items()},
             source_review=reviewed_edit["source_review"])
         rendered = render_task_hypothesis(binding, assessed, prompt=task["prompt"],
             catalog=contract.catalog, enabled=(True,), additions={}, reviewed_variant=realization)

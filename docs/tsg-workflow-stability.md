@@ -132,6 +132,21 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
+The [current-path validation](experiments/2026-09-16-atomic-current-workflow.md)
+ran the exposed pandoc task under the actual prepared input. Four baseline calls
+produced a graph and repaired missing exception/logging guards, but retained two
+API prohibitions in one atom and combined separately scoped error obligations.
+A single prompt-clarification recheck truncated before compilation; it was not
+adopted, and the default instructions were restored. Five calls cost CNY3.089772
+under conservative accounting. Both frozen executions replay exactly offline.
+Correcting two baseline records locally, with two added atoms, allowed the existing
+candidate draft and reviewed rewrite to handle the fixed subprocess factor while
+retaining the other prohibition. This author correction is not automatic candidate
+discovery or independent qualification. The next research decision concerns a
+bounded downstream comparison with explicit controls and independent measurements,
+keeping the automatic-graph failure and authored correction distinct. No more
+review-prompt iteration is scheduled by this diagnostic.
+
 The latest [single-requirement edit diagnostic](experiments/2026-09-16-atomic-shell-removal.md)
 found a source-audited feasible REMOVE in one exposed pandoc task. Removing only the
 subprocess prohibition preserved the os.system prohibition and non-target behavior.
@@ -141,8 +156,8 @@ shell=True`, leaving a broader prohibition while reporting an intended absent st
 Evidence spans are not automatically editable semantic units, and intended states
 are not measured fidelity. This was an author-audited interface probe, not fresh
 extraction, automatic candidate discovery or independent intervention qualification.
-Next, check this fixed comparison on the current exact-input extraction path before
-expanding tasks or generating code. No additional review component is proposed.
+That result motivated the current-path check above. No additional review component
+was promoted.
 
 The earlier [Atomic interface diagnostic](experiments/2026-09-16-atomic-candidate-interface.md)
 replayed three exposed tasks without provider calls. Correct requirement-only

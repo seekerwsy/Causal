@@ -34,3 +34,10 @@ python data/method/atomic-candidate-interface-development-v1/reproduce.py NEW_OU
 
 See the [follow-up report](../../../docs/experiments/2026-09-16-atomic-shell-removal.md).
 The original three-case inputs and saved results are unchanged and replay exactly.
+
+`current-workflow/` retains the subsequent real-model baseline, the unsuccessful
+prompt-change recheck, and a local author correction on the actual baseline output.
+Its `replay.py` replays frozen wire requests and responses with networking replaced;
+`launch.sh` is a paid execution record, not the reproduction command.
+See the [current-path report](../../../docs/experiments/2026-09-16-atomic-current-workflow.md)
+for the exact offline commands, negative findings and source-review boundaries.
