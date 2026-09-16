@@ -1,0 +1,21 @@
+# Audit of the three fresh-context agent constructions
+
+All three original first attempts compiled. Inspecting **actual graph edges, requirement scopes/composition and contract roles**, this audit found no confirmed critical binding mismatch across the **24 frozen reference requirements**. Every additional requirement and all 17 operation/input/result roles were also checked. This is a positive result on these three exposed tasks, not a stable-quality or population-reliability claim.
+
+| Task | Actual structural evidence | Remaining gap |
+| --- | --- | --- |
+| Firmware | Name/type/size/header constraints point to their exact input objects; containment points to saved path; failure guard conditions a runtime task-scoped requirement; examples keep exact invocation guards. | The current candidate projector cannot use the faithful subject-only safety bindings. Saved path has no structural operation ownership/incidence. |
+| Pandoc | Two prohibited APIs are distinct negative leaves under AND; failure condition points to logging requirement; other-exception restriction remains separately unguarded on the aggregate function. | Single-API candidate normalization/editability is untested. Readback incorrectly labels absence of an execution gate as “UNCONDITIONAL execution.” |
+| Book | Exists/otherwise conditions bind distinct return requirements to the outward function; book-ID assumption targets the input; failure remains conditional at runtime task scope. | This does not supply a security factor or execution oracle. Example tuples are illustrative, not proof of database contents. |
+
+The firmware subject-only constraints are **semantically valid**; zero projected bindings must not be scored as incorrect extraction to force a preferred graph topology. The byte input already has a `used_by` relationship, so a revised projector might use a justified boundary. Saved path is different: the source explicitly returns a status string containing the path, and the provided role contract forbids treating a substring as a whole returned object or inventing that saving produces a filepath. Missing structural ownership remains a separate representational/projection gap.
+
+The logging concern is also kept separate. The record instructions describe execution conditions as necessary “only then” gates. Missing such a gate does not assert that an operation executes on every call. The actual failure guard correctly targets `req_log_on_failure`; source says logging occurs **if** conversion fails, not **only if** it fails, and describes logger use throughout the function. Root adjudicated the old readback label as misleading, without changing references or forcing an invented execution condition. The same distinction prevents reading book's alternative result incidences as simultaneous outputs.
+
+The effective JSON-code/Python/interface-preservation requirements come from the program's fixed template and bind generation only. Pandoc's lower-priority Markdown instruction is explicitly non-effective and produces no opposing obligation. No os.system/subprocess.run call is invented from imports, book ID is correctly a SQL data value rather than a table identifier, and source-example guards do not become universal task requirements.
+
+The [detailed audit](review.json) records hashes, exact graph edges and scopes, all reference mappings, extra requirements and roles. It keeps projection eligibility separate and lists remaining limitations. No constructor output, reference, production code or prior audit was changed. No repair feedback was sent to the constructors.
+
+Next evidence must come from a frozen, reproducible agent procedure on repeated constructions and the predeclared transfer tasks, together with valid candidate use of the resulting scopes. Three favorable first attempts cannot establish those outcomes.
+
+The later prospective decoder clarification is now present in `source_records.py`: “NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path.” This audit verified that text separately. The original pilot readback and execution archive remain unchanged. It does not alter requirement-condition semantics or forgive a guard that exists only in prose.

@@ -60,6 +60,109 @@ def _compile(task, catalog, wire):
         annotator_id="source-authored-offline-fixture", review_status="development_exposed")
 
 
+def test_independent_obligation_inventory_preserves_binding_evidence_and_uncertainty():
+    from copy import deepcopy
+    from prompt_mechanism_study.source_records import (
+        record_request, obligation_inventory_request, obligation_inventory_response_format,
+        validate_obligation_inventory,
+    )
+    task = prepare_task_input(dict(task_id='authored-independent-obligation-inventory', language='python',
+        prompt='Function process(value, base). When ready, redact or withhold value within base. '
+        'Across the task allocate at most ten units. Every output must be redacted.'))
+    original = record_request(contract_decision_request(task, open_concept_catalog()))
+    original.update(records={'private_draft_sentinel': 'draft'},
+        reference_answer='private_reference_sentinel', graph={'private_graph_sentinel': 'graph'})
+    request = obligation_inventory_request(original, task=task)
+    assert set(request) == {'request_kind', 'source_prompt', 'source_units', 'instructions'}
+    assert request['source_prompt'] == task['prompt']
+    from prompt_mechanism_study.prompt_contract_extract import _source_units
+    expected_units = _source_units(task, fixed_template=False)
+    assert request['source_units'] == {key: {name: item for name, item in row.items()
+        if name not in {'evidence_start_token', 'evidence_end_token'}} for key, row in expected_units.items()}
+    assert len(request['source_units']) > len(original['source_units'])
+    assert any(row['evidence_text'] == 'python' for row in request['source_units'].values())
+    assert any(row['evidence_text'] in task['generation_input']['system_prompt']
+        for row in request['source_units'].values())
+    assert 'sentinel' not in json.dumps(request)
+    schema = obligation_inventory_response_format(request)['json_schema']
+    assert schema['strict']
+    descriptions = schema['schema']['properties']['requirements']['items']['properties']
+    assert 'Empty for task, implementation and composite' in descriptions['targets']['description']
+    assert 'Neutral identity' in schema['schema']['properties']['entities']['items']['properties']['meaning']['description']
+    wrong_source = deepcopy(original)
+    wrong_source['source_prompt'] += ' Changed source.'
+    with pytest.raises(PromptContractExtractionError, match='differs from the supplied task'):
+        obligation_inventory_request(wrong_source, task=task)
+    def evidence(quote):
+        unit = next(key for key, row in request['source_units'].items() if quote in row['evidence_text'])
+        return [dict(unit=unit, quote=quote)]
+    def requirement(key, content, quote, **fields):
+        return dict(id=key, content=content, modality='obligation', structure='atom', members=[],
+            boundary='targets', targets=['e2'], references=['e3'], target_class=None, guards=[],
+            source=evidence(quote), **fields)
+    rows = [requirement('r1', 'Redact the value.', 'redact or withhold value within base'),
+            requirement('r2', 'Withhold the value.', 'redact or withhold value within base'),
+            requirement('r3', 'Choose redaction or withholding.', 'When ready, redact or withhold value within base'),
+            requirement('r4', 'Allocate at most ten units in total.', 'Across the task allocate at most ten units'),
+            requirement('r5', 'Redact each output.', 'Every output must be redacted')]
+    rows[2].update(structure='or', members=['r1', 'r2'], boundary='composite', targets=[], references=[],
+        guards=[dict(meaning='Processing is ready.', source=evidence('When ready'))])
+    rows[3].update(boundary='task', targets=[], references=[])
+    rows[4].update(boundary='each', targets=['e1'], references=[], target_class='Every output')
+    value = dict(entities=[dict(id=key, meaning=meaning, source=evidence(quote)) for key, meaning, quote in [
+        ('e1', 'The process function.', 'Function process'),
+        ('e2', 'The value being handled.', 'value, base'),
+        ('e3', 'The enclosing base.', 'within base')]], requirements=rows,
+        coverage={unit: dict(status='no_requirement', requirements=[]) for unit in request['source_units']},
+        unresolved_notes=[])
+    def coverage(payload):
+        for row in payload['coverage'].values():
+            row.update(status='no_requirement', requirements=[])
+        for row in payload['requirements']:
+            for unit in {item['unit'] for item in row['source']}:
+                target = payload['coverage'][unit]
+                target['requirements'].append(row['id'])
+                uncertain = row['boundary'] == 'unresolved' or row['modality'] == 'unresolved' or row['structure'] == 'opaque'
+                target['status'] = 'unresolved' if uncertain or target['status'] == 'unresolved' else 'represented'
+        return payload
+    value = coverage(value)
+    checked = validate_obligation_inventory(value, request=request)
+    assert checked == value and checked is not value
+    assert checked['requirements'][0]['targets'] == ['e2']
+    assert checked['requirements'][0]['references'] == ['e3']
+    assert checked['requirements'][2]['guards'][0]['source'] == evidence('When ready')
+    # Effective system/language obligations now have literal evidence coordinates
+    # even when the ordinary source-record request relies on injected templates.
+    all_input = deepcopy(value)
+    system_unit, system_row = next((key, row) for key, row in request['source_units'].items()
+        if row['evidence_text'] in task['generation_input']['system_prompt'])
+    system_requirement = requirement('r6', system_row['evidence_text'], system_row['evidence_text'])
+    system_requirement.update(boundary='implementation', targets=[], references=[])
+    all_input['requirements'].append(system_requirement)
+    validate_obligation_inventory(coverage(all_input), request=request)
+    # These controls test representational mechanics, not semantic truth of a
+    # model-generated inventory or entailment of the altered authored predicates.
+    for structure in ('and', 'not', 'opaque'):
+        other = deepcopy(value)
+        parent = other['requirements'][2]
+        parent.update(structure=structure, members=['r1'] if structure == 'not' else ['r1', 'r2'])
+        if structure == 'opaque':
+            parent.update(members=[], boundary='unresolved')
+        validate_obligation_inventory(coverage(other), request=request)
+    malformed = []
+    bad = deepcopy(value); bad['entities'][0]['source'][0]['quote'] = 'invented source words'; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][0]['targets'] = ['missing']; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][3]['targets'] = ['e1']; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][4]['target_class'] = None; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][0]['modality'] = 'assumption'; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][3]['boundary'] = 'unresolved'; malformed.append(bad)
+    bad = deepcopy(value); next(row for row in bad['coverage'].values() if row['requirements'])['requirements'] = []; malformed.append(bad)
+    bad = deepcopy(value); bad['requirements'][0].update(structure='not', members=['r3'], boundary='composite', targets=[]); malformed.append(bad)
+    for bad in malformed:
+        with pytest.raises(PromptContractExtractionError):
+            validate_obligation_inventory(bad, request=request)
+
+
 def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
     from copy import deepcopy
     from prompt_mechanism_study.prompt_contract_extract import source_annotation_diagnostics
@@ -808,6 +911,7 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     assert check['operation_role_meanings'] == request['operation_role_meanings']
     assert 'NO per-operation obligation' in check['record_semantics']['task_scope']
     from prompt_mechanism_study.source_records import structural_readback, review_response_format
+    assert structural_readback(request,records)['operations']['q']['execution_guard'].startswith('NO DECLARED EXECUTION GUARD:')
     readback=structural_readback(request,records)['requirements']['binding']
     assert readback['direct_operation_bindings'][0]['target_operation']=='q'
     assert readback['requirement_guards'][0]['predicate']=='The request is external.'

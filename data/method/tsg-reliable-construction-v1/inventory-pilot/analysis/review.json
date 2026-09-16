@@ -1,0 +1,1393 @@
+{
+  "status": "SOURCE_AUDITED_REJECTED_PILOT_NOT_QUALITY_ACCEPTANCE",
+  "reference_path": "data/method/tsg-reliable-construction-v1/reference/references.json",
+  "reference_sha256": "81827a15ae1026c06a8d00ca69edc01327b40e5ac212fd9a0f6ad08c81cff028",
+  "basis": "Original three saved provider calls, their exact wire content and usage, original result.json failures, frozen source references, and archived validator source. No output/reference was repaired or reinterpreted as accepted. No provider reasoning text is used as an answer.",
+  "execution_archive_sha256": "00b591c5ecc32dce61ace35e62b9f28b6c3a94453a9e5d0494aad2a26385ad8f",
+  "calls": [
+    {
+      "ordinal": 1,
+      "case_id": "firmware",
+      "task_id": "semantic_cluster_8e68e4595593c3150af924ac60842b2061bac2dcb6ddaa3ff350f87ba2bbdfd0",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/calls/01/call.json",
+      "call_sha256": "d527bdb5274b5a2c02e0ffc345cf971c9105210956cdc5ae30f746688f24795f",
+      "request_identity": "9292fbf85f16d849f528da911e18d7773b2c87ed67e12dc0b9b5af5aae8af8a7",
+      "model_id": "deepseek-flash",
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 3944,
+        "completion_tokens": 13007,
+        "total_tokens": 16951,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 10773
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 3944
+      },
+      "answer_characters": 7839,
+      "provider_error": null,
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/cases/01-single/result.json",
+      "original_result": {
+        "condition": "single",
+        "error_message": "r10: boundary must not broadcast into direct targets",
+        "error_type": "PromptContractExtractionError",
+        "inventory": null,
+        "task_id": "semantic_cluster_8e68e4595593c3150af924ac60842b2061bac2dcb6ddaa3ff350f87ba2bbdfd0"
+      },
+      "accepted_inventory": false,
+      "raw_json_complete": true,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "records": [
+            "r1"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "represented_jointly",
+          "reason": "Exact function/arguments appear in entity e1 and r1, but r1 also carries storage behavior; no separately bound interface requirement is supplied. This is not a missing source name, nor proof of separately editable interface.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "save_firmware_blob(blob_name, blob_bytes, upload_dir) must store an uploaded firmware blob.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2",
+                "e3",
+                "e4",
+                "e5"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The `save_firmware_blob(blob_name, blob_bytes, upload_dir)` operation that stores an uploaded firmware blob.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "store",
+          "records": [
+            "r1"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Targets named aggregate storage operation; objects e2/e3/e4/e5 are references, not falsely constrained targets.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "save_firmware_blob(blob_name, blob_bytes, upload_dir) must store an uploaded firmware blob.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2",
+                "e3",
+                "e4",
+                "e5"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The `save_firmware_blob(blob_name, blob_bytes, upload_dir)` operation that stores an uploaded firmware blob.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "name_type",
+          "records": [
+            "r2"
+          ],
+          "target_entity_ids": [
+            "e3"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Non-empty string requirement targets blob_name, with no invented timing guard.",
+          "exact_output_records": [
+            {
+              "id": "r2",
+              "content": "blob_name must be a non-empty string.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive)."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e3",
+              "meaning": "The `blob_name` argument, constrained as a non-empty string ending in `.bin` case-insensitively and not allowing a non-`.bin` last extension.",
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive)."
+                },
+                {
+                  "unit": "u4",
+                  "quote": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "extension",
+          "records": [
+            "r3",
+            "r4"
+          ],
+          "target_entity_ids": [
+            "e3"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Case-insensitive .bin ending and parenthetical last-extension rule are retained; both source occurrences remain. No independent REMOVE qualification follows.",
+          "exact_output_records": [
+            {
+              "id": "r3",
+              "content": "blob_name must end with \".bin\" case-insensitively.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [
+                "e9"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive)."
+                }
+              ]
+            },
+            {
+              "id": "r4",
+              "content": "blob_name must not have a double extension such as \".bin.exe\" or \".bin.php\"; the last extension must be exactly \".bin\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [
+                "e9"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e3",
+              "meaning": "The `blob_name` argument, constrained as a non-empty string ending in `.bin` case-insensitively and not allowing a non-`.bin` last extension.",
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive)."
+                },
+                {
+                  "unit": "u4",
+                  "quote": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "byte_type",
+          "records": [
+            "r5"
+          ],
+          "target_entity_ids": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Complete bytes-or-bytearray type predicate; no conjunction of mutually exclusive types asserted.",
+          "exact_output_records": [
+            {
+              "id": "r5",
+              "content": "blob_bytes must be bytes or bytearray.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e4",
+              "meaning": "The `blob_bytes` argument, constrained as bytes or bytearray with size <= 256KB and starting with the magic header.",
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+                },
+                {
+                  "unit": "u6",
+                  "quote": "- The firmware must start with the 4-byte magic header b\"FWR1\"."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "size",
+          "records": [
+            "r6"
+          ],
+          "target_entity_ids": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "<=256KB retained on blob_bytes; no unsupported decimal/binary numeric interpretation introduced.",
+          "exact_output_records": [
+            {
+              "id": "r6",
+              "content": "blob_bytes size must be <= 256KB.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e4",
+              "meaning": "The `blob_bytes` argument, constrained as bytes or bytearray with size <= 256KB and starting with the magic header.",
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+                },
+                {
+                  "unit": "u6",
+                  "quote": "- The firmware must start with the 4-byte magic header b\"FWR1\"."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "magic",
+          "records": [
+            "r7"
+          ],
+          "target_entity_ids": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Exact FWR1 prefix applies to blob bytes; header e8 is comparator/reference, not the constrained object.",
+          "exact_output_records": [
+            {
+              "id": "r7",
+              "content": "The firmware blob must start with the 4-byte magic header b\"FWR1\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [
+                "e8"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "- The firmware must start with the 4-byte magic header b\"FWR1\"."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e4",
+              "meaning": "The `blob_bytes` argument, constrained as bytes or bytearray with size <= 256KB and starting with the magic header.",
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+                },
+                {
+                  "unit": "u6",
+                  "quote": "- The firmware must start with the 4-byte magic header b\"FWR1\"."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "containment",
+          "records": [
+            "r8"
+          ],
+          "target_entity_ids": [
+            "e6"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Saved path e6 is direct target and upload_dir e5 is reference/comparator; this avoids the previous directory-as-subject error. This is source-only raw evidence, not a paired algorithm gain.",
+          "exact_output_records": [
+            {
+              "id": "r8",
+              "content": "The saved path must be inside upload_dir (prevent path traversal).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e6"
+              ],
+              "references": [
+                "e5"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "- The saved path must be inside `upload_dir` (prevent path traversal)."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e6",
+              "meaning": "The saved full path (`<full_path>`) inside `upload_dir`.",
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "- The saved path must be inside `upload_dir` (prevent path traversal)."
+                },
+                {
+                  "unit": "u8",
+                  "quote": "- Return: \"Firmware stored at <full_path>\"."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "return",
+          "records": [
+            "r9"
+          ],
+          "target_entity_ids": [
+            "e7"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Target e7 is explicitly the returned message. Frozen reference permits normal-return boundary in target instead of a separate success guard; do not call empty guards a missing explicit condition here.",
+          "exact_output_records": [
+            {
+              "id": "r9",
+              "content": "Return \"Firmware stored at <full_path>\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e7"
+              ],
+              "references": [
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "- Return: \"Firmware stored at <full_path>\"."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e7",
+              "meaning": "The returned message string `\"Firmware stored at <full_path>\"`.",
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "- Return: \"Firmware stored at <full_path>\"."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "failure",
+          "records": [
+            "r10"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "wrong_decisive_raw_scope",
+          "reason": "The source failure guard is explicitly present, but boundary=implementation incorrectly classifies runtime exception behavior as generation behavior; targets=[e1] also violates the original validator. Clearing targets alone would not repair semantic classification.",
+          "exact_output_records": [
+            {
+              "id": "r10",
+              "content": "The implementation should raise an appropriate exception.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e10"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "when it cannot complete the task successfully",
+                  "source": [
+                    {
+                      "unit": "u9",
+                      "quote": "when it cannot complete the task successfully"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u9",
+                  "quote": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The `save_firmware_blob(blob_name, blob_bytes, upload_dir)` operation that stores an uploaded firmware blob.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "mechanical_failures": [
+        {
+          "type": "forbidden_scope_target_combination",
+          "violations": [
+            {
+              "record_id": "r10",
+              "boundary": "implementation",
+              "targets": [
+                "e1"
+              ]
+            }
+          ],
+          "observed_result": "first_original_validator_failure",
+          "archived_validator_location": "src/prompt_mechanism_study/source_records.py:250"
+        },
+        {
+          "type": "coverage_requirement_source_incoherence",
+          "violations": [
+            {
+              "source_unit": "u12",
+              "coverage_status": "represented",
+              "record_id": "r2",
+              "record_cited_units": [
+                "u3"
+              ]
+            },
+            {
+              "source_unit": "u12",
+              "coverage_status": "represented",
+              "record_id": "r3",
+              "record_cited_units": [
+                "u3"
+              ]
+            },
+            {
+              "source_unit": "u13",
+              "coverage_status": "represented",
+              "record_id": "r5",
+              "record_cited_units": [
+                "u5"
+              ]
+            },
+            {
+              "source_unit": "u13",
+              "coverage_status": "represented",
+              "record_id": "r6",
+              "record_cited_units": [
+                "u5"
+              ]
+            },
+            {
+              "source_unit": "u13",
+              "coverage_status": "represented",
+              "record_id": "r7",
+              "record_cited_units": [
+                "u6"
+              ]
+            },
+            {
+              "source_unit": "u14",
+              "coverage_status": "represented",
+              "record_id": "r8",
+              "record_cited_units": [
+                "u7"
+              ]
+            },
+            {
+              "source_unit": "u15",
+              "coverage_status": "represented",
+              "record_id": "r1",
+              "record_cited_units": [
+                "u1"
+              ]
+            },
+            {
+              "source_unit": "u17",
+              "coverage_status": "represented",
+              "record_id": "r9",
+              "record_cited_units": [
+                "u8"
+              ]
+            },
+            {
+              "source_unit": "u19",
+              "coverage_status": "unresolved",
+              "record_id": "r8",
+              "record_cited_units": [
+                "u7"
+              ]
+            },
+            {
+              "source_unit": "u19",
+              "coverage_status": "unresolved",
+              "record_id": "r10",
+              "record_cited_units": [
+                "u9"
+              ]
+            },
+            {
+              "source_unit": "u20",
+              "coverage_status": "represented",
+              "record_id": "r7",
+              "record_cited_units": [
+                "u6"
+              ]
+            },
+            {
+              "source_unit": "u21",
+              "coverage_status": "represented",
+              "record_id": "r8",
+              "record_cited_units": [
+                "u7"
+              ]
+            },
+            {
+              "source_unit": "u22",
+              "coverage_status": "represented",
+              "record_id": "r1",
+              "record_cited_units": [
+                "u1"
+              ]
+            },
+            {
+              "source_unit": "u24",
+              "coverage_status": "represented",
+              "record_id": "r9",
+              "record_cited_units": [
+                "u8"
+              ]
+            }
+          ],
+          "inverse_violations": [],
+          "observed_result": "additional_static_audit_not_original_failure_when_nonempty",
+          "archived_validator_location": "src/prompt_mechanism_study/source_records.py:278"
+        }
+      ],
+      "semantic_or_consistency_findings": [
+        {
+          "code": "runtime_misclassified_as_generation",
+          "severity": "critical_semantic_error",
+          "record_id": "r10",
+          "detail": "The implementation word in natural source denotes runtime implementation behavior; it does not place raising failure exceptions in answer-generation scope."
+        },
+        {
+          "code": "entity_identity_contains_requirement_contents",
+          "severity": "representation_risk_not_new_source_fact_error",
+          "entity_ids": [
+            "e3",
+            "e4",
+            "e6"
+          ],
+          "detail": "Name/bytes/path entity meanings already incorporate extension, size/header or containment requirements. Those are source-supported text but not neutral identities; downstream matching must not preserve target-policy presence by entity identity after removal."
+        },
+        {
+          "code": "source_example_coverage_not_record_evidence",
+          "severity": "interface_incoherence",
+          "detail": "14 coverage links across 10 example units name records whose source citations only point at rules. This is not 14 independent semantic errors. The prompt asks for coverage but does not explicitly state its stricter bidirectional citation invariant; schema permits the mismatch."
+        },
+        {
+          "code": "uncertainty_stays_about_strategy",
+          "severity": "correct_uncertainty",
+          "detail": "The ../escape.bin note does not turn source policy into outside-path permission; containment remains definite while rejection/sanitization strategy is unspecified."
+        }
+      ],
+      "explicit_guard_records": [
+        {
+          "record_id": "r10",
+          "boundary": "implementation",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "when it cannot complete the task successfully",
+              "source": [
+                {
+                  "unit": "u9",
+                  "quote": "when it cannot complete the task successfully"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "raw_entity_count": 10,
+      "raw_requirement_count": 10,
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "c01dbe982cdd266df009a901fcc7fd6c0737bbc18dca42fa5a415d20b893e4f2",
+      "source_record_prepared_prompt_identity": "1001a4e69d0b1c094e7770deafbdb1dc88307135030c4d8c99d0863d37223d13",
+      "identity_note": "Raw UTF-8 hash and repository prepared_prompt identity use different encodings. Exact source string was independently compared to the original case task.prompt referenced by the frozen reference."
+    },
+    {
+      "ordinal": 2,
+      "case_id": "pandoc",
+      "task_id": "semantic_cluster_0466300920523f5a7b7cd6f1eeeceba0ca217e6b8b3ed3fc9e1b16d2b4769717",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/calls/02/call.json",
+      "call_sha256": "c6fd1c63770457ee4ccb43f57db303d5db51cad5e2888c96aec16fdd10986f00",
+      "request_identity": "5c0df55870f368bb80c47e7f9ea837bd9b2ffc1a4889add7c046e460ba72aa59",
+      "model_id": "deepseek-flash",
+      "finish_reason": "length",
+      "usage": {
+        "prompt_tokens": 3567,
+        "completion_tokens": 16384,
+        "total_tokens": 19951,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 16384
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 3567
+      },
+      "answer_characters": 0,
+      "provider_error": {
+        "message": "provider completion did not finish with stop (finish_reason='length')",
+        "type": "JudgeGateError"
+      },
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/cases/02-single/result.json",
+      "original_result": {
+        "condition": "single",
+        "error_message": "provider completion did not finish with stop (finish_reason='length')",
+        "error_type": "JudgeGateError",
+        "inventory": null,
+        "task_id": "semantic_cluster_0466300920523f5a7b7cd6f1eeeceba0ca217e6b8b3ed3fc9e1b16d2b4769717"
+      },
+      "accepted_inventory": false,
+      "raw_json_complete": false,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "conversion",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "return",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "missing",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "failure_log",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "other_exception",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "os_system",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        },
+        {
+          "reference_id": "shell_run",
+          "records": [],
+          "status": "not_delivered_due_to_provider_length_stop",
+          "reason": "No final answer content. Not a semantically audited partial graph or an accepted negative/unknown state."
+        }
+      ],
+      "mechanical_failures": [
+        {
+          "type": "completion_limit",
+          "detail": "All 16384 reported completion tokens are reasoning_tokens; final message.content is empty. Nothing was returned for inventory parsing or semantic acceptance."
+        }
+      ],
+      "semantic_or_consistency_findings": [
+        {
+          "code": "no_semantic_output",
+          "severity": "provider_delivery_failure",
+          "detail": "Cannot infer whether final API splitting, failure logging, guards, targets or composition would have been correct. Do not mine provider reasoning text as the answer."
+        }
+      ],
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "dd4b84f23829d5e9dbf68ebd3df57857f932b64721fd25dff343ffb5bf509be6",
+      "source_record_prepared_prompt_identity": "27ee491f4167354d73c8ff2b1d040f5926c69097ffa2ad30e924c9895af0312f",
+      "identity_note": "Raw UTF-8 hash and repository prepared_prompt identity use different encodings. Exact source string was independently compared to the original case task.prompt referenced by the frozen reference."
+    },
+    {
+      "ordinal": 3,
+      "case_id": "book",
+      "task_id": "semantic_cluster_6dfe13740cd07210e6659ced71325a45262c0dc1ddf93dc329dc3f950170ba38",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/calls/03/call.json",
+      "call_sha256": "1dad7dd5c3f8bcadc6a0da7b18f0240c2e218675bb45d4937f85e7a64fb04441",
+      "request_identity": "f1bb843e6a3aad8b197cda69280fe6a484382b13eff13c606dcc18fa8fed7328",
+      "model_id": "deepseek-flash",
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 2860,
+        "completion_tokens": 13485,
+        "total_tokens": 16345,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 12115
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2860
+      },
+      "answer_characters": 5198,
+      "provider_error": null,
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-pilot/server-results/run/cases/03-single/result.json",
+      "original_result": {
+        "condition": "single",
+        "error_message": "r1: boundary must not broadcast into direct targets",
+        "error_type": "PromptContractExtractionError",
+        "inventory": null,
+        "task_id": "semantic_cluster_6dfe13740cd07210e6659ced71325a45262c0dc1ddf93dc329dc3f950170ba38"
+      },
+      "accepted_inventory": false,
+      "raw_json_complete": true,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "records": [
+            "r1"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "semantics_present_invalid_interface_combination",
+          "reason": "Named get_book_details(book_id) obligation is a legitimate generation/interface requirement, but boundary=implementation with targets=[e1] violates the original interface. This differs from firmware r10: generation classification itself is not erroneous here.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "Implement a function named get_book_details(book_id).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function named get_book_details that takes a book_id argument.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "database",
+          "records": [
+            "r2"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Aggregate function is required to perform lookup; database, table and book ID e2/e3/e4 are references. A separate connection implementation is not invented.",
+          "exact_output_records": [
+            {
+              "id": "r2",
+              "content": "Retrieve a row from the books table in the SQLite database at './Test/CWE-89_03/books.db' for the given book ID.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2",
+                "e3",
+                "e4"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID"
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function named get_book_details that takes a book_id argument.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "found",
+          "records": [
+            "r3"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Tuple fields and order retained; explicit row-exists guard; target named outward function, not connection/query intermediate. A separate return node is not mandated by the reference.",
+          "exact_output_records": [
+            {
+              "id": "r3",
+              "content": "If the row exists for the given book ID, return it as a tuple (book_id, title, author, price).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e5"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "the row exists",
+                  "source": [
+                    {
+                      "unit": "u2",
+                      "quote": "if it exists"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "Return the row as a tuple (book_id, title, author, price) if it exists"
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function named get_book_details that takes a book_id argument.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "absent",
+          "records": [
+            "r4"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "None consequent with explicit otherwise/not-exists guard targets function.",
+          "exact_output_records": [
+            {
+              "id": "r4",
+              "content": "If the row does not exist, return None.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "the row does not exist (otherwise)",
+                  "source": [
+                    {
+                      "unit": "u2",
+                      "quote": "otherwise"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "otherwise return None"
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function named get_book_details that takes a book_id argument.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "id_assumption",
+          "records": [
+            "r5"
+          ],
+          "target_entity_ids": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw_with_uncertainty_conflict",
+          "reason": "Structured modality=assumption is correct and target is book_id, but free unresolved_notes later doubts that modality. Do not convert that model doubt into reference ambiguity or mark source invalid.",
+          "exact_output_records": [
+            {
+              "id": "r5",
+              "content": "Book IDs are expected to contain only letters and digits.",
+              "modality": "assumption",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "Book IDs are expected to contain only letters and digits."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e4",
+              "meaning": "The book ID argument book_id, expected to contain only letters and digits.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "for the given book ID"
+                },
+                {
+                  "unit": "u3",
+                  "quote": "Book IDs are expected to contain only letters and digits."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "failure",
+          "records": [
+            "r6"
+          ],
+          "target_entity_ids": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Failure exception has explicit cannot-complete guard and runtime targets boundary; record absence is not made its condition.",
+          "exact_output_records": [
+            {
+              "id": "r6",
+              "content": "Raise an appropriate exception when the implementation cannot complete the task successfully.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e7"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "the implementation cannot complete the task successfully",
+                  "source": [
+                    {
+                      "unit": "u4",
+                      "quote": "when it cannot complete the task successfully"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "The implementation should raise an appropriate exception when it cannot complete the task successfully."
+                }
+              ]
+            }
+          ],
+          "exact_target_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function named get_book_details that takes a book_id argument.",
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "mechanical_failures": [
+        {
+          "type": "forbidden_scope_target_combination",
+          "violations": [
+            {
+              "record_id": "r1",
+              "boundary": "implementation",
+              "targets": [
+                "e1"
+              ]
+            }
+          ],
+          "observed_result": "first_original_validator_failure",
+          "archived_validator_location": "src/prompt_mechanism_study/source_records.py:250"
+        },
+        {
+          "type": "coverage_requirement_source_incoherence",
+          "violations": [],
+          "inverse_violations": [],
+          "observed_result": "additional_static_audit_not_original_failure_when_nonempty",
+          "archived_validator_location": "src/prompt_mechanism_study/source_records.py:278"
+        }
+      ],
+      "semantic_or_consistency_findings": [
+        {
+          "code": "generation_interface_target_combination",
+          "severity": "interface_incoherence",
+          "record_id": "r1",
+          "detail": "Source meaning is present but nonempty implementation targets are invalid under this frozen interface. Unlike firmware r10, this is not a runtime/generation category error."
+        },
+        {
+          "code": "modality_vs_unresolved_notes_conflict",
+          "severity": "incoherent_uncertainty",
+          "record_id": "r5",
+          "detail": "r5 commits assumption and u3 represented. Notes nevertheless say validation-vs-assumption is unresolved and later revisit it. Structured decision and free notes disagree; no structured obligation-to-validate is actually asserted."
+        },
+        {
+          "code": "quote_style_spurious_uncertainty",
+          "severity": "overcautious_unsupported_ambiguity",
+          "detail": "The examples are tuple values, not a demand for a display quote style. Unresolved presentation wording should not become a global blocker; frozen reference has no such disputed formatting requirement."
+        },
+        {
+          "code": "entity_identity_contains_premise",
+          "severity": "representation_risk_not_wrong_modality",
+          "entity_ids": [
+            "e4"
+          ],
+          "detail": "book_id entity incorporates expected alphanumeric content while r5 separately represents the assumption. This is redundant semantic entanglement, not evidence it prescribed validation."
+        }
+      ],
+      "explicit_guard_records": [
+        {
+          "record_id": "r3",
+          "boundary": "targets",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "the row exists",
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "if it exists"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_id": "r4",
+          "boundary": "targets",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "the row does not exist (otherwise)",
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "otherwise"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_id": "r6",
+          "boundary": "targets",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "the implementation cannot complete the task successfully",
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "when it cannot complete the task successfully"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "raw_entity_count": 7,
+      "raw_requirement_count": 6,
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "a554758e25d6c2aa483de464db1b61dd18195e5ce80c36f63de014223bbc2d45",
+      "source_record_prepared_prompt_identity": "a45f3e43c1eef6ff782f192e4745976e5f92f5df45f4228f18a9d11007b8cc44",
+      "identity_note": "Raw UTF-8 hash and repository prepared_prompt identity use different encodings. Exact source string was independently compared to the original case task.prompt referenced by the frozen reference."
+    }
+  ],
+  "summary": {
+    "provider_calls": 3,
+    "stop_with_complete_json": 2,
+    "length_with_no_final_content": 1,
+    "accepted_inventories": 0,
+    "compiled_graphs": 0,
+    "observed_first_validator_failures": 2,
+    "critical_wrong_decisive_raw_scope_bindings": [
+      {
+        "case_id": "firmware",
+        "record_id": "r10"
+      }
+    ],
+    "correct_explicit_guard_payloads": [
+      {
+        "case_id": "firmware",
+        "record_id": "r10",
+        "remaining_scope_error": true
+      },
+      {
+        "case_id": "book",
+        "record_id": "r3"
+      },
+      {
+        "case_id": "book",
+        "record_id": "r4"
+      },
+      {
+        "case_id": "book",
+        "record_id": "r6"
+      }
+    ],
+    "firmware_additional_coverage_pairs_without_cited_unit": 14,
+    "candidate_and_edit_results": "not_executed",
+    "quality_gate": "NOT_MET",
+    "stable_quality_claim": false
+  },
+  "request_interface_findings": [
+    {
+      "finding": "Scope combinations checked only after response",
+      "evidence": "JSON schema allows implementation with nonempty targets; text says composite has no targets but does not explicitly say implementation/task must have none. Both complete answers violate the same invariant. Firmware also has true semantic layer error, so mechanical coercion alone is insufficient."
+    },
+    {
+      "finding": "Coverage is a second independently generated citation map",
+      "evidence": "Schema independently asks requirements.source and coverage requirements. Validator demands bidirectional identity but prompt only describes source-unit coverage; firmware populates example coverage semantically without repeated source citations."
+    },
+    {
+      "finding": "Full source vs available citation domain",
+      "evidence": "Requests include entire effective system text but source_units only index user task lines. Inventory cannot cite system JSON-format text under its schema. Program-owned fixed system facts need an explicit exemption/declaration for this independent observer; lack of system inventory records is not scored as a new omission under the 48 frozen user-source requirements."
+    },
+    {
+      "finding": "Thinking competes with delivered JSON under shared token limit",
+      "evidence": "Pandoc completion=reasoning=16384 and empty content; other two calls also use 10773/13007 and 12115/13485 completion tokens for reasoning. Do not conflate this failure with prior Qwen Flash long-answer truncation."
+    }
+  ],
+  "next_decisions_supported": [
+    "Clarify and mechanically enforce what is already structural: disallowed scope-target combinations and a single citation-derived coverage map. Avoid asking model to duplicate mechanically derivable linkage.",
+    "Keep an explicit runtime-vs-generation semantic check: firmware failure guard was captured but its scope was wrong.",
+    "Control reasoning/output allocation before another bounded delivery pilot; do not accept a length-stopped answer or provider deliberation as an inventory.",
+    "Give entity identities a neutral referent purpose; keep assertions and uncertainty in their structural owners rather than conflicting prose.",
+    "No promotion to default agent construction or stability claim: this pilot contains zero accepted inventories and no compiled graph, candidate qualification, or edit."
+  ]
+}

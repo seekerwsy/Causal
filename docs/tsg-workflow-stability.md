@@ -21,6 +21,13 @@ The model no longer receives a separate free binding task. Ordinary extraction a
 and retained fixtures; frozen old runs reproduce with their own execution archives.
 They are not an alternative active workflow.
 
+The [September 17 reliability checks](experiments/2026-09-17-tsg-reliable-construction.md)
+keep independent obligation inventories experimental: complete output and valid
+structure did not guarantee correct guards, scope or composition. Candidate delivery
+now uses one exact requirement key per decision and program-restored bindings;
+semantic eligibility still needs review. Bounded source-only construction agents are
+development diagnostics, not an additional default reviewer or qualification.
+
 1. **Prepare exact input.** `task_input.py` combines actual system/user messages and
    declared language. The program indexes source units; users do not manually number
    files. Generation must use the corresponding input. Recognized fixed system
@@ -50,6 +57,9 @@ They are not an alternative active workflow.
    single policy meaning; opaque or differing member bindings remain unresolved.
    A nested requirement guard produces only condition-to-requirement edges. It cannot
    also gate an operation unless the model separately asserts an execution condition.
+   An absent operation execution guard is not a claim that the operation executes on
+   every path. Prompt TSG is not an execution trace. In contrast, a requirement's
+   empty guard supplies no conditional restriction on that requirement's binding.
    Source-supported `scope_conditions` instead produce non-gating `context_for` edges;
    independent context cannot be inferred merely from a target requirement's guard.
 3. **Distinguish modality.** `obligation` prescribes behavior. `assumption` records an
@@ -292,7 +302,7 @@ Each frozen development batch includes inputs, exact execution source, provider
 requests/responses and retained failures. The record trace permits exact mechanical
 replay including review and patch. Independent source references and assertion review
 remain necessary to judge the resulting semantics. The current Atomic default suite
-has 102 cases in 82 functions. One whole-policy projection/edit case adds eight
+has 103 cases in 83 functions. One whole-policy projection/edit case adds eight
 authored semantic contrasts; historical counts above retain their original meaning.
 See the [bounded projection check](experiments/2026-09-17-complete-policy-projection.md).
 These are implementation checks, not automatic-extraction accuracy or natural coverage.

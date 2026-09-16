@@ -64,6 +64,11 @@ The subsequent [two-task natural check](docs/experiments/2026-09-17-complete-pol
 completed both graphs, but its one automatic candidate response truncated. Source
 guard/target defects and inappropriate functional candidates remained; no candidate
 gain or actual edit was established. Six calls and their failures replay offline.
+The [next bounded check](docs/experiments/2026-09-17-tsg-reliable-construction.md)
+removed candidate truncation and reference re-entry: one decision now names each
+original requirement and the program preserves its bindings. Two factors survived
+author review, but inappropriate selections and source-construction errors remain.
+Independent inventories were not adopted as a default stage or a reliable reference.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) records the exact active procedure,
 negative results and next research decision. The

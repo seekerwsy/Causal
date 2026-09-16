@@ -10,6 +10,7 @@ from prompt_mechanism_study.prompt_contract import (
 )
 from prompt_mechanism_study.candidate_construction import (
     build_candidate_catalog,
+    candidate_model_request,
     candidate_request,
     compile_candidate_proposal,
     prepare_candidate_request,
@@ -130,6 +131,30 @@ def _review(request, response, draft):
                            for factor in draft["factors"]])
 
 
+def _compact_response(request, response):
+    """Translate authored decisions only; expectations retain their original full scopes."""
+    wire = candidate_model_request(request)
+    refs = {}
+    for source, short in zip(request["sources"], wire["sources"], strict=True):
+        assert source["source_prompt"] == short["source_prompt"]
+        for node, item in zip(sorted(source["nodes"], key=lambda n: n["node_id"]), short["nodes"], strict=True):
+            refs[source["task_id"], node["node_id"]] = item["node_ref"]
+            assert node["definition"] == item["definition"]
+    decisions = {}
+    for factor in response["factors"]:
+        for row in factor["occurrences"]:
+            for requirement in row["requirement_node_ids"]:
+                ref = refs[row["task_id"], requirement]
+                decision = dict(status="include", label=factor["label"], definition=factor["definition"],
+                                rationale=factor["atomicity_rationale"])
+                assert ref not in decisions or decisions[ref] == decision
+                decisions[ref] = decision
+    decisions.update({refs[row["task_id"], row["requirement_node_id"]]: dict(
+        status=row["status"], label="", definition="", rationale=row["rationale"])
+        for row in response["dispositions"] if row["status"] != "included"})
+    return dict(decisions=decisions)
+
+
 def _prepared_proposal():
     tasks, contracts = _development_sources()
     request = candidate_request(tasks, contracts)
@@ -139,7 +164,7 @@ def _prepared_proposal():
 
 
 def test_atomic_source_nodes_stay_separate_and_equivalent_occurrences_pool_before_review():
-    _, _, _, draft = _prepared_proposal()
+    request, response, design, draft = _prepared_proposal()
     factors = {factor["label"]: factor for factor in draft["factors"]}
     assert len(factors) == 2
     binding = factors["Bound SQL value"]["source_occurrences"]
@@ -152,6 +177,24 @@ def test_atomic_source_nodes_stay_separate_and_equivalent_occurrences_pool_befor
     assert draft["policies"] == [] and draft["queries"] == []
     assert draft["scientific_claim_allowed"] is False
     assert draft["formal_execution_authorized"] is False
+    compact = _compact_response(request, response)
+    selected = compile_candidate_proposal(request, compact, design)
+    assert selected["factors"] == draft["factors"]
+    assert selected["response_sha256"] == content_hash(compact)
+    assert len(json.dumps(compact)) < len(json.dumps(response))
+    assert all(source["task_id"] not in json.dumps(candidate_model_request(request)) for source in request["sources"])
+    # A model cannot revise targets/conditions, invent keys, skip units or bundle nodes.
+    for change in ("invented", "scope", "omission"):
+        altered = json.loads(json.dumps(compact))
+        first = next(iter(altered["decisions"]))
+        if change == "invented":
+            altered["decisions"]["T999.N999"] = altered["decisions"].pop(first)
+        elif change == "scope":
+            altered["decisions"][first]["scope"] = {}
+        else:
+            altered["decisions"].pop(first)
+        with pytest.raises(ValueError, match="requirement decision.*fields"):
+            compile_candidate_proposal(request, altered, design)
 
 
 def _one_requirement_request(*, compound):
@@ -207,6 +250,15 @@ def test_compound_source_node_cannot_be_split_into_different_candidate_meanings(
     unresolved = compile_candidate_proposal(request, response, _design())
     assert unresolved["factors"] == unresolved["policies"] == []
     assert unresolved["dispositions"][0]["status"] == "unresolved"
+    # One unit can retain several source-bound operations; the model does not choose a subset.
+    request, occurrences, disposition = _one_requirement_request(compound=False)
+    response = dict(factors=[dict(label="Binding", definition="Bind the data value in both queries.",
+        atomicity_rationale="One shared requirement at both stated operations.", occurrences=occurrences)],
+        dispositions=[disposition])
+    legacy = compile_candidate_proposal(request, response, _design())
+    compact = _compact_response(request, response)
+    assert len(compact["decisions"]) == 1
+    assert compile_candidate_proposal(request, compact, _design())["factors"] == legacy["factors"]
 
 
 def test_reviewed_factors_emit_both_atomic_edits_without_support_filtering():
@@ -280,10 +332,11 @@ def _write_candidate_request(tmp_path, *, include_template=False):
     return tasks, contracts, task_path, extraction, request_bundle
 
 
-def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extractor(tmp_path):
+def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extractor(tmp_path, monkeypatch):
     tasks, _, _, _, request_bundle = _write_candidate_request(tmp_path, include_template=True)
     request = read_json(request_bundle / "request.json")
-    response, design = _proposal(request), _design()
+    response, design = _compact_response(request, _proposal(request)), _design()
+    assert read_json(request_bundle / "model-request.json") == candidate_model_request(request)
     draft = compile_candidate_proposal(request, response, design)
     paths = [tmp_path / name for name in ("response.json", "design.json", "review.json")]
     for path, value in zip(paths, (response, design, _review(request, response, draft)), strict=True):
@@ -291,6 +344,18 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
     output = tmp_path / "candidate-catalog"
     report = build_candidate_catalog(request_bundle, paths[1], output, response_path=paths[0], review_path=paths[2])
     assert report["status"] == "REVIEWED" and report["accepted_factors"] == 2
+    sent = []
+    def fake_complete(model_request, evaluator, prompt):
+        sent.append(model_request)
+        schema = evaluator["response_format"]["json_schema"]["schema"]
+        assert schema["required"] == ["decisions"]
+        assert set(schema["properties"]["decisions"]["required"]) == set(response["decisions"])
+        return json.dumps(response).encode()
+    monkeypatch.setattr("prompt_mechanism_study.functional_judge.bailian_complete", fake_complete)
+    monkeypatch.setattr("prompt_mechanism_study.candidate_construction._proposal_evaluator", lambda path: {})
+    proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=paths[1])
+    assert sent == [candidate_model_request(request)]
+    assert proposed["status"] == "PENDING_SEMANTIC_REVIEW" and proposed["accepted_factors"] == 0
     catalog = read_json(output / "catalog.json")
     prepared_task = prepare_task_input(tasks[0])
     extraction_request = contract_decision_request(prepared_task, catalog)
@@ -401,6 +466,17 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 rationale="Whole policy only; choice members are not independently asserted.")
                 for node in request["sources"][0]["nodes"] if node["node_type"] in {"safety_requirement", "task_requirement"}])
         draft = compile_candidate_proposal(request, response, _design())
+        compact = _compact_response(request, response)
+        assert compile_candidate_proposal(request, compact, _design())["factors"] == draft["factors"]
+        if choice:
+            child = next(n for n in candidate_model_request(request)["sources"][0]["nodes"]
+                         if n["node_type"] == "safety_requirement" and n["complete_bindings"] == [])
+            invalid = json.loads(json.dumps(compact))
+            invalid["decisions"][child["node_ref"]] = dict(status="include", label="Member",
+                definition=child["definition"], rationale="A member is not an independently asserted requirement.")
+            with pytest.raises(ValueError, match="no complete source binding"):
+                compile_candidate_proposal(request, invalid, _design())
+        response = compact
         reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
         factor = reviewed["factors"][0]
         feature, selector = factor["feature_id"], factor["scope_selector"]

@@ -50,17 +50,30 @@ nodes, meanings, source quotations and edges. Outcome values, feature-state
 assessments, CWE/task-family routing labels, support, ranks and preselected
 intervention names are not model inputs. Missing graphs remain listed.
 
-The model inventories every requirement node as `included`, `not_actionable` or
-`unresolved`, with a reason. For each proposed factor it supplies a definition,
-atomicity rationale and source occurrences. An occurrence names existing
-requirement nodes and an exact boundary/input/condition scope. Task-wide policies
-name the task root; universal policies name their retained task/function boundary,
-never a hand-picked instance. Each factor must be an asserted complete obligation.
-Construction records reliable atoms and finite composition, including shared guards.
-Atomicity alone does not establish independent editability. Source citations may overlap. Conditions, negations,
-quantifiers and thresholds must retain their full meaning, rather than being
-split into disconnected words. Multiple equivalent nodes can support one factor.
-The model cannot supply policy keys, review acceptance, scores or effect direction.
+`candidate_model_request` gives each source node one short, task-qualified reference.
+Every requirement carries its definition, source quotation and program-derived
+`complete_bindings` together. The response schema requires exactly one decision
+under that same requirement reference: `include`, `not_actionable` or `unresolved`,
+with a rationale. An included unit supplies only its normalized label and complete
+definition. Other decisions leave those two fields empty. There is no second binding
+index, separate exclusion inventory, or model-selected basket of source nodes.
+
+The program restores all complete boundary/input/condition bindings of each included
+requirement; the model cannot invent, choose or rewrite those coordinates. A unit
+without a complete binding cannot be included. Task-wide policies retain the task
+root; universal policies retain their original task/function boundary and target
+class, never a hand-picked instance. Conditions, negations, quantifiers and thresholds
+remain part of the complete requirement. Separately judged equivalent units can
+deduplicate under the existing normalized-definition and exact-scope rules. The model
+cannot supply policy keys, review acceptance, scores or effect direction.
+
+These are identity and binding-preservation guarantees, not semantic eligibility
+guarantees. A correctly copied binding can still be wrong in the source graph; a
+faithful definition can still describe ordinary required functionality, a duplicated
+policy that cannot be independently removed, or more than one editable requirement.
+The model must judge those meanings against the full source, and explicit semantic
+review remains necessary. Neither an `atom` label nor a supplied binding certifies
+security relevance or independent editability. Source citations may overlap.
 
 Source statement modality is retained: input assumptions and unresolved normative
 force are not eligible editable requirements, even when represented as constraint
@@ -77,7 +90,7 @@ under different normalized requirement definitions. The same atomic meaning may
 still have multiple exact source scopes; those can produce different scoped factors.
 
 The compiler verifies direct edges or retained boundary/class, input use, complete
-conditions and dispositions. It constructs stable
+conditions and exactly one decision per source requirement. It constructs stable
 feature IDs from the semantic definition, requirement role and structural scope
 selector. Identical definitions and scope signatures deduplicate; distinct scopes
 remain distinct factors. Source context concepts merge only when their type and

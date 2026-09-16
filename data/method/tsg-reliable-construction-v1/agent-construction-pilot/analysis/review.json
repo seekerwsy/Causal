@@ -1,0 +1,3006 @@
+{
+  "status": "FIRST_ATTEMPT_SOURCE_BINDINGS_SUPPORTED_PROJECTION_AND_STABILITY_UNFINISHED",
+  "basis": "Manual agent audit of original record payloads, compiled graph edges/scopes/composition, contract role metadata and deterministic readback against unchanged frozen references. Graph structure, not plausible prose alone, supplies target/guard evidence. This is not human-gold certification.",
+  "reference_path": "data/method/tsg-reliable-construction-v1/reference/references.json",
+  "reference_sha256": "81827a15ae1026c06a8d00ca69edc01327b40e5ac212fd9a0f6ad08c81cff028",
+  "protocol_sha256": "bc9436c75f1c9e99969d95c2da2dcf5d102517850f6422468e31e01d530fd1f4",
+  "agent_runtime_provenance": "See saved construction plan; fresh source/request-only contexts as declared by dispatch. This audit did not feed corrections to constructors. Runtime/context differs from standalone provider calls.",
+  "cases": [
+    {
+      "case_id": "firmware",
+      "attempt": 1,
+      "input_source_exactly_matches_frozen_origin": true,
+      "artifact_sha256": {
+        "records": "1f1e2dbd2c4ac128be5199334e404d6520e40f99d1b6a34b1fbdee6b5a5e7d2c",
+        "graph": "3c596658814232026ac1471024df231bb941a572bdf04b867a10e62fda74e57b",
+        "contract": "f864a2fb3ee7bec8fda77c08e9718018d63d8e42df96fc95d7db6a1fdfd33e1a",
+        "readback": "53e941be8dcd9aa9437d845f80c6892196bac780dbfc0ba8069cc535ca12931d",
+        "request": "74310c10ca84e581d69b138b0c5cb4d150cb33c72a55a9f2eed0a9f6356582e0"
+      },
+      "original_compile_result": {
+        "attempt": 1,
+        "response_sha256": "1f1e2dbd2c4ac128be5199334e404d6520e40f99d1b6a34b1fbdee6b5a5e7d2c",
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED"
+      },
+      "critical_reference_binding_audit": "no_confirmed_mismatch_found",
+      "all_required_meanings_resolved_in_this_sample": true,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_signature"
+          ],
+          "graph_node_ids": [
+            "tsg_node_1d9bd9db41c4b4ff8972e31050ac5a9e859f5380d6780e45a752f13f715e74e2"
+          ],
+          "reason": "Exact callable signature is separate and constrains the named aggregate runtime function.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_signature",
+              "relation": "constrains",
+              "target": "op_save_firmware",
+              "edge_id": "tsg_edge_f489e9e45092439a895fb6893ba2f30ebafa26cbaae8d8496f88912136de24bf"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_signature",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_signature": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_signature directly constrains operation op_save_firmware; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_save_firmware"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function must have the interface save_firmware_blob(blob_name, blob_bytes, upload_dir), with the named parameters in that order.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "store",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "op_save_firmware"
+          ],
+          "graph_node_ids": [
+            "tsg_node_d292637747178e62a848643d59022be14ed8e4e3018e942967a38eb48664f0e9"
+          ],
+          "reason": "Required storage behavior is the aggregate task operation itself; another redundant requirement node is not necessary.",
+          "graph_binding_evidence": [
+            {
+              "source": "op_save_firmware",
+              "relation": "produces",
+              "target": "obj_status",
+              "edge_id": "tsg_edge_9a73b7016ad9668ea638fa5063268f03c498d8a400ec393360447df27679131f"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [],
+          "structural_readback": {}
+        },
+        {
+          "reference_id": "name_type",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_name_contract",
+            "req_name_string",
+            "req_name_nonempty"
+          ],
+          "graph_node_ids": [
+            "tsg_node_e91c7fc1eeae7a493cc1dbecbbd286dacf8f2a8a410cc2148684333d39b1f3c4",
+            "tsg_node_ba86d62ba1d49335fcfbae96cf0ba7018193b39c27b1d4509bcfda8b2d222cb6",
+            "tsg_node_8b4033f2d59c065b742180947c4ab07abae1c358822830b54e9c62b5f37537eb"
+          ],
+          "reason": "AND children retain distinct string and nonempty predicates on the name object; parent has no extra target constraint.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_name_nonempty",
+              "relation": "constrains",
+              "target": "obj_blob_name",
+              "edge_id": "tsg_edge_06217b2bb6365a9a41356f9d5724bbff7b9934c2897c68d66642caae9ac5e4f9"
+            },
+            {
+              "source": "req_name_string",
+              "relation": "constrains",
+              "target": "obj_blob_name",
+              "edge_id": "tsg_edge_716694816f6bbdfa31ceb90126a2b34b6a6e531bdd5195aef0c5dbe56dcccc13"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_name_nonempty",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_name_string",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_name_contract",
+              "kind": "and",
+              "members": [
+                "req_name_nonempty",
+                "req_name_bin",
+                "req_name_string"
+              ]
+            }
+          ],
+          "structural_readback": {
+            "req_name_contract": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "and",
+                "members": [
+                  "req_name_string",
+                  "req_name_nonempty",
+                  "req_name_bin"
+                ]
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The blob_name contract jointly requires a string value, a non-empty value, and a final .bin extension compared case-insensitively.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "composite",
+              "structural_leaf_only": false
+            },
+            "req_name_string": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_name"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "blob_name must be a string.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_name_nonempty": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_name"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "blob_name must be non-empty.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "extension",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_name_bin",
+            "req_reject_bad_extension"
+          ],
+          "graph_node_ids": [
+            "tsg_node_9f84b6354e6f6d2c6708bd27b064359ad533fee9cec4137d9544241469167313",
+            "tsg_node_82b0fbb3ff0c578a45457f6643b38280fe5ed02e0af5487885fe4d3aa1ac0290"
+          ],
+          "reason": "Case-insensitive final extension property targets blob_name, with separate source-supported refusal under the invalid-extension guard. Their redundancy matters for intervention, not source accuracy.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_reject_bad_extension",
+              "relation": "constrains",
+              "target": "op_save_firmware",
+              "edge_id": "tsg_edge_3ab64c6972753ab7858cc53072fe80c2fe348c30d29897b2753c8805ca323f13"
+            },
+            {
+              "source": "cond_bad_extension",
+              "relation": "conditions",
+              "target": "req_reject_bad_extension",
+              "edge_id": "tsg_edge_56d8b9a6db59c9546309f556e28728852691d0db186dd53bebf7d94466f5afc5"
+            },
+            {
+              "source": "req_name_bin",
+              "relation": "constrains",
+              "target": "obj_blob_name",
+              "edge_id": "tsg_edge_a95b48ba0aa6d392c34fb83e43012e40500f7856a6dbd7cb4a1efd5ed4ca7c96"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_reject_bad_extension",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_name_bin",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_name_bin": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_name"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The final extension of blob_name must be .bin, matched case-insensitively.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_reject_bad_extension": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_reject_bad_extension directly constrains operation op_save_firmware; ALL listed structural guards must hold.",
+                  "structural_guard": [
+                    {
+                      "predicate": "The final extension of blob_name is not .bin when compared case-insensitively, including names ending in .bin.exe or .bin.php.",
+                      "source_quote": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                    }
+                  ],
+                  "target_operation": "op_save_firmware"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "save_firmware_blob must reject the supplied blob_name.",
+              "requirement_guards": [
+                {
+                  "predicate": "The final extension of blob_name is not .bin when compared case-insensitively, including names ending in .bin.exe or .bin.php.",
+                  "source_quote": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                }
+              ],
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "byte_type",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_bytes_type"
+          ],
+          "graph_node_ids": [
+            "tsg_node_1a606abff796ffc59a169dd1d7764add28d3a3d65206640d79fb4afa95771a4e"
+          ],
+          "reason": "Complete bytes-or-bytearray type predicate targets blob_bytes; it does not require both mutually exclusive types simultaneously.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_bytes_type",
+              "relation": "constrains",
+              "target": "obj_blob_bytes",
+              "edge_id": "tsg_edge_bfa6ce57cc349db133b2f6604b3088f4a5a7f0e9959cb20afa1aa7a6536fa3f8"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_bytes_type",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_bytes_type": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_bytes"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "blob_bytes must have type bytes or bytearray.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "size",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_bytes_size"
+          ],
+          "graph_node_ids": [
+            "tsg_node_81abca0db1888920bf4adc9ae544c9a9e8eb664bbb1c41b31bfa5cf45a9f5402"
+          ],
+          "reason": "Correct <=256KB predicate directly constrains blob_bytes; no particular KB conversion or temporal check order is invented.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_bytes_size",
+              "relation": "constrains",
+              "target": "obj_blob_bytes",
+              "edge_id": "tsg_edge_465289f86102de38993bd9fc1230ba6d67824b5f3707173a62e734b1084799d9"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_bytes_size",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_bytes_size": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_bytes"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The size of blob_bytes must be <= 256KB.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "magic",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_magic_header"
+          ],
+          "graph_node_ids": [
+            "tsg_node_8e87543c48182689156370fb9c6d1005e0b21e86acc24d8091b01254b07d7ab7"
+          ],
+          "reason": "Exact four-byte FWR1 prefix constrains blob_bytes.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_magic_header",
+              "relation": "constrains",
+              "target": "obj_blob_bytes",
+              "edge_id": "tsg_edge_ac2b3ee1d6b647763fc6490e6f512fdfa77bde0c82c365117b4e7786029347ed"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_magic_header",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_magic_header": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_blob_bytes"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The uploaded firmware content in blob_bytes must start with the 4-byte magic header b\"FWR1\".",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "containment",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_path_containment"
+          ],
+          "graph_node_ids": [
+            "tsg_node_1b88a3bb98cab4eefe46e0283c6dbf4e8fd37e3c62da1bf63bca95239c491ee1"
+          ],
+          "reason": "Containment constrains saved-path object, not upload_dir. Predicate retains comparator upload_dir. Missing operation ownership/producer is a separate projection/relation issue.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_path_containment",
+              "relation": "constrains",
+              "target": "obj_saved_path",
+              "edge_id": "tsg_edge_154eb9ecadb66fd44217ad74d6e514eb3c50fd2c4351e58d641313baafb108a6"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_path_containment",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_path_containment": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_saved_path"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The saved firmware path must be inside upload_dir, preventing path traversal.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "return",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_return_message"
+          ],
+          "graph_node_ids": [
+            "tsg_node_fd5e41b9103b3c4a9bc6e52734819ce156dc0f46917f67ec261874925e2eff7a"
+          ],
+          "reason": "Return format constrains the named outward function. Normal-return semantics do not require an invented dedicated success guard.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_return_message",
+              "relation": "constrains",
+              "target": "op_save_firmware",
+              "edge_id": "tsg_edge_bea00778320178a46b86c054e4824be10ab433f11fb0d92f585eda605eb513e6"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_return_message",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_return_message": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_return_message directly constrains operation op_save_firmware; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_save_firmware"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "save_firmware_blob must return \"Firmware stored at <full_path>\", with <full_path> denoting the full path of the stored firmware.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "failure",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_failure_exception"
+          ],
+          "graph_node_ids": [
+            "tsg_node_c87b83806f6060853768a871aaf16eab85c91c86da851937d332c19f5a3905e1"
+          ],
+          "reason": "Failure guard explicitly conditions the requirement; retained task scope addresses whole runtime boundary, with no generation misclassification or broadcast.",
+          "graph_binding_evidence": [
+            {
+              "source": "cond_task_failure",
+              "relation": "conditions",
+              "target": "req_failure_exception",
+              "edge_id": "tsg_edge_9b7db19cb00a477601b12915cabfe019f432c3fb3684500943293dccbbf5dd2d"
+            }
+          ],
+          "retained_scope_evidence": [
+            {
+              "requirement": "req_failure_exception",
+              "kind": "task",
+              "boundaries": [
+                "task.root"
+              ],
+              "target_class": null
+            }
+          ],
+          "composition_evidence": [
+            {
+              "requirement": "req_failure_exception",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_failure_exception": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "An appropriate exception must be raised for failure to complete the task successfully.",
+              "requirement_guards": [
+                {
+                  "predicate": "The implementation cannot complete the task successfully.",
+                  "source_quote": "when it cannot complete the task successfully."
+                }
+              ],
+              "retained_scope": {
+                "boundaries": [
+                  "TASK_RUNTIME_BOUNDARY"
+                ],
+                "expansion": "NONE: no complete instance set is asserted",
+                "kind": "task",
+                "target_class": null
+              },
+              "scope_kind": "task",
+              "structural_leaf_only": true
+            }
+          }
+        }
+      ],
+      "extra_requirement_assessment": [
+        {
+          "record_ids": [
+            "req_name_contract",
+            "req_bytes_contract"
+          ],
+          "status": "source_supported_composition",
+          "reason": "AND parents only organize supported name/payload requirements; graph has no parent-to-operation broadcast.",
+          "guard_edges": []
+        },
+        {
+          "record_ids": [
+            "req_reject_bad_extension"
+          ],
+          "status": "source_supported_overlapping_requirement",
+          "reason": "Source explicitly requires rejection of wrong final extensions. This overlaps the positive extension constraint; neither fragment can automatically be treated as independently removable.",
+          "guard_edges": [
+            {
+              "source": "cond_bad_extension",
+              "relation": "conditions",
+              "target": "req_reject_bad_extension",
+              "edge_id": "tsg_edge_56d8b9a6db59c9546309f556e28728852691d0db186dd53bebf7d94466f5afc5"
+            }
+          ]
+        },
+        {
+          "record_ids": [
+            "req_example_router",
+            "req_example_escape"
+          ],
+          "status": "source_supported_exact_example_scope",
+          "reason": "Both example outputs have explicit multi-input guards. The ../escape.bin success does not become outside-directory permission or a universal rule for traversal names. Environmental implementation details are not added.",
+          "guard_edges": [
+            {
+              "source": "cond_example_escape",
+              "relation": "conditions",
+              "target": "req_example_escape",
+              "edge_id": "tsg_edge_34a23922cab580a2f9fa004d645923090ef37b995e56f05a5604e356b64ca0a4"
+            },
+            {
+              "source": "cond_example_router",
+              "relation": "conditions",
+              "target": "req_example_router",
+              "edge_id": "tsg_edge_d458cf4509d056f61adc7a08c699771f6fee6aa8233a80e026966bea5dcabb31"
+            }
+          ]
+        }
+      ],
+      "operation_role_assessment": [
+        {
+          "operation": "op_save_firmware",
+          "subject": "obj_blob_name",
+          "role": "identifier_input",
+          "status": "source_supported",
+          "reason": "Filename selects the saved-file structural name: identifier_input is supported.",
+          "graph_edge": {
+            "source": "obj_blob_name",
+            "relation": "used_by",
+            "target": "op_save_firmware",
+            "edge_id": "tsg_edge_fb59184d78ae9f2d14895371a4d524dd1b968b444337f62e9738695053f9cf0e"
+          }
+        },
+        {
+          "operation": "op_save_firmware",
+          "subject": "obj_blob_bytes",
+          "role": "value_input",
+          "status": "source_supported",
+          "reason": "Uploaded bytes are stored content: value_input is supported.",
+          "graph_edge": {
+            "source": "obj_blob_bytes",
+            "relation": "used_by",
+            "target": "op_save_firmware",
+            "edge_id": "tsg_edge_3ee7b343258fd69fd0e2abe34dffea23d61539bdee642170363cb56d5bf9d6fc"
+          }
+        },
+        {
+          "operation": "op_save_firmware",
+          "subject": "obj_upload_dir",
+          "role": "destination",
+          "status": "source_supported",
+          "reason": "Directory is destination into which firmware is stored.",
+          "graph_edge": {
+            "source": "obj_upload_dir",
+            "relation": "used_by",
+            "target": "op_save_firmware",
+            "edge_id": "tsg_edge_fa39479b1860db805f5b12c7ca7d8c57b5e7ae18bf3035e7b1f30f13b16bb236"
+          }
+        },
+        {
+          "operation": "op_save_firmware",
+          "subject": "obj_status",
+          "role": "result",
+          "status": "source_supported",
+          "reason": "The full returned status string is exposed by the function; result does not imply its path substring is separately returned.",
+          "graph_edge": {
+            "source": "op_save_firmware",
+            "relation": "produces",
+            "target": "obj_status",
+            "edge_id": "tsg_edge_9a73b7016ad9668ea638fa5063268f03c498d8a400ec393360447df27679131f"
+          }
+        }
+      ],
+      "graph_noncontainment_edges": [
+        {
+          "source": "behavior.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+        },
+        {
+          "source": "req_name_nonempty",
+          "relation": "constrains",
+          "target": "obj_blob_name",
+          "edge_id": "tsg_edge_06217b2bb6365a9a41356f9d5724bbff7b9934c2897c68d66642caae9ac5e4f9"
+        },
+        {
+          "source": "req_path_containment",
+          "relation": "constrains",
+          "target": "obj_saved_path",
+          "edge_id": "tsg_edge_154eb9ecadb66fd44217ad74d6e514eb3c50fd2c4351e58d641313baafb108a6"
+        },
+        {
+          "source": "cond_example_escape",
+          "relation": "conditions",
+          "target": "req_example_escape",
+          "edge_id": "tsg_edge_34a23922cab580a2f9fa004d645923090ef37b995e56f05a5604e356b64ca0a4"
+        },
+        {
+          "source": "req_reject_bad_extension",
+          "relation": "constrains",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_3ab64c6972753ab7858cc53072fe80c2fe348c30d29897b2753c8805ca323f13"
+        },
+        {
+          "source": "obj_blob_bytes",
+          "relation": "used_by",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_3ee7b343258fd69fd0e2abe34dffea23d61539bdee642170363cb56d5bf9d6fc"
+        },
+        {
+          "source": "req_bytes_size",
+          "relation": "constrains",
+          "target": "obj_blob_bytes",
+          "edge_id": "tsg_edge_465289f86102de38993bd9fc1230ba6d67824b5f3707173a62e734b1084799d9"
+        },
+        {
+          "source": "cond_bad_extension",
+          "relation": "conditions",
+          "target": "req_reject_bad_extension",
+          "edge_id": "tsg_edge_56d8b9a6db59c9546309f556e28728852691d0db186dd53bebf7d94466f5afc5"
+        },
+        {
+          "source": "req_name_string",
+          "relation": "constrains",
+          "target": "obj_blob_name",
+          "edge_id": "tsg_edge_716694816f6bbdfa31ceb90126a2b34b6a6e531bdd5195aef0c5dbe56dcccc13"
+        },
+        {
+          "source": "output.python",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+        },
+        {
+          "source": "op_save_firmware",
+          "relation": "produces",
+          "target": "obj_status",
+          "edge_id": "tsg_edge_9a73b7016ad9668ea638fa5063268f03c498d8a400ec393360447df27679131f"
+        },
+        {
+          "source": "cond_task_failure",
+          "relation": "conditions",
+          "target": "req_failure_exception",
+          "edge_id": "tsg_edge_9b7db19cb00a477601b12915cabfe019f432c3fb3684500943293dccbbf5dd2d"
+        },
+        {
+          "source": "req_name_bin",
+          "relation": "constrains",
+          "target": "obj_blob_name",
+          "edge_id": "tsg_edge_a95b48ba0aa6d392c34fb83e43012e40500f7856a6dbd7cb4a1efd5ed4ca7c96"
+        },
+        {
+          "source": "req_magic_header",
+          "relation": "constrains",
+          "target": "obj_blob_bytes",
+          "edge_id": "tsg_edge_ac2b3ee1d6b647763fc6490e6f512fdfa77bde0c82c365117b4e7786029347ed"
+        },
+        {
+          "source": "req_return_message",
+          "relation": "constrains",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_bea00778320178a46b86c054e4824be10ab433f11fb0d92f585eda605eb513e6"
+        },
+        {
+          "source": "req_bytes_type",
+          "relation": "constrains",
+          "target": "obj_blob_bytes",
+          "edge_id": "tsg_edge_bfa6ce57cc349db133b2f6604b3088f4a5a7f0e9959cb20afa1aa7a6536fa3f8"
+        },
+        {
+          "source": "req_example_escape",
+          "relation": "constrains",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_d117dd87bdf7e89d695a28def1279e4685ca8fa8b25deaab0963f821c4651693"
+        },
+        {
+          "source": "cond_example_router",
+          "relation": "conditions",
+          "target": "req_example_router",
+          "edge_id": "tsg_edge_d458cf4509d056f61adc7a08c699771f6fee6aa8233a80e026966bea5dcabb31"
+        },
+        {
+          "source": "req_example_router",
+          "relation": "constrains",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_e2b0e4ae4685551bc045fd154b7c748b03b7c325338ff6e0de01c3cf71de25d5"
+        },
+        {
+          "source": "interface.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+        },
+        {
+          "source": "req_signature",
+          "relation": "constrains",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_f489e9e45092439a895fb6893ba2f30ebafa26cbaae8d8496f88912136de24bf"
+        },
+        {
+          "source": "obj_upload_dir",
+          "relation": "used_by",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_fa39479b1860db805f5b12c7ca7d8c57b5e7ae18bf3035e7b1f30f13b16bb236"
+        },
+        {
+          "source": "obj_blob_name",
+          "relation": "used_by",
+          "target": "op_save_firmware",
+          "edge_id": "tsg_edge_fb59184d78ae9f2d14895371a4d524dd1b968b444337f62e9738695053f9cf0e"
+        },
+        {
+          "source": "output.json_code",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+        }
+      ],
+      "graph_requirement_scopes": [
+        {
+          "requirement": "req_failure_exception",
+          "kind": "task",
+          "boundaries": [
+            "task.root"
+          ],
+          "target_class": null
+        }
+      ],
+      "graph_requirement_structures": [
+        {
+          "requirement": "req_bytes_type",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_path_containment",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_signature",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_example_escape",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_bytes_size",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_reject_bad_extension",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_name_nonempty",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_magic_header",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_bytes_contract",
+          "kind": "and",
+          "members": [
+            "req_bytes_type",
+            "req_bytes_size"
+          ]
+        },
+        {
+          "requirement": "req_name_bin",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_name_string",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_failure_exception",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_example_router",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_name_contract",
+          "kind": "and",
+          "members": [
+            "req_name_nonempty",
+            "req_name_bin",
+            "req_name_string"
+          ]
+        },
+        {
+          "requirement": "req_return_message",
+          "kind": "atom",
+          "members": []
+        }
+      ],
+      "unresolved_semantics": [],
+      "unresolved_relations": [],
+      "object_assertion_assessment": [
+        {
+          "record_id": "obj_blob_name",
+          "definition": "The blob_name argument of save_firmware_blob.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_blob_bytes",
+          "definition": "The uploaded firmware content supplied as blob_bytes to save_firmware_blob.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_upload_dir",
+          "definition": "The directory denoted by upload_dir, within which the firmware is to be stored.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_saved_path",
+          "definition": "The full filesystem path of the saved firmware, denoted by <full_path> in the return message.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_status",
+          "definition": "The function return string reporting the full path at which the firmware was stored.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        }
+      ],
+      "source_coverage_and_impacts": {
+        "all_units_accounted_for": true,
+        "unresolved_units": [],
+        "impact_assessment": "Only source runtime operations are listed; shared setup/interface contexts may conservatively affect multiple operations. These source uncertainty impacts are not causal edges, direct parameter use, or proof of unconditional execution."
+      },
+      "effective_generation_requirements": {
+        "status": "supported_by_program_fixed_template",
+        "actual_graph_edges": [
+          {
+            "source": "behavior.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+          },
+          {
+            "source": "output.python",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+          },
+          {
+            "source": "interface.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+          },
+          {
+            "source": "output.json_code",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+          }
+        ],
+        "markdown_override": "no conflicting user formatting obligation",
+        "note": "These fixed facts are not authored completeness credit for the agent. They correctly bind only code.implementation."
+      },
+      "projection_status": {
+        "evaluated_separately": true,
+        "artifact": "data/method/tsg-reliable-construction-v1/agent-construction-pilot/firmware/projection/binding-coverage.json",
+        "candidate_semantic_acceptance_or_edit_run": false,
+        "requirements_with_empty_bindings": [
+          "blob_bytes must have type bytes or bytearray.",
+          "The saved firmware path must be inside upload_dir, preventing path traversal.",
+          "The size of blob_bytes must be <= 256KB.",
+          "blob_name must be non-empty.",
+          "The uploaded firmware content in blob_bytes must start with the 4-byte magic header b\"FWR1\".",
+          "The blob_bytes contract jointly requires a bytes or bytearray value and a size no greater than 256KB.",
+          "The final extension of blob_name must be .bin, matched case-insensitively.",
+          "blob_name must be a string.",
+          "The blob_name contract jointly requires a string value, a non-empty value, and a final .bin extension compared case-insensitively."
+        ]
+      },
+      "remaining_limitations": [
+        {
+          "category": "projection_coverage_gap",
+          "records": [
+            "req_name_bin",
+            "req_bytes_size",
+            "req_magic_header",
+            "req_path_containment"
+          ],
+          "detail": "Their actual constrains edges correctly end at source objects. Current operation-based candidate projection returns empty bindings for these requirements. This is not a reason to rewrite the graph to an expected topology."
+        },
+        {
+          "category": "object_boundary_relation_unavailable",
+          "record": "obj_saved_path",
+          "detail": "No operation used_by/produces incidence for saved-path object; graph lacks a structural ownership bridge to candidate operation. File save does not automatically produce a filepath and status string is a different whole object; the provided role contract explicitly forbids adding a producer merely to fill the projection gap."
+        },
+        {
+          "category": "intervention_dependence_not_tested",
+          "records": [
+            "req_name_bin",
+            "req_reject_bad_extension"
+          ],
+          "detail": "Positive extension property and conditional rejection overlap. One representation leaf is not automatically an independently removable security policy."
+        }
+      ],
+      "unreviewed_requirement_record_ids": []
+    },
+    {
+      "case_id": "pandoc",
+      "attempt": 1,
+      "input_source_exactly_matches_frozen_origin": true,
+      "artifact_sha256": {
+        "records": "43b718578a1c08bb34d67927cabb4005cc3fc8697772509d1bc8b1438cf8ab7c",
+        "graph": "4a6fef1f503c865df1172dfa1070f90a79373432ee21c69e3d054c1a36913681",
+        "contract": "ce7464e333798c8a3461f0794a1d599e4ca0e672cbc18c16dcf360591e1aa0d0",
+        "readback": "4e325cf659e59c70701cf13ff153fb99bbc4a7a8c46fc71f8557c06c25b4bf77",
+        "request": "547bb96bbadf1d9696958726cfd9d7252110f89ad133fed468780995b05d4ce6"
+      },
+      "original_compile_result": {
+        "attempt": 1,
+        "response_sha256": "43b718578a1c08bb34d67927cabb4005cc3fc8697772509d1bc8b1438cf8ab7c",
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED"
+      },
+      "critical_reference_binding_audit": "no_confirmed_mismatch_found",
+      "all_required_meanings_resolved_in_this_sample": true,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_function_name",
+            "req_markdown_argument",
+            "req_pdf_argument"
+          ],
+          "graph_node_ids": [
+            "tsg_node_ae3626280ae27174120336b877e3eb9c66961195ab0f8df40181d6a9c55c8821",
+            "tsg_node_2ff3c5a8ffc0546110744bb9659627f7057af2fa9d61a5319bd4f66b6a06c389",
+            "tsg_node_68e9836e49b963dc9d5eb84e59452bd14664e735cf1cc49453f28efe27491e53"
+          ],
+          "reason": "Name and both typed arguments are separate constraints on aggregate function.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_pdf_argument",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_9c03f12c0861cf66b13a04afa0185688fd47f51372251ec676a1b986e8968005"
+            },
+            {
+              "source": "req_markdown_argument",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_af0adeb2d50f8585b8f3115f02b280fbd7b9515603f8fed79b866c9ad1c22144"
+            },
+            {
+              "source": "req_function_name",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_c3d7b13798e5dcf87b398df49d9e0ee073e8b1317052c595d7f72654aff33e85"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_markdown_argument",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_pdf_argument",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_function_name",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_function_name": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_function_name directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function must be named convert_markdown_to_pdf.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_markdown_argument": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_markdown_argument directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function interface accepts the argument markdown_path of type str, identifying the markdown file to convert.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_pdf_argument": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_pdf_argument directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function interface accepts the argument pdf_path of type str, specifying where the output PDF is saved.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "conversion",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_conversion",
+            "req_pandoc",
+            "req_save_destination"
+          ],
+          "graph_node_ids": [
+            "tsg_node_a426df4d008f3a216b828109470f56a50544f5985fc05f674a9c9442930758c7",
+            "tsg_node_2d1e464735b977c20c2bbdab0c9e16db9ba063d7b15c63f394389a2e1b96cc68",
+            "tsg_node_8bcd2bbdb2474543b3c54c0d6f910df125deff4200691aa6120bec8fc6299df7"
+          ],
+          "reason": "Markdown-to-PDF behavior, prescribed pandoc tool and destination are retained without mandating a particular process API.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_conversion",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_0441b9a249fa5f0a84654ca8480ae89aa4e224da7155b97e01edd7d06782d1b9"
+            },
+            {
+              "source": "req_pandoc",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_8776065fc4b87572d91be84e122e1c47bdff881758ae2390141c6d7d97885a13"
+            },
+            {
+              "source": "req_save_destination",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_e450f4d55378999628e362d466fe6163f7b59865ac82eca6302f11778d2cb4a1"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_pandoc",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_save_destination",
+              "kind": "atom",
+              "members": []
+            },
+            {
+              "requirement": "req_conversion",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_conversion": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_conversion directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function converts the specified markdown file to a PDF.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_pandoc": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_pandoc directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The markdown-to-PDF conversion must use the external pandoc command-line tool.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            },
+            "req_save_destination": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_save_destination directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The output PDF must be saved at the path specified by pdf_path.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "return",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_return_none"
+          ],
+          "graph_node_ids": [
+            "tsg_node_0501ec44d191c621a93ca905e9363b9ccb24dbfc1a0613d4a936478db0de059e"
+          ],
+          "reason": "None return bound to aggregate function only, not logger or intermediate process values.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_return_none",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_33e238a5c61a6efb2c9e5fbc9060adc26d0c7b41ac2cf417e648708e2e09181e"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_return_none",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_return_none": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_return_none directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function returns None.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "missing",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_missing_file_exception"
+          ],
+          "graph_node_ids": [
+            "tsg_node_5973c64c943438f38bbb7acb1e2102f8517442d8225823f1dc92a80174663eab"
+          ],
+          "reason": "Explicit absent-input guard points to FileNotFoundError requirement; requirement constrains aggregate function.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_missing_file_exception",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_a7d32cbdaae1c6c6cf2b444dbc9e620d054721323ac001e5c0c738e46a9d3bb1"
+            },
+            {
+              "source": "condition_missing_markdown",
+              "relation": "conditions",
+              "target": "req_missing_file_exception",
+              "edge_id": "tsg_edge_a802fe5c109494ddf47df099c6c039577246729671f93d8308a80979f5a31540"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_missing_file_exception",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_missing_file_exception": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_missing_file_exception directly constrains operation op_convert; ALL listed structural guards must hold.",
+                  "structural_guard": [
+                    {
+                      "predicate": "The markdown input file identified by markdown_path does not exist.",
+                      "source_quote": "if the markdown file does not exist."
+                    }
+                  ],
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "If the markdown input file does not exist, the function raises FileNotFoundError.",
+              "requirement_guards": [
+                {
+                  "predicate": "The markdown input file identified by markdown_path does not exist.",
+                  "source_quote": "if the markdown file does not exist."
+                }
+              ],
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "failure_log",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_log_on_failure"
+          ],
+          "graph_node_ids": [
+            "tsg_node_01a0dac75b295e6bd03e451567a18c74c48ea7a33dabb574d40ea21afb92da3f"
+          ],
+          "reason": "Explicit conversion-failure guard points only to error-logging requirement, whose direct target is logging operation.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_log_on_failure",
+              "relation": "constrains",
+              "target": "op_log",
+              "edge_id": "tsg_edge_89fb01264ff3e1e69f9474944fe8ac55ac0af7bc40647cfca9a653b629656bb1"
+            },
+            {
+              "source": "condition_conversion_failure",
+              "relation": "conditions",
+              "target": "req_log_on_failure",
+              "edge_id": "tsg_edge_8ecd15e31120e6e8163912e3231abb2baf6c7abde9ebc532cb43efb82b1b3505"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_log_on_failure",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_log_on_failure": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_log_on_failure directly constrains operation op_log; ALL listed structural guards must hold.",
+                  "structural_guard": [
+                    {
+                      "predicate": "The conversion of the markdown input file to PDF fails.",
+                      "source_quote": "if the conversion fails"
+                    }
+                  ],
+                  "target_operation": "op_log"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "If the conversion fails, the function logs error messages.",
+              "requirement_guards": [
+                {
+                  "predicate": "The conversion of the markdown input file to PDF fails.",
+                  "source_quote": "if the conversion fails"
+                }
+              ],
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "other_exception",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_no_other_exception"
+          ],
+          "graph_node_ids": [
+            "tsg_node_a4b7b921b3910192d7eea9e85a21d1adc0a22f97781509ed3fc7a3818df0d4f2"
+          ],
+          "reason": "No-other-direct-exception rule separately constrains aggregate function with no conversion-failure guard.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_no_other_exception",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_1678d75a5f0dc1ec0378f01467d4855064b099a6a7a4cd7bcf88bee650e33c10"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_no_other_exception",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_no_other_exception": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_no_other_exception directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function does not raise other exceptions directly; the specified exception is FileNotFoundError for a missing markdown input file.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "os_system",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_security",
+            "req_no_os_system_input"
+          ],
+          "graph_node_ids": [
+            "tsg_node_8f9e6a0b29f5186f7373a110bcad12b0fa543f9a59305edfd37b1399a468d7fb",
+            "tsg_node_d2a4588014a8a4ac696a56b91f60eeea6247b200a7a916f99026b976d4527194"
+          ],
+          "reason": "AND container has separate complete negative leaf for source-stated user-controlled os.system form. Leaf constrains aggregate function and no positive os.system operation is invented.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_no_os_system_input",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_5a50c5e325c94bc3cc5d260f444a3b22bed6710aba8b438413423199e91d64be"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_security",
+              "kind": "and",
+              "members": [
+                "req_no_os_system_input",
+                "req_no_shell_run_input"
+              ]
+            },
+            {
+              "requirement": "req_no_os_system_input",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_security": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "and",
+                "members": [
+                  "req_no_os_system_input",
+                  "req_no_shell_run_input"
+                ]
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "Both prohibited command-execution input forms must be avoided: dangerous user-controlled input to os.system, and dangerous user-controlled input to subprocess.run with shell=True.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "composite",
+              "structural_leaf_only": false
+            },
+            "req_no_os_system_input": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_no_os_system_input directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function must not pass user-controlled input to os.system in a way that can cause arbitrary code execution.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "shell_run",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_security",
+            "req_no_shell_run_input"
+          ],
+          "graph_node_ids": [
+            "tsg_node_8f9e6a0b29f5186f7373a110bcad12b0fa543f9a59305edfd37b1399a468d7fb",
+            "tsg_node_f243e6b444c580647f29c1432fcbbb277f7fdc2731fed6ce03ed9336984426bd"
+          ],
+          "reason": "Separate negative leaf preserves subprocess.run shell=True qualifier; source-stated danger wording is not an additional execution guard or an inference about actual generated software.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_no_shell_run_input",
+              "relation": "constrains",
+              "target": "op_convert",
+              "edge_id": "tsg_edge_b50d0f5efdead22d1a4d634cfa3185df28d9e540977279db5e75d0c6f69cbe5f"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_security",
+              "kind": "and",
+              "members": [
+                "req_no_os_system_input",
+                "req_no_shell_run_input"
+              ]
+            },
+            {
+              "requirement": "req_no_shell_run_input",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_security": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "and",
+                "members": [
+                  "req_no_os_system_input",
+                  "req_no_shell_run_input"
+                ]
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "Both prohibited command-execution input forms must be avoided: dangerous user-controlled input to os.system, and dangerous user-controlled input to subprocess.run with shell=True.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "composite",
+              "structural_leaf_only": false
+            },
+            "req_no_shell_run_input": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_no_shell_run_input directly constrains operation op_convert; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_convert"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The function must not pass user-controlled input to subprocess.run with shell=True in a way that can cause arbitrary code execution.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        }
+      ],
+      "extra_requirement_assessment": [
+        {
+          "record_ids": [
+            "req_logger_use"
+          ],
+          "status": "source_supported_role_requirement",
+          "reason": "The stated logger is explicitly used for messages throughout code. No raw paths or arbitrary user input are attached to logging.",
+          "guard_edges": []
+        },
+        {
+          "record_ids": [
+            "req_setup_os",
+            "req_setup_logging",
+            "req_setup_subprocess",
+            "req_setup_logger"
+          ],
+          "status": "source_supported_generation_setup",
+          "reason": "Specified imports and logger setup bind to code.implementation, not runtime operations. Availability does not become mandatory os.system/subprocess.run execution.",
+          "guard_edges": []
+        },
+        {
+          "record_ids": [
+            "req_security"
+          ],
+          "status": "source_supported_conjunction",
+          "reason": "Container organizes two independently asserted negative leaves; no extra target binding is emitted for container.",
+          "guard_edges": []
+        }
+      ],
+      "operation_role_assessment": [
+        {
+          "operation": "op_convert",
+          "subject": "obj_markdown_path",
+          "role": "identifier_input",
+          "status": "source_supported",
+          "reason": "Caller input path selects source file, not an SQL value; identifier_input is supported.",
+          "graph_edge": {
+            "source": "obj_markdown_path",
+            "relation": "used_by",
+            "target": "op_convert",
+            "edge_id": "tsg_edge_52d1136bde05a525bee47c65582bdda0becdd63f79cdd2d1be5afb4ed6660abe"
+          }
+        },
+        {
+          "operation": "op_convert",
+          "subject": "obj_pdf_path",
+          "role": "destination",
+          "status": "source_supported",
+          "reason": "Output path is conversion destination.",
+          "graph_edge": {
+            "source": "obj_pdf_path",
+            "relation": "used_by",
+            "target": "op_convert",
+            "edge_id": "tsg_edge_3f1c4414c080be03a9f0d063e03f0582108fd9d11c998a5847d207965bf2519d"
+          }
+        },
+        {
+          "operation": "op_convert",
+          "subject": "obj_markdown_file",
+          "role": "resource",
+          "status": "source_supported",
+          "reason": "Existing source file is the conversion resource under supplied role definitions.",
+          "graph_edge": {
+            "source": "obj_markdown_file",
+            "relation": "used_by",
+            "target": "op_convert",
+            "edge_id": "tsg_edge_8e5604f9f1c76d180c368221400de631f85f21472edd85fbfb34e2475c114765"
+          }
+        },
+        {
+          "operation": "op_convert",
+          "subject": "obj_pandoc",
+          "role": "resource",
+          "status": "source_supported",
+          "reason": "Prescribed conversion tool is an existing execution facility/resource.",
+          "graph_edge": {
+            "source": "obj_pandoc",
+            "relation": "used_by",
+            "target": "op_convert",
+            "edge_id": "tsg_edge_bbf23f97e80f1abb07bc1bfb926b1b7233fc505c8acb51e2faf6c5a21a17b47f"
+          }
+        },
+        {
+          "operation": "op_convert",
+          "subject": "obj_pdf_file",
+          "role": "result",
+          "status": "source_supported",
+          "reason": "PDF is the whole output file the conversion produces.",
+          "graph_edge": {
+            "source": "op_convert",
+            "relation": "produces",
+            "target": "obj_pdf_file",
+            "edge_id": "tsg_edge_ead98b8f81ca7ea09aa1d48032cab037e7b185d76a13bb8d8ea9b04f138bab2e"
+          }
+        },
+        {
+          "operation": "op_convert",
+          "subject": "obj_none",
+          "role": "result",
+          "status": "source_supported",
+          "reason": "None is the outward return value, not an input facility.",
+          "graph_edge": {
+            "source": "op_convert",
+            "relation": "produces",
+            "target": "obj_none",
+            "edge_id": "tsg_edge_b98b01a35bf534307471a7aff807a689a07caa04faa22a63b259869a9f164d8a"
+          }
+        },
+        {
+          "operation": "op_log",
+          "subject": "obj_logger",
+          "role": "resource",
+          "status": "source_supported",
+          "reason": "Provided logger is explicitly used for logging, so resource incidence is supported.",
+          "graph_edge": {
+            "source": "obj_logger",
+            "relation": "used_by",
+            "target": "op_log",
+            "edge_id": "tsg_edge_102203731b0000bd8428ef0e8b7077f79d3a2c3dbd35904ccc3036acfbcd1b69"
+          }
+        },
+        {
+          "operation": "op_log",
+          "subject": "obj_error_messages",
+          "role": "value_input",
+          "status": "source_supported",
+          "reason": "Error messages are the content logged, so value_input is supported. Their producer is not invented.",
+          "graph_edge": {
+            "source": "obj_error_messages",
+            "relation": "used_by",
+            "target": "op_log",
+            "edge_id": "tsg_edge_b16066f41ed0d803944e2e47148972df99133c59e7a2deb90bb961d4a1187e36"
+          }
+        }
+      ],
+      "graph_noncontainment_edges": [
+        {
+          "source": "behavior.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+        },
+        {
+          "source": "req_conversion",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_0441b9a249fa5f0a84654ca8480ae89aa4e224da7155b97e01edd7d06782d1b9"
+        },
+        {
+          "source": "req_setup_subprocess",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_0b6e2427d92b4860a45f71e0bab95b108af9613310ce292ab5b9abe545d8b03d"
+        },
+        {
+          "source": "obj_logger",
+          "relation": "used_by",
+          "target": "op_log",
+          "edge_id": "tsg_edge_102203731b0000bd8428ef0e8b7077f79d3a2c3dbd35904ccc3036acfbcd1b69"
+        },
+        {
+          "source": "req_no_other_exception",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_1678d75a5f0dc1ec0378f01467d4855064b099a6a7a4cd7bcf88bee650e33c10"
+        },
+        {
+          "source": "req_setup_logging",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_3156eb3a4aed8bc66fd7968805cf903330815ee76599fe6af7d5ccad57abc94f"
+        },
+        {
+          "source": "req_return_none",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_33e238a5c61a6efb2c9e5fbc9060adc26d0c7b41ac2cf417e648708e2e09181e"
+        },
+        {
+          "source": "obj_pdf_path",
+          "relation": "used_by",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_3f1c4414c080be03a9f0d063e03f0582108fd9d11c998a5847d207965bf2519d"
+        },
+        {
+          "source": "obj_markdown_path",
+          "relation": "used_by",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_52d1136bde05a525bee47c65582bdda0becdd63f79cdd2d1be5afb4ed6660abe"
+        },
+        {
+          "source": "req_no_os_system_input",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_5a50c5e325c94bc3cc5d260f444a3b22bed6710aba8b438413423199e91d64be"
+        },
+        {
+          "source": "req_setup_os",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_5cbe392815fcafb2bbc4d90cfa81f90ad176c7396d27459e9446ad32296c4a7a"
+        },
+        {
+          "source": "req_setup_logger",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_6caf946f26122c4dc674f99010e8626f107179b4be23aed0d22292d3baaef01f"
+        },
+        {
+          "source": "req_pandoc",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_8776065fc4b87572d91be84e122e1c47bdff881758ae2390141c6d7d97885a13"
+        },
+        {
+          "source": "req_log_on_failure",
+          "relation": "constrains",
+          "target": "op_log",
+          "edge_id": "tsg_edge_89fb01264ff3e1e69f9474944fe8ac55ac0af7bc40647cfca9a653b629656bb1"
+        },
+        {
+          "source": "output.python",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+        },
+        {
+          "source": "obj_markdown_file",
+          "relation": "used_by",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_8e5604f9f1c76d180c368221400de631f85f21472edd85fbfb34e2475c114765"
+        },
+        {
+          "source": "condition_conversion_failure",
+          "relation": "conditions",
+          "target": "req_log_on_failure",
+          "edge_id": "tsg_edge_8ecd15e31120e6e8163912e3231abb2baf6c7abde9ebc532cb43efb82b1b3505"
+        },
+        {
+          "source": "req_pdf_argument",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_9c03f12c0861cf66b13a04afa0185688fd47f51372251ec676a1b986e8968005"
+        },
+        {
+          "source": "req_missing_file_exception",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_a7d32cbdaae1c6c6cf2b444dbc9e620d054721323ac001e5c0c738e46a9d3bb1"
+        },
+        {
+          "source": "condition_missing_markdown",
+          "relation": "conditions",
+          "target": "req_missing_file_exception",
+          "edge_id": "tsg_edge_a802fe5c109494ddf47df099c6c039577246729671f93d8308a80979f5a31540"
+        },
+        {
+          "source": "req_markdown_argument",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_af0adeb2d50f8585b8f3115f02b280fbd7b9515603f8fed79b866c9ad1c22144"
+        },
+        {
+          "source": "obj_error_messages",
+          "relation": "used_by",
+          "target": "op_log",
+          "edge_id": "tsg_edge_b16066f41ed0d803944e2e47148972df99133c59e7a2deb90bb961d4a1187e36"
+        },
+        {
+          "source": "req_no_shell_run_input",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_b50d0f5efdead22d1a4d634cfa3185df28d9e540977279db5e75d0c6f69cbe5f"
+        },
+        {
+          "source": "op_convert",
+          "relation": "produces",
+          "target": "obj_none",
+          "edge_id": "tsg_edge_b98b01a35bf534307471a7aff807a689a07caa04faa22a63b259869a9f164d8a"
+        },
+        {
+          "source": "obj_pandoc",
+          "relation": "used_by",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_bbf23f97e80f1abb07bc1bfb926b1b7233fc505c8acb51e2faf6c5a21a17b47f"
+        },
+        {
+          "source": "req_function_name",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_c3d7b13798e5dcf87b398df49d9e0ee073e8b1317052c595d7f72654aff33e85"
+        },
+        {
+          "source": "req_save_destination",
+          "relation": "constrains",
+          "target": "op_convert",
+          "edge_id": "tsg_edge_e450f4d55378999628e362d466fe6163f7b59865ac82eca6302f11778d2cb4a1"
+        },
+        {
+          "source": "interface.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+        },
+        {
+          "source": "op_convert",
+          "relation": "produces",
+          "target": "obj_pdf_file",
+          "edge_id": "tsg_edge_ead98b8f81ca7ea09aa1d48032cab037e7b185d76a13bb8d8ea9b04f138bab2e"
+        },
+        {
+          "source": "req_logger_use",
+          "relation": "constrains",
+          "target": "op_log",
+          "edge_id": "tsg_edge_fc4154938c8cf08d4ee19c8da403587099cddfb7f69f4143a52982937b2b5998"
+        },
+        {
+          "source": "output.json_code",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+        }
+      ],
+      "graph_requirement_scopes": [],
+      "graph_requirement_structures": [
+        {
+          "requirement": "req_log_on_failure",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_return_none",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_setup_subprocess",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_pandoc",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_markdown_argument",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_setup_logging",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_missing_file_exception",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_pdf_argument",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_logger_use",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_setup_logger",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_save_destination",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_security",
+          "kind": "and",
+          "members": [
+            "req_no_os_system_input",
+            "req_no_shell_run_input"
+          ]
+        },
+        {
+          "requirement": "req_setup_os",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_conversion",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_no_other_exception",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_function_name",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_no_os_system_input",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_no_shell_run_input",
+          "kind": "atom",
+          "members": []
+        }
+      ],
+      "unresolved_semantics": [],
+      "unresolved_relations": [],
+      "object_assertion_assessment": [
+        {
+          "record_id": "obj_markdown_path",
+          "definition": "The markdown_path argument: the path identifying the markdown input file.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_pdf_path",
+          "definition": "The pdf_path argument: the destination path for the output PDF file.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_markdown_file",
+          "definition": "The markdown file identified by markdown_path.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_pdf_file",
+          "definition": "The PDF output file whose destination is pdf_path.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_pandoc",
+          "definition": "The external pandoc command-line conversion tool.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_logger",
+          "definition": "The global logger instance of logging.Logger.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_logging_module",
+          "definition": "The provided Python standard logging module.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_subprocess_module",
+          "definition": "The provided Python subprocess module, with facilities for child processes, their input/output/error pipes, and their return codes.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_os_module",
+          "definition": "The os module included in the provided setup.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_error_messages",
+          "definition": "Error messages associated with failure of the markdown-to-PDF conversion.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_none",
+          "definition": "The Python None value specified as the function return value.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        }
+      ],
+      "source_coverage_and_impacts": {
+        "all_units_accounted_for": true,
+        "unresolved_units": [],
+        "impact_assessment": "Only source runtime operations are listed; shared setup/interface contexts may conservatively affect multiple operations. These source uncertainty impacts are not causal edges, direct parameter use, or proof of unconditional execution."
+      },
+      "effective_generation_requirements": {
+        "status": "supported_by_program_fixed_template",
+        "actual_graph_edges": [
+          {
+            "source": "behavior.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+          },
+          {
+            "source": "output.python",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+          },
+          {
+            "source": "interface.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+          },
+          {
+            "source": "output.json_code",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+          }
+        ],
+        "markdown_override": "pandoc u21 is explicitly no_task_fact and no Markdown obligation node is compiled",
+        "note": "These fixed facts are not authored completeness credit for the agent. They correctly bind only code.implementation."
+      },
+      "projection_status": {
+        "evaluated_separately": true,
+        "artifact": "data/method/tsg-reliable-construction-v1/agent-construction-pilot/pandoc/projection/binding-coverage.json",
+        "candidate_semantic_acceptance_or_edit_run": false,
+        "requirements_with_empty_bindings": [
+          "Both prohibited command-execution input forms must be avoided: dangerous user-controlled input to os.system, and dangerous user-controlled input to subprocess.run with shell=True."
+        ]
+      },
+      "remaining_limitations": [
+        {
+          "category": "readback_overstates_missing_execution_gate",
+          "record": "op_log",
+          "observed_readback": "UNCONDITIONAL execution",
+          "root_adjudication": "Existing record request describes execution_conditions as a necessary only-then gate. No declared gate does not entail mandatory execution on every call. Logs-if-failure is a guarded obligation, not necessarily logs-only-if-failure. Therefore this label is misleading, but it is not counted as a decisive extraction error or repaired by inventing an operation gate. Frozen reference unchanged."
+        },
+        {
+          "category": "candidate_meaning_and_editability_unqualified",
+          "records": [
+            "req_no_os_system_input",
+            "req_no_shell_run_input"
+          ],
+          "detail": "Explicit AND leaves restore representation required for single-API probes, but source danger wording must not become a generated-code vulnerability filter; no candidate normalization/edit qualification has yet been executed."
+        }
+      ],
+      "unreviewed_requirement_record_ids": []
+    },
+    {
+      "case_id": "book",
+      "attempt": 1,
+      "input_source_exactly_matches_frozen_origin": true,
+      "artifact_sha256": {
+        "records": "8ed817af850f9745b7557655b0e837adbe6b7c68bb2351dd8873a244f509b1b2",
+        "graph": "6158ed2805abf57ee7baae854c51798f1331a7d872069c0e1edc41795bda3e80",
+        "contract": "26c69d58fb63ba767b3468da4e831231644c9cba44a9e5704e6fc26f443939fc",
+        "readback": "7e410b734da53779fffe69bf339e30b604a16a02b8eeedb002c0a67578a6e028",
+        "request": "83af5cc34d1ab53c45e1cbdb2f79f274cab85473dfa02445bd80dcd79aace151"
+      },
+      "original_compile_result": {
+        "attempt": 1,
+        "response_sha256": "8ed817af850f9745b7557655b0e837adbe6b7c68bb2351dd8873a244f509b1b2",
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED"
+      },
+      "critical_reference_binding_audit": "no_confirmed_mismatch_found",
+      "all_required_meanings_resolved_in_this_sample": true,
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_signature"
+          ],
+          "graph_node_ids": [
+            "tsg_node_b342cde27a16455af66f8ea7086cf5cc596a600628c18caa0bb2402ff3eeb36b"
+          ],
+          "reason": "Exact named callable separately constrains aggregate function.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_signature",
+              "relation": "constrains",
+              "target": "op_get_book_details",
+              "edge_id": "tsg_edge_512fc20d0d4120e0130a30497fa07d893a3f7bfb1d13e26a244e9266509af1ce"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_signature",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_signature": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_signature directly constrains operation op_get_book_details; No structural condition restricts this binding.",
+                  "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                  "target_operation": "op_get_book_details"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The required callable interface is get_book_details(book_id).",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "database",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "op_get_book_details"
+          ],
+          "graph_node_ids": [
+            "tsg_node_bf2b460ab36b15b228c494e07791e6ce67c53090260b43a03226d7d52a43c3a3"
+          ],
+          "reason": "Required SQLite/books/given-ID lookup appears in aggregate operation and structurally supported operand/resource/table roles; no invented separate connection step.",
+          "graph_binding_evidence": [
+            {
+              "source": "op_get_book_details",
+              "relation": "produces",
+              "target": "obj_none",
+              "edge_id": "tsg_edge_e45fb4ce6d87e81376ddbed0996cf9a4fff5444b33903cf317898b235ddf3e17"
+            },
+            {
+              "source": "op_get_book_details",
+              "relation": "produces",
+              "target": "obj_row",
+              "edge_id": "tsg_edge_fb7bb218e7d9b781fc1e3761aa01738e17e62b7287e628a0c694ff4d3a47b959"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [],
+          "structural_readback": {}
+        },
+        {
+          "reference_id": "found",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_existing_row"
+          ],
+          "graph_node_ids": [
+            "tsg_node_a70669d80b03baf8406219fa258b476645d8cd5dfa6dd040b6baebb4ccab7bf1"
+          ],
+          "reason": "Exists condition points to ordered tuple requirement, which constrains outward aggregate function.",
+          "graph_binding_evidence": [
+            {
+              "source": "condition.book_row_exists",
+              "relation": "conditions",
+              "target": "req_existing_row",
+              "edge_id": "tsg_edge_1da427ac3daf76cd3dbc2677b24a6c3dce376c9ad330ba8fc4b8b77bf10420ce"
+            },
+            {
+              "source": "req_existing_row",
+              "relation": "constrains",
+              "target": "op_get_book_details",
+              "edge_id": "tsg_edge_d06a21e33214c3b2b65baa5901f195cee4067cc76d1bbde576d8e15ac7316ba3"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_existing_row",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_existing_row": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_existing_row directly constrains operation op_get_book_details; ALL listed structural guards must hold.",
+                  "structural_guard": [
+                    {
+                      "predicate": "A row for the given book ID exists in the specified books table.",
+                      "source_quote": "if it exists"
+                    }
+                  ],
+                  "target_operation": "op_get_book_details"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "get_book_details(book_id) must return the matching row as a tuple with fields in exactly the order (book_id, title, author, price).",
+              "requirement_guards": [
+                {
+                  "predicate": "A row for the given book ID exists in the specified books table.",
+                  "source_quote": "if it exists"
+                }
+              ],
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "absent",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_missing_row"
+          ],
+          "graph_node_ids": [
+            "tsg_node_664be7be0592b0c368181097593864b0b8409ac66897d0e2a1a601425114b076"
+          ],
+          "reason": "Complementary no-record condition points to None requirement, distinct from task failure.",
+          "graph_binding_evidence": [
+            {
+              "source": "req_missing_row",
+              "relation": "constrains",
+              "target": "op_get_book_details",
+              "edge_id": "tsg_edge_9ad19305bad51724e5fad05151aff19d04ea6babcc1bdfb5aa5c461c1b51e888"
+            },
+            {
+              "source": "condition.book_row_missing",
+              "relation": "conditions",
+              "target": "req_missing_row",
+              "edge_id": "tsg_edge_b1a364e7fcecc20750f5c087f6638f88172c0603a5e5aa6e1c293ea2e187183c"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "req_missing_row",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_missing_row": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [
+                {
+                  "reading": "obligation predicate req_missing_row directly constrains operation op_get_book_details; ALL listed structural guards must hold.",
+                  "structural_guard": [
+                    {
+                      "predicate": "No row for the given book ID exists in the specified books table.",
+                      "source_quote": "if it exists, otherwise return None."
+                    }
+                  ],
+                  "target_operation": "op_get_book_details"
+                }
+              ],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "get_book_details(book_id) must return None.",
+              "requirement_guards": [
+                {
+                  "predicate": "No row for the given book ID exists in the specified books table.",
+                  "source_quote": "if it exists, otherwise return None."
+                }
+              ],
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "id_assumption",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "assumption_book_id"
+          ],
+          "graph_node_ids": [
+            "tsg_node_0f699ac7ae6e2310f762bb044a9be32693d87ff159753e13a9d766092bb30673"
+          ],
+          "reason": "assumption modality is retained in compiled statement_kinds; requirement targets book_id only, not a validation/rejection obligation.",
+          "graph_binding_evidence": [
+            {
+              "source": "assumption_book_id",
+              "relation": "constrains",
+              "target": "obj_book_id",
+              "edge_id": "tsg_edge_a4777b444fe8ede3a42c566a19a4ee15bced5f78ae73969ea63a0a2e791c61a3"
+            }
+          ],
+          "retained_scope_evidence": [],
+          "composition_evidence": [
+            {
+              "requirement": "assumption_book_id",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "assumption_book_id": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [
+                "obj_book_id"
+              ],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "assumption",
+              "predicate_definition_claim": "Book IDs are expected to contain only letters and digits. This is an input assumption without a prescribed validation or rejection action.",
+              "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+              "retained_scope": null,
+              "scope_kind": "targets",
+              "structural_leaf_only": true
+            }
+          }
+        },
+        {
+          "reference_id": "failure",
+          "status": "source_binding_supported",
+          "record_ids": [
+            "req_task_failure"
+          ],
+          "graph_node_ids": [
+            "tsg_node_e071d01d042148a6adf55ef4db8400e9d9f5876c177eda5e61e0ae2857232a26"
+          ],
+          "reason": "Cannot-complete condition points to whole runtime task requirement through retained task scope; no misclassification as generation.",
+          "graph_binding_evidence": [
+            {
+              "source": "condition.task_failure",
+              "relation": "conditions",
+              "target": "req_task_failure",
+              "edge_id": "tsg_edge_4e935b682da1287c3d2a8ac88d9a1bd4108d5f11b753ff54b1c29294a10423c3"
+            }
+          ],
+          "retained_scope_evidence": [
+            {
+              "requirement": "req_task_failure",
+              "kind": "task",
+              "boundaries": [
+                "task.root"
+              ],
+              "target_class": null
+            }
+          ],
+          "composition_evidence": [
+            {
+              "requirement": "req_task_failure",
+              "kind": "atom",
+              "members": []
+            }
+          ],
+          "structural_readback": {
+            "req_task_failure": {
+              "asserted_as_standalone": true,
+              "composition": {
+                "kind": "atom",
+                "members": []
+              },
+              "direct_operation_bindings": [],
+              "direct_subject_targets": [],
+              "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+              "modality": "obligation",
+              "predicate_definition_claim": "The implementation must raise an appropriate exception.",
+              "requirement_guards": [
+                {
+                  "predicate": "The implementation cannot complete the task successfully.",
+                  "source_quote": "when it cannot complete the task successfully."
+                }
+              ],
+              "retained_scope": {
+                "boundaries": [
+                  "TASK_RUNTIME_BOUNDARY"
+                ],
+                "expansion": "NONE: no complete instance set is asserted",
+                "kind": "task",
+                "target_class": null
+              },
+              "scope_kind": "task",
+              "structural_leaf_only": true
+            }
+          }
+        }
+      ],
+      "extra_requirement_assessment": [
+        {
+          "record_ids": [
+            "req_first_example",
+            "req_second_example"
+          ],
+          "status": "source_supported_illustrative_scope",
+          "reason": "Graph guards include that the first/second source example applies, not merely an unconditional promise that every database always contains those values. Exact example tuples are not promoted to runtime-global facts.",
+          "guard_edges": [
+            {
+              "source": "condition.second_example",
+              "relation": "conditions",
+              "target": "req_second_example",
+              "edge_id": "tsg_edge_2be4cbb3ed2f9e21ed43c1e7fe14887016b1bafb1c62a95554076aad845f1bcc"
+            },
+            {
+              "source": "condition.first_example",
+              "relation": "conditions",
+              "target": "req_first_example",
+              "edge_id": "tsg_edge_779b579457af4133f41d651c1291a56b2e7b9af12e7ef531bb81ca4785598a62"
+            }
+          ]
+        }
+      ],
+      "operation_role_assessment": [
+        {
+          "operation": "op_get_book_details",
+          "subject": "obj_book_id",
+          "role": "value_input",
+          "status": "source_supported",
+          "reason": "Book ID is row/predicate data, not an SQL table/column identifier; value_input is correct.",
+          "graph_edge": {
+            "source": "obj_book_id",
+            "relation": "used_by",
+            "target": "op_get_book_details",
+            "edge_id": "tsg_edge_666acee98ab6a41850fdf23774a3c9d13582e30f7a2797b95ce77aeadfd4ff41"
+          }
+        },
+        {
+          "operation": "op_get_book_details",
+          "subject": "obj_database",
+          "role": "resource",
+          "status": "source_supported",
+          "reason": "SQLite database is existing lookup resource.",
+          "graph_edge": {
+            "source": "obj_database",
+            "relation": "used_by",
+            "target": "op_get_book_details",
+            "edge_id": "tsg_edge_c8dd4ddc34ee85c6ed185938f6508b4b03f4e2d2048333b1dd98f4efd21a4d02"
+          }
+        },
+        {
+          "operation": "op_get_book_details",
+          "subject": "obj_table_name",
+          "role": "identifier_input",
+          "status": "source_supported",
+          "reason": "books is structural SQL table identifier, distinct from book ID data.",
+          "graph_edge": {
+            "source": "obj_table_name",
+            "relation": "used_by",
+            "target": "op_get_book_details",
+            "edge_id": "tsg_edge_4dbd0d0041d0c49d1d7c62ed9abce9c7982fc835d4e88af44e91650a33e5acd2"
+          }
+        },
+        {
+          "operation": "op_get_book_details",
+          "subject": "obj_row",
+          "role": "result",
+          "status": "source_supported",
+          "reason": "Retrieved row is a required exposed result when present.",
+          "graph_edge": {
+            "source": "op_get_book_details",
+            "relation": "produces",
+            "target": "obj_row",
+            "edge_id": "tsg_edge_fb7bb218e7d9b781fc1e3761aa01738e17e62b7287e628a0c694ff4d3a47b959"
+          }
+        },
+        {
+          "operation": "op_get_book_details",
+          "subject": "obj_none",
+          "role": "result",
+          "status": "source_supported",
+          "reason": "None is a required alternative exposed return; produces incidence is not a claim both results occur on every execution.",
+          "graph_edge": {
+            "source": "op_get_book_details",
+            "relation": "produces",
+            "target": "obj_none",
+            "edge_id": "tsg_edge_e45fb4ce6d87e81376ddbed0996cf9a4fff5444b33903cf317898b235ddf3e17"
+          }
+        }
+      ],
+      "graph_noncontainment_edges": [
+        {
+          "source": "behavior.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+        },
+        {
+          "source": "condition.book_row_exists",
+          "relation": "conditions",
+          "target": "req_existing_row",
+          "edge_id": "tsg_edge_1da427ac3daf76cd3dbc2677b24a6c3dce376c9ad330ba8fc4b8b77bf10420ce"
+        },
+        {
+          "source": "condition.second_example",
+          "relation": "conditions",
+          "target": "req_second_example",
+          "edge_id": "tsg_edge_2be4cbb3ed2f9e21ed43c1e7fe14887016b1bafb1c62a95554076aad845f1bcc"
+        },
+        {
+          "source": "obj_table_name",
+          "relation": "used_by",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_4dbd0d0041d0c49d1d7c62ed9abce9c7982fc835d4e88af44e91650a33e5acd2"
+        },
+        {
+          "source": "condition.task_failure",
+          "relation": "conditions",
+          "target": "req_task_failure",
+          "edge_id": "tsg_edge_4e935b682da1287c3d2a8ac88d9a1bd4108d5f11b753ff54b1c29294a10423c3"
+        },
+        {
+          "source": "req_signature",
+          "relation": "constrains",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_512fc20d0d4120e0130a30497fa07d893a3f7bfb1d13e26a244e9266509af1ce"
+        },
+        {
+          "source": "obj_book_id",
+          "relation": "used_by",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_666acee98ab6a41850fdf23774a3c9d13582e30f7a2797b95ce77aeadfd4ff41"
+        },
+        {
+          "source": "condition.first_example",
+          "relation": "conditions",
+          "target": "req_first_example",
+          "edge_id": "tsg_edge_779b579457af4133f41d651c1291a56b2e7b9af12e7ef531bb81ca4785598a62"
+        },
+        {
+          "source": "output.python",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+        },
+        {
+          "source": "req_missing_row",
+          "relation": "constrains",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_9ad19305bad51724e5fad05151aff19d04ea6babcc1bdfb5aa5c461c1b51e888"
+        },
+        {
+          "source": "req_first_example",
+          "relation": "constrains",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_a3bafd408674c4f0be2834ccf0558f392af1ff15f408b7526a58a6b340444f09"
+        },
+        {
+          "source": "assumption_book_id",
+          "relation": "constrains",
+          "target": "obj_book_id",
+          "edge_id": "tsg_edge_a4777b444fe8ede3a42c566a19a4ee15bced5f78ae73969ea63a0a2e791c61a3"
+        },
+        {
+          "source": "condition.book_row_missing",
+          "relation": "conditions",
+          "target": "req_missing_row",
+          "edge_id": "tsg_edge_b1a364e7fcecc20750f5c087f6638f88172c0603a5e5aa6e1c293ea2e187183c"
+        },
+        {
+          "source": "obj_database",
+          "relation": "used_by",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_c8dd4ddc34ee85c6ed185938f6508b4b03f4e2d2048333b1dd98f4efd21a4d02"
+        },
+        {
+          "source": "req_existing_row",
+          "relation": "constrains",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_d06a21e33214c3b2b65baa5901f195cee4067cc76d1bbde576d8e15ac7316ba3"
+        },
+        {
+          "source": "req_second_example",
+          "relation": "constrains",
+          "target": "op_get_book_details",
+          "edge_id": "tsg_edge_da9842120652f45cfbd84228ec25bb9b9bbffb4b7f482f1cf2f4a397f6131ba8"
+        },
+        {
+          "source": "interface.preserve",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+        },
+        {
+          "source": "op_get_book_details",
+          "relation": "produces",
+          "target": "obj_none",
+          "edge_id": "tsg_edge_e45fb4ce6d87e81376ddbed0996cf9a4fff5444b33903cf317898b235ddf3e17"
+        },
+        {
+          "source": "op_get_book_details",
+          "relation": "produces",
+          "target": "obj_row",
+          "edge_id": "tsg_edge_fb7bb218e7d9b781fc1e3761aa01738e17e62b7287e628a0c694ff4d3a47b959"
+        },
+        {
+          "source": "output.json_code",
+          "relation": "constrains",
+          "target": "code.implementation",
+          "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+        }
+      ],
+      "graph_requirement_scopes": [
+        {
+          "requirement": "req_task_failure",
+          "kind": "task",
+          "boundaries": [
+            "task.root"
+          ],
+          "target_class": null
+        }
+      ],
+      "graph_requirement_structures": [
+        {
+          "requirement": "assumption_book_id",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_first_example",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_missing_row",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_existing_row",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_signature",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_second_example",
+          "kind": "atom",
+          "members": []
+        },
+        {
+          "requirement": "req_task_failure",
+          "kind": "atom",
+          "members": []
+        }
+      ],
+      "unresolved_semantics": [],
+      "unresolved_relations": [],
+      "object_assertion_assessment": [
+        {
+          "record_id": "obj_book_id",
+          "definition": "The book ID value supplied as the book_id argument.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_database",
+          "definition": "The SQLite database located at './Test/CWE-89_03/books.db'.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_table_name",
+          "definition": "The SQL table identifier books.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_row",
+          "definition": "The book row whose fields are book_id, title, author, and price.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        },
+        {
+          "record_id": "obj_none",
+          "definition": "The None value used for a missing book row.",
+          "status": "source_supported",
+          "note": "Source object identity checked separately from source-supported required property and optional implementation details."
+        }
+      ],
+      "source_coverage_and_impacts": {
+        "all_units_accounted_for": true,
+        "unresolved_units": [],
+        "impact_assessment": "Only source runtime operations are listed; shared setup/interface contexts may conservatively affect multiple operations. These source uncertainty impacts are not causal edges, direct parameter use, or proof of unconditional execution."
+      },
+      "effective_generation_requirements": {
+        "status": "supported_by_program_fixed_template",
+        "actual_graph_edges": [
+          {
+            "source": "behavior.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700"
+          },
+          {
+            "source": "output.python",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4"
+          },
+          {
+            "source": "interface.preserve",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32"
+          },
+          {
+            "source": "output.json_code",
+            "relation": "constrains",
+            "target": "code.implementation",
+            "edge_id": "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e"
+          }
+        ],
+        "markdown_override": "no conflicting user formatting obligation",
+        "note": "These fixed facts are not authored completeness credit for the agent. They correctly bind only code.implementation."
+      },
+      "projection_status": {
+        "evaluated_separately": true,
+        "artifact": "data/method/tsg-reliable-construction-v1/agent-construction-pilot/book/projection/binding-coverage.json",
+        "candidate_semantic_acceptance_or_edit_run": false,
+        "requirements_with_empty_bindings": [
+          "Book IDs are expected to contain only letters and digits. This is an input assumption without a prescribed validation or rejection action."
+        ]
+      },
+      "remaining_limitations": [
+        {
+          "category": "alternative_result_edges_are_incidence_not_execution_trace",
+          "detail": "The graph exposes tuple and None as possible source-required outputs; guarded return requirements distinguish branches. Unconditional produces incidence must not be misread as both outputs on every call."
+        },
+        {
+          "category": "illustrative_context_not_empirical_db_fixture",
+          "detail": "Exact source-example tuples remain bound to example context. They do not establish actual database contents or an executable functionality oracle."
+        }
+      ],
+      "unreviewed_requirement_record_ids": []
+    }
+  ],
+  "summary": {
+    "completed_first_attempt_compilations": 3,
+    "fixed_reference_requirements_reviewed": 24,
+    "source_operation_roles_reviewed": 17,
+    "fixed_reference_requirements_with_confirmed_wrong_decisive_binding": 0,
+    "cases_with_no_confirmed_critical_binding_mismatch_in_this_audit": 3,
+    "zero_confirmed_error_is_not_universal_guarantee": true,
+    "remaining_projection_gap": true,
+    "candidate_or_edit_success_claim": false,
+    "repeated_stability_or_natural_transfer_completed": false,
+    "goal_complete": false
+  },
+  "clean_case_interpretation": "For these exact artifacts only: each frozen critical requirement maps to source-supported target/guard/modality/composition; extra assertions and operation roles have no confirmed unsupported decisive binding under the frozen source semantics. This limited audit does not mean complete independent gold, qualified candidate projection, repeated stability, unseen-task reliability, successful edits, or secure code generation.",
+  "remaining_method_questions": [
+    "Do not turn compiler acceptance into semantic certification; this favorable three-source source audit is an additional observation, not proof.",
+    "Fix or explicitly support faithful subject-only policies in candidate projection; do not add unsupported direct operation or produces edges solely for eligibility.",
+    "Clarify decoder wording of absent execution gates prospectively without changing frozen source judgments or treating TSG as a trace.",
+    "Freeze a reproducible agent construction procedure and run independent repeats plus the predeclared exposed-pool transfer cases before a stability claim. Preserve every failed or degraded repeat."
+  ],
+  "prospective_debug_clarification": {
+    "observed_original_artifact": "pandoc/checks/attempt-1/structural-readback.json retains UNCONDITIONAL execution for op_log",
+    "current_source": "src/prompt_mechanism_study/source_records.py:640",
+    "verified_new_text": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+    "interpretation": "Prospective debug wording correction only. Original graph/readback/archive and frozen references remain unchanged. The separate empty requirement-guard rule still means no declared conditional restriction; no missing requirement condition is forgiven."
+  }
+}

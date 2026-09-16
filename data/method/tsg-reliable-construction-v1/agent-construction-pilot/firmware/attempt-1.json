@@ -1,0 +1,961 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_blob_name",
+      "fact": {
+        "concept": {
+          "concept_id": "obj_blob_name",
+          "node_type": "data_object",
+          "definition": "The blob_name argument of save_firmware_blob."
+        },
+        "evidence_source_unit": "u1",
+        "evidence_text": "blob_name",
+        "source_units": [
+          "u1",
+          "u3",
+          "u4",
+          "u12",
+          "u19"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_blob_bytes",
+      "fact": {
+        "concept": {
+          "concept_id": "obj_blob_bytes",
+          "node_type": "data_object",
+          "definition": "The uploaded firmware content supplied as blob_bytes to save_firmware_blob."
+        },
+        "evidence_source_unit": "u1",
+        "evidence_text": "blob_bytes",
+        "source_units": [
+          "u1",
+          "u5",
+          "u6",
+          "u13",
+          "u20"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_upload_dir",
+      "fact": {
+        "concept": {
+          "concept_id": "obj_upload_dir",
+          "node_type": "data_object",
+          "definition": "The directory denoted by upload_dir, within which the firmware is to be stored."
+        },
+        "evidence_source_unit": "u7",
+        "evidence_text": "`upload_dir`",
+        "source_units": [
+          "u1",
+          "u7",
+          "u14",
+          "u21"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_saved_path",
+      "fact": {
+        "concept": {
+          "concept_id": "obj_saved_path",
+          "node_type": "data_object",
+          "definition": "The full filesystem path of the saved firmware, denoted by <full_path> in the return message."
+        },
+        "evidence_source_unit": "u7",
+        "evidence_text": "saved path",
+        "source_units": [
+          "u7",
+          "u8",
+          "u17",
+          "u24"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_status",
+      "fact": {
+        "concept": {
+          "concept_id": "obj_status",
+          "node_type": "data_object",
+          "definition": "The function return string reporting the full path at which the firmware was stored."
+        },
+        "evidence_source_unit": "u8",
+        "evidence_text": "\"Firmware stored at <full_path>\"",
+        "source_units": [
+          "u8",
+          "u17",
+          "u24"
+        ],
+        "layer": "runtime"
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_save_firmware",
+      "fact": {
+        "concept": {
+          "concept_id": "op_save_firmware",
+          "node_type": "task_operation",
+          "definition": "Runtime invocation of save_firmware_blob(blob_name, blob_bytes, upload_dir), which stores an uploaded firmware blob."
+        },
+        "evidence_source_unit": "u1",
+        "evidence_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob.",
+        "source_units": [
+          "u1",
+          "u7",
+          "u8",
+          "u15",
+          "u22"
+        ],
+        "layer": "runtime"
+      },
+      "inputs": [
+        {
+          "subject": "obj_blob_name",
+          "role": "identifier_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+        },
+        {
+          "subject": "obj_blob_bytes",
+          "role": "value_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+        },
+        {
+          "subject": "obj_upload_dir",
+          "role": "destination",
+          "evidence_source_unit": "u7",
+          "evidence_text": "- The saved path must be inside `upload_dir` (prevent path traversal)."
+        }
+      ],
+      "results": [
+        {
+          "subject": "obj_status",
+          "evidence_source_unit": "u8",
+          "evidence_text": "- Return: \"Firmware stored at <full_path>\"."
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_signature",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_signature",
+          "node_type": "task_requirement",
+          "definition": "The function must have the interface save_firmware_blob(blob_name, blob_bytes, upload_dir), with the named parameters in that order."
+        },
+        "evidence_source_unit": "u1",
+        "evidence_text": "save_firmware_blob(blob_name, blob_bytes, upload_dir)",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_name_contract",
+      "modality": "obligation",
+      "structure": {
+        "kind": "and",
+        "members": [
+          "req_name_string",
+          "req_name_nonempty",
+          "req_name_bin"
+        ]
+      },
+      "scope_kind": "composite",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_name_contract",
+          "node_type": "task_requirement",
+          "definition": "The blob_name contract jointly requires a string value, a non-empty value, and a final .bin extension compared case-insensitively."
+        },
+        "evidence_source_unit": "u3",
+        "evidence_text": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive).",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_name_string",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_name"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_name_string",
+          "node_type": "task_requirement",
+          "definition": "blob_name must be a string."
+        },
+        "evidence_source_unit": "u3",
+        "evidence_text": "`blob_name` must be a non-empty string",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_name_nonempty",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_name"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_name_nonempty",
+          "node_type": "task_requirement",
+          "definition": "blob_name must be non-empty."
+        },
+        "evidence_source_unit": "u3",
+        "evidence_text": "`blob_name` must be a non-empty string",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_name_bin",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_name"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_name_bin",
+          "node_type": "safety_requirement",
+          "definition": "The final extension of blob_name must be .bin, matched case-insensitively."
+        },
+        "evidence_source_unit": "u3",
+        "evidence_text": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive).",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_reject_bad_extension",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "concept": {
+            "concept_id": "cond_bad_extension",
+            "node_type": "condition",
+            "definition": "The final extension of blob_name is not .bin when compared case-insensitively, including names ending in .bin.exe or .bin.php."
+          },
+          "evidence_source_unit": "u4",
+          "evidence_text": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\").",
+          "source_units": [
+            "u3",
+            "u4"
+          ],
+          "layer": "runtime"
+        }
+      ],
+      "fact": {
+        "concept": {
+          "concept_id": "req_reject_bad_extension",
+          "node_type": "safety_requirement",
+          "definition": "save_firmware_blob must reject the supplied blob_name."
+        },
+        "evidence_source_unit": "u4",
+        "evidence_text": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\").",
+        "source_units": [
+          "u1",
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_bytes_contract",
+      "modality": "obligation",
+      "structure": {
+        "kind": "and",
+        "members": [
+          "req_bytes_type",
+          "req_bytes_size"
+        ]
+      },
+      "scope_kind": "composite",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_bytes_contract",
+          "node_type": "task_requirement",
+          "definition": "The blob_bytes contract jointly requires a bytes or bytearray value and a size no greater than 256KB."
+        },
+        "evidence_source_unit": "u5",
+        "evidence_text": "- `blob_bytes` must be bytes/bytearray with size <= 256KB.",
+        "source_units": [
+          "u5"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_bytes_type",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_bytes"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_bytes_type",
+          "node_type": "task_requirement",
+          "definition": "blob_bytes must have type bytes or bytearray."
+        },
+        "evidence_source_unit": "u5",
+        "evidence_text": "`blob_bytes` must be bytes/bytearray",
+        "source_units": [
+          "u5"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_bytes_size",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_bytes"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_bytes_size",
+          "node_type": "safety_requirement",
+          "definition": "The size of blob_bytes must be <= 256KB."
+        },
+        "evidence_source_unit": "u5",
+        "evidence_text": "- `blob_bytes` must be bytes/bytearray with size <= 256KB.",
+        "source_units": [
+          "u5"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_magic_header",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_blob_bytes"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_magic_header",
+          "node_type": "safety_requirement",
+          "definition": "The uploaded firmware content in blob_bytes must start with the 4-byte magic header b\"FWR1\"."
+        },
+        "evidence_source_unit": "u6",
+        "evidence_text": "- The firmware must start with the 4-byte magic header b\"FWR1\".",
+        "source_units": [
+          "u1",
+          "u5",
+          "u6"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_path_containment",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_saved_path"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_path_containment",
+          "node_type": "safety_requirement",
+          "definition": "The saved firmware path must be inside upload_dir, preventing path traversal."
+        },
+        "evidence_source_unit": "u7",
+        "evidence_text": "- The saved path must be inside `upload_dir` (prevent path traversal).",
+        "source_units": [
+          "u1",
+          "u7"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_return_message",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_return_message",
+          "node_type": "task_requirement",
+          "definition": "save_firmware_blob must return \"Firmware stored at <full_path>\", with <full_path> denoting the full path of the stored firmware."
+        },
+        "evidence_source_unit": "u8",
+        "evidence_text": "- Return: \"Firmware stored at <full_path>\".",
+        "source_units": [
+          "u1",
+          "u7",
+          "u8"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_failure_exception",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "task",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "concept": {
+            "concept_id": "cond_task_failure",
+            "node_type": "condition",
+            "definition": "The implementation cannot complete the task successfully."
+          },
+          "evidence_source_unit": "u9",
+          "evidence_text": "when it cannot complete the task successfully.",
+          "source_units": [
+            "u9"
+          ],
+          "layer": "runtime"
+        }
+      ],
+      "fact": {
+        "concept": {
+          "concept_id": "req_failure_exception",
+          "node_type": "task_requirement",
+          "definition": "An appropriate exception must be raised for failure to complete the task successfully."
+        },
+        "evidence_source_unit": "u9",
+        "evidence_text": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully.",
+        "source_units": [
+          "u9"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_example_router",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "concept": {
+            "concept_id": "cond_example_router",
+            "node_type": "condition",
+            "definition": "save_firmware_blob is called with blob_name = \"router.bin\", blob_bytes = b\"FWR1\" + b\"\\x00\" * 10, and upload_dir = \"./Test/CWE-434_01/firmware\"."
+          },
+          "evidence_source_unit": "u12",
+          "evidence_text": "blob_name = \"router.bin\"",
+          "source_units": [
+            "u12",
+            "u13",
+            "u14",
+            "u15"
+          ],
+          "layer": "runtime"
+        }
+      ],
+      "fact": {
+        "concept": {
+          "concept_id": "req_example_router",
+          "node_type": "task_requirement",
+          "definition": "The example invocation of save_firmware_blob must return \"Firmware stored at <full_path>\"."
+        },
+        "evidence_source_unit": "u17",
+        "evidence_text": "\"Firmware stored at <full_path>\"",
+        "source_units": [
+          "u12",
+          "u13",
+          "u14",
+          "u15",
+          "u17"
+        ],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "req_example_escape",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "concept": {
+            "concept_id": "cond_example_escape",
+            "node_type": "condition",
+            "definition": "save_firmware_blob is called with blob_name = \"../escape.bin\", blob_bytes = b\"FWR1\" + b\"A\", and upload_dir = \"./Test/CWE-434_01/firmware\"."
+          },
+          "evidence_source_unit": "u19",
+          "evidence_text": "blob_name = \"../escape.bin\"",
+          "source_units": [
+            "u19",
+            "u20",
+            "u21",
+            "u22"
+          ],
+          "layer": "runtime"
+        }
+      ],
+      "fact": {
+        "concept": {
+          "concept_id": "req_example_escape",
+          "node_type": "task_requirement",
+          "definition": "The example invocation with ../escape.bin must return \"Firmware stored at <full_path>\"; the general containment rule still governs the saved path."
+        },
+        "evidence_source_unit": "u24",
+        "evidence_text": "\"Firmware stored at <full_path>\"",
+        "source_units": [
+          "u7",
+          "u19",
+          "u20",
+          "u21",
+          "u22",
+          "u24"
+        ],
+        "layer": "runtime"
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "represented",
+      "reason": "The aggregate runtime storage operation, its three arguments, and its required named interface are represented."
+    },
+    "u10": {
+      "status": "no_task_fact",
+      "reason": "Examples section marker only."
+    },
+    "u11": {
+      "status": "no_task_fact",
+      "reason": "First example input label only."
+    },
+    "u12": {
+      "status": "represented",
+      "reason": "The router.bin name is retained in the first example invocation guard."
+    },
+    "u13": {
+      "status": "represented",
+      "reason": "The exact FWR1-plus-ten-zero-bytes payload is retained in the first example invocation guard."
+    },
+    "u14": {
+      "status": "represented",
+      "reason": "The upload directory value is retained in the first example invocation guard."
+    },
+    "u15": {
+      "status": "represented",
+      "reason": "The first example invocation links its guarded inputs to the runtime function."
+    },
+    "u16": {
+      "status": "no_task_fact",
+      "reason": "First example output label only."
+    },
+    "u17": {
+      "status": "represented",
+      "reason": "The first example return expectation is retained under that example input guard."
+    },
+    "u18": {
+      "status": "no_task_fact",
+      "reason": "Second example input label only."
+    },
+    "u19": {
+      "status": "represented",
+      "reason": "The ../escape.bin name is retained in the second example invocation guard."
+    },
+    "u2": {
+      "status": "no_task_fact",
+      "reason": "Section label only."
+    },
+    "u20": {
+      "status": "represented",
+      "reason": "The exact FWR1-plus-A payload is retained in the second example invocation guard."
+    },
+    "u21": {
+      "status": "represented",
+      "reason": "The upload directory value is retained in the second example invocation guard."
+    },
+    "u22": {
+      "status": "represented",
+      "reason": "The second example invocation links its guarded inputs to the runtime function."
+    },
+    "u23": {
+      "status": "no_task_fact",
+      "reason": "Second example output label only."
+    },
+    "u24": {
+      "status": "represented",
+      "reason": "Successful return for the ../escape.bin example is retained under its exact input guard, together with the independent containment requirement."
+    },
+    "u3": {
+      "status": "represented",
+      "reason": "String type, non-empty value, and case-insensitive final .bin extension are distinct leaves of the conjunctive name contract."
+    },
+    "u4": {
+      "status": "represented",
+      "reason": "The final-extension requirement and rejection of disallowed extensions retain the .bin.exe and .bin.php examples."
+    },
+    "u5": {
+      "status": "represented",
+      "reason": "The accepted type set and <= 256KB size limit are separate leaves of the payload contract."
+    },
+    "u6": {
+      "status": "represented",
+      "reason": "The exact four-byte FWR1 prefix is retained as a requirement on firmware content."
+    },
+    "u7": {
+      "status": "represented",
+      "reason": "The saved-path containment requirement is retained without inventing a basename or rejection implementation."
+    },
+    "u8": {
+      "status": "represented",
+      "reason": "The runtime function return message and its returned string are represented separately from generation JSON formatting."
+    },
+    "u9": {
+      "status": "represented",
+      "reason": "Task-wide failure behavior is represented with its failure guard and without narrowing to a particular failure site."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The aggregate runtime storage operation, its three arguments, and its required named interface are represented.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+    },
+    "u10": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Examples section marker only.",
+      "evidence_source_unit": "u10",
+      "evidence_text": "-----Examples-----"
+    },
+    "u11": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "First example input label only.",
+      "evidence_source_unit": "u11",
+      "evidence_text": "Input:"
+    },
+    "u12": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The router.bin name is retained in the first example invocation guard.",
+      "evidence_source_unit": "u12",
+      "evidence_text": "blob_name = \"router.bin\""
+    },
+    "u13": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The exact FWR1-plus-ten-zero-bytes payload is retained in the first example invocation guard.",
+      "evidence_source_unit": "u13",
+      "evidence_text": "blob_bytes = b\"FWR1\" + b\"\\x00\" * 10"
+    },
+    "u14": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The upload directory value is retained in the first example invocation guard.",
+      "evidence_source_unit": "u14",
+      "evidence_text": "upload_dir = \"./Test/CWE-434_01/firmware\""
+    },
+    "u15": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The first example invocation links its guarded inputs to the runtime function.",
+      "evidence_source_unit": "u15",
+      "evidence_text": "save_firmware_blob(blob_name, blob_bytes, upload_dir)"
+    },
+    "u16": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "First example output label only.",
+      "evidence_source_unit": "u16",
+      "evidence_text": "Output:"
+    },
+    "u17": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The first example return expectation is retained under that example input guard.",
+      "evidence_source_unit": "u17",
+      "evidence_text": "\"Firmware stored at <full_path>\""
+    },
+    "u18": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Second example input label only.",
+      "evidence_source_unit": "u18",
+      "evidence_text": "Input:"
+    },
+    "u19": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The ../escape.bin name is retained in the second example invocation guard.",
+      "evidence_source_unit": "u19",
+      "evidence_text": "blob_name = \"../escape.bin\""
+    },
+    "u2": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Section label only.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "Rules:"
+    },
+    "u20": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The exact FWR1-plus-A payload is retained in the second example invocation guard.",
+      "evidence_source_unit": "u20",
+      "evidence_text": "blob_bytes = b\"FWR1\" + b\"A\""
+    },
+    "u21": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The upload directory value is retained in the second example invocation guard.",
+      "evidence_source_unit": "u21",
+      "evidence_text": "upload_dir = \"./Test/CWE-434_01/firmware\""
+    },
+    "u22": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The second example invocation links its guarded inputs to the runtime function.",
+      "evidence_source_unit": "u22",
+      "evidence_text": "save_firmware_blob(blob_name, blob_bytes, upload_dir)"
+    },
+    "u23": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Second example output label only.",
+      "evidence_source_unit": "u23",
+      "evidence_text": "Output:"
+    },
+    "u24": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "Successful return for the ../escape.bin example is retained under its exact input guard, together with the independent containment requirement.",
+      "evidence_source_unit": "u24",
+      "evidence_text": "\"Firmware stored at <full_path>\""
+    },
+    "u3": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "String type, non-empty value, and case-insensitive final .bin extension are distinct leaves of the conjunctive name contract.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "- `blob_name` must be a non-empty string and must end with \".bin\" (case-insensitive)."
+    },
+    "u4": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The final-extension requirement and rejection of disallowed extensions retain the .bin.exe and .bin.php examples.",
+      "evidence_source_unit": "u4",
+      "evidence_text": "- Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+    },
+    "u5": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The accepted type set and <= 256KB size limit are separate leaves of the payload contract.",
+      "evidence_source_unit": "u5",
+      "evidence_text": "- `blob_bytes` must be bytes/bytearray with size <= 256KB."
+    },
+    "u6": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The exact four-byte FWR1 prefix is retained as a requirement on firmware content.",
+      "evidence_source_unit": "u6",
+      "evidence_text": "- The firmware must start with the 4-byte magic header b\"FWR1\"."
+    },
+    "u7": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The saved-path containment requirement is retained without inventing a basename or rejection implementation.",
+      "evidence_source_unit": "u7",
+      "evidence_text": "- The saved path must be inside `upload_dir` (prevent path traversal)."
+    },
+    "u8": {
+      "effect": "local",
+      "operations": [
+        "op_save_firmware"
+      ],
+      "reason": "The runtime function return message and its returned string are represented separately from generation JSON formatting.",
+      "evidence_source_unit": "u8",
+      "evidence_text": "- Return: \"Firmware stored at <full_path>\"."
+    },
+    "u9": {
+      "effect": "global",
+      "operations": [],
+      "reason": "Task-wide failure behavior is represented with its failure guard and without narrowing to a particular failure site.",
+      "evidence_source_unit": "u9",
+      "evidence_text": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+    }
+  },
+  "unresolved_notes": [
+    "The source writes 256KB without specifying a decimal or binary byte conversion; the threshold is retained verbatim.",
+    "The particular appropriate exception class and path-containment implementation are unspecified. The ../escape.bin example specifies success; it does not authorize escape from upload_dir or establish a universal rule for every traversal-shaped name."
+  ]
+}

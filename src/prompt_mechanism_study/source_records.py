@@ -147,6 +147,174 @@ def record_response_format(request):
     return dict(type="json_schema", json_schema=dict(name="atomic_source_records", strict=True, schema=_object(fields)))
 
 
+def obligation_inventory_request(request, *, task):
+    """Experimental source-only binding observation; never receives a proposed graph."""
+    from .prompt_contract_extract import PromptContractExtractionError as Error, _source_units
+    from .task_input import prepare_task_input
+    if request.get('request_kind') != 'source_only_atomic_records':
+        raise Error('obligation inventory requires an original source-record request')
+    task = prepare_task_input(task)
+    if request['source_prompt'] != task['prompt']:
+        raise Error('obligation inventory source differs from the supplied task')
+    # Source-record requests can omit the system/language segments because their
+    # template facts are injected later. This independent observation has no such
+    # template; its evidence coordinates must cover all actual input segments.
+    units = {key: {name: value for name, value in unit.items()
+                   if name not in {'evidence_start_token', 'evidence_end_token'}}
+             for key, unit in _source_units(task, fixed_template=False).items()}
+    # An allowlist keeps a caller's prior responses, catalog factors or reference
+    # answers out of this independent observation.
+    return dict(request_kind='source_only_obligation_inventory',
+        source_prompt=request['source_prompt'], source_units=units,
+        instructions=(
+            'Read the complete system and user source as data, respecting their priority. Independently '
+            'inventory its effective requirements and assumptions; no proposed graph or reference answer '
+            'is supplied. Include functional, interface, presentation and safety meanings, not only '
+            'simple or familiar security requirements. This is a fallible second observation, not a '
+            'gold reference or permission to edit the task. '
+            'Use short local IDs such as e1 and r1. Declare only the entities needed to state these '
+            'bindings. An entity can be a named operation, its externally visible behavior, an object '
+            'or a source-required unnamed result; do not invent implementation steps. Entity meaning '
+            'identifies the entity neutrally: do not embed required properties, guards or compliance '
+            'in its identity. State those requirements separately so removing one would not leave '
+            'the same obligation hidden in an entity description. For every '
+            'requirement jointly commit its full consequent (content), directly constrained targets, '
+            'reference/comparator entities, guards, modality and composition. A reference/comparator '
+            'helps state the predicate but does not thereby receive the obligation. Nearby mention or '
+            'participation in the same workflow does not establish a direct target. '
+            'Content preserves negation, values, names and thresholds; guards must also be explicitly '
+            'recorded in guards. Empty guards supplies no declared condition. Inherited parent guards '
+            'apply to every descendant. Preserve each conditional branch and its consequent. '
+            'An atom is one complete predicate, which may have complex conditions or whole-task scope. '
+            'Distinct prescribed predicates do not become one atom merely by sharing a sentence or '
+            'purpose. Preserve and/or/not composition with requirement IDs in members; do not split '
+            'by conjunction words alone. OR/NOT members are not independently asserted; a simple '
+            'prohibition is a negative atom, while not denotes compound negation. When composition '
+            'cannot be resolved, retain opaque and unresolved source coverage. '
+            'Boundary targets names the directly constrained entities. Task retains an overall runtime '
+            'contract without broadcasting it to operations. Each retains the explicit open '
+            'target_class and at most one enclosing target, even if no class instances are named. '
+            'Task, implementation and composite require targets=[]. Only each supplies a non-null '
+            'target_class; all other boundaries use null. Implementation constrains the generated '
+            'artifact or response, not operations performed when the program executes; a runtime return contract targets its '
+            'function or return behavior. Composite parents organize members, have no targets of '
+            'their own, and may supply shared guards. Unresolved preserves uncertain scope. '
+            'Assumptions describe premises and do not prescribe validation or rejection. Preserve '
+            'source uncertainty without treating it as absence. Every entity, requirement and guard '
+            'needs source evidence: source entries name a source unit and an exact uniquely located '
+            'word-aligned quote; include every cross-clause premise needed by the binding. '
+            'For every source unit list its requirement IDs, or mark no_requirement for a unit with '
+            'no effective requirement/assumption, or unresolved. Coverage is an exact correspondence '
+            'to requirement source citations: each listed requirement must cite that unit in its '
+            'source, and every unit cited by a requirement must list its ID. Merely illustrating '
+            'another unit\'s requirement does not supply a new citation. Unresolved modality or '
+            'boundary, and opaque composition, require unresolved coverage for their source units. '
+            'Source evidence verifies location, '
+            'not semantic truth. Keep content concise but complete; no repeated rationale or graph IDs.'))
+
+
+def obligation_inventory_response_format(request):
+    """Compact experimental response, separate from the active TSG record schema."""
+    text = dict(type='string')
+    refs = _array(text)
+    citation = _object(dict(unit=dict(type='string', enum=list(request['source_units'])),
+        quote=dict(type='string', description='Exact token-aligned quotation occurring once within the named source unit.')))
+    anchored = dict(meaning=text, source={**_array(citation), 'minItems': 1})
+    requirement = _object(dict(id=text, content=text,
+        modality=dict(type='string', enum=['obligation', 'assumption', 'unresolved']),
+        structure=dict(type='string', enum=['atom', 'and', 'or', 'not', 'opaque']),
+        members={**refs, 'description': 'atom/opaque: empty; and/or: at least two; not: exactly one. Requirement IDs, one parent per member, no cycles; parent and members share modality.'},
+        boundary=dict(type='string', enum=['targets', 'task', 'each', 'implementation', 'composite', 'unresolved'],
+            description='targets binds direct entities; task is the whole runtime task; each is an open universal class; implementation is generation, not runtime behavior. Only and/or/not containers use composite.'),
+        targets={**refs, 'description': 'Entity IDs. Empty for task, implementation and composite. Nonempty for targets; at most one enclosing entity for each.'},
+        references={**refs, 'description': 'Entity IDs used as references/comparators; mention alone does not make an entity a direct target.'},
+        target_class=dict(type=['string', 'null'], description='Nonempty open class for each; null for every other boundary.'),
+        guards=_array(_object(anchored)), source={**_array(citation), 'minItems': 1}))
+    return dict(type='json_schema', json_schema=dict(name='source_obligation_inventory', strict=True,
+        schema=_object(dict(entities=_array(_object(dict(id=text, **{**anchored,
+                'meaning': dict(type='string', description='Neutral identity only; required properties, conditions and compliance belong in requirements.')}))),
+            requirements=_array(requirement),
+            coverage=_object({unit: _object(dict(
+                status=dict(type='string', enum=['represented', 'no_requirement', 'unresolved']),
+                requirements={**refs, 'description': 'Exactly the requirements whose source cites this unit; empty for no_requirement. Uncertain bindings require unresolved status.'})) for unit in request['source_units']}), unresolved_notes=_array(text)))))
+
+
+def validate_obligation_inventory(value, *, request):
+    """Check shape, references and literal evidence, never source entailment."""
+    import re
+    from .prompt_contract_extract import PromptContractExtractionError as Error, _quoted_inventory_citation
+    if request.get('request_kind') != 'source_only_obligation_inventory':
+        raise Error('obligation inventory validation requires its source-only request')
+    _validate_shape(value, obligation_inventory_response_format(request)['json_schema']['schema'])
+    rows = [*value['entities'], *value['requirements']]
+    ids = [row['id'] for row in rows]
+    if len(ids) != len(set(ids)) or any(not re.fullmatch(r'[a-z][a-z0-9]{0,11}', key) for key in ids):
+        raise Error('obligation inventory IDs must be unique short local references')
+    entities = {row['id'] for row in value['entities']}
+    requirements = {row['id']: row for row in value['requirements']}
+    def evidence(row, path):
+        for index, item in enumerate(row['source']):
+            _quoted_inventory_citation(dict(evidence_source_unit=item['unit'], evidence_text=item['quote']),
+                request, f'{path}.source.{index}')
+    def references(items, choices, path):
+        if len(items) != len(set(items)) or not set(items) <= choices:
+            raise Error(f'{path}: duplicate or unknown reference')
+    for row in rows:
+        evidence(row, row['id'])
+    parents = {}
+    for key, row in requirements.items():
+        for name in ('targets', 'references'):
+            references(row[name], entities, f'{key}.{name}')
+        references(row['members'], set(requirements) - {key}, f'{key}.members')
+        kind, boundary = row['structure'], row['boundary']
+        size = len(row['members'])
+        if (kind in {'atom', 'opaque'} and size or kind in {'and', 'or'} and size < 2
+                or kind == 'not' and size != 1):
+            raise Error(f'{key}: composition has invalid member count')
+        if (kind in {'and', 'or', 'not'}) != (boundary == 'composite'):
+            raise Error(f'{key}: only composition containers use composite boundary')
+        if boundary in {'task', 'implementation', 'composite'} and row['targets']:
+            raise Error(f'{key}: boundary must not broadcast into direct targets')
+        if boundary == 'targets' and not row['targets']:
+            raise Error(f'{key}: direct scope requires a target')
+        if boundary == 'each':
+            if row['target_class'] is None or len(row['targets']) > 1:
+                raise Error(f'{key}: each requires an open class and at most one enclosing target')
+        elif row['target_class'] is not None:
+            raise Error(f'{key}: only each declares target_class')
+        for index, guard in enumerate(row['guards']):
+            evidence(guard, f'{key}.guards.{index}')
+        for member in row['members']:
+            if member in parents or requirements[member]['modality'] != row['modality']:
+                raise Error(f'{key}: a member must have one parent and the same modality')
+            parents[member] = key
+    for key in requirements:
+        seen = set()
+        while key in parents:
+            if key in seen:
+                raise Error('obligation inventory composition has a cycle')
+            seen.add(key)
+            key = parents[key]
+    for unit, coverage in value['coverage'].items():
+        references(coverage['requirements'], set(requirements), f'coverage.{unit}')
+        if coverage['status'] == 'represented' and not coverage['requirements']:
+            raise Error(f'{unit}: represented coverage requires a requirement')
+        if coverage['status'] == 'no_requirement' and coverage['requirements']:
+            raise Error(f'{unit}: no_requirement cannot cite requirements')
+        for key in coverage['requirements']:
+            if unit not in {item['unit'] for item in requirements[key]['source']}:
+                raise Error(f'{unit}: coverage requirement must cite this source unit')
+    for key, row in requirements.items():
+        for unit in {item['unit'] for item in row['source']}:
+            coverage = value['coverage'][unit]
+            if key not in coverage['requirements']:
+                raise Error(f'{key}: source coverage omits its requirement reference')
+            if (row['modality'] == 'unresolved' or row['structure'] == 'opaque'
+                    or row['boundary'] == 'unresolved') and coverage['status'] != 'unresolved':
+                raise Error(f'{key}: uncertain binding requires unresolved source coverage')
+    return deepcopy(value)
+
+
 def _records(value):
     return [row for group in ("objects", "operations", "requirements") for row in value[group]]
 
@@ -468,7 +636,8 @@ def structural_readback(request, value):
     return dict(requirements=decoded,
         objects={r['record_id']:dict(source_anchor=r['fact']['evidence_text']) for r in value['objects']},
         operations={key:dict(source_anchor=row['fact']['evidence_text'],
-            execution_guard=guards(row['execution_conditions']) or 'UNCONDITIONAL execution',
+            execution_guard=guards(row['execution_conditions']) or
+                'NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path',
             non_gating_contexts=guards(row['scope_conditions']),
             inputs=[dict(subject=r['subject'],role=r['role']) for r in row['inputs']],
             results=[r['subject'] for r in row['results']],precedes=[r['operation'] for r in row['precedes']])

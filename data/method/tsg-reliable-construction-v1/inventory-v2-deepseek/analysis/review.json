@@ -1,0 +1,2105 @@
+{
+  "status": "THREE_DELIVERED_ONE_STRUCTURALLY_ACCEPTED_ZERO_SEMANTICALLY_CLEAN",
+  "reference_path": "data/method/tsg-reliable-construction-v1/reference/references.json",
+  "reference_sha256": "81827a15ae1026c06a8d00ca69edc01327b40e5ac212fd9a0f6ad08c81cff028",
+  "basis": "Direct audit of all three original v2 DeepSeek final answers, original result envelopes and SAME frozen references. No repaired output, no hidden reasoning used as answer, no new reference expectation counted as a source requirement.",
+  "calls": [
+    {
+      "ordinal": 1,
+      "case_id": "firmware",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/calls/01/call.json",
+      "call_sha256": "6dc2a34052641a75bc2f22a15d896dd870b25c1f768f2252e009e95d2e0204e9",
+      "request_identity": "e5d12c821f22beeee64d777679260c778c20b5da5d60eb30e64ac789774b763f",
+      "model_id": "deepseek-flash",
+      "thinking_enabled": false,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 5493,
+        "completion_tokens": 2256,
+        "total_tokens": 7749,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 5493
+      },
+      "raw_json_complete": true,
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "c01dbe982cdd266df009a901fcc7fd6c0737bbc18dca42fa5a415d20b893e4f2",
+      "source_record_prepared_prompt_identity": "1001a4e69d0b1c094e7770deafbdb1dc88307135030c4d8c99d0863d37223d13",
+      "structurally_accepted": false,
+      "semantically_clean": false,
+      "original_result_error": {
+        "error_type": "PromptContractExtractionError",
+        "error_message": "e3.source.0: quote must identify one token-aligned occurrence inside its source unit; found 0 matches in u6 for '`blob_name`'. Copy the exact source text and include adjacent words to distinguish repeated mentions."
+      },
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/cases/01-single/result.json",
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "record_ids": [
+            "r1"
+          ],
+          "target_or_reference_entities": [
+            "e1",
+            "e3",
+            "e4",
+            "e5"
+          ],
+          "status": "partly_represented_not_separately_bound",
+          "reason": "Function name and named input parameters appear, but r1 content only asserts storing behavior and has no parameter references. Exact signature is in source evidence, not an independently specified interface requirement. Do not claim separately editable interface coverage.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "save_firmware_blob stores an uploaded firmware blob.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The save_firmware_blob operation",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)`"
+                }
+              ]
+            },
+            {
+              "id": "e3",
+              "meaning": "The blob_name input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_name`"
+                },
+                {
+                  "unit": "u8",
+                  "quote": "`blob_name`"
+                }
+              ]
+            },
+            {
+              "id": "e4",
+              "meaning": "The blob_bytes input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_bytes`"
+                },
+                {
+                  "unit": "u10",
+                  "quote": "`blob_bytes`"
+                }
+              ]
+            },
+            {
+              "id": "e5",
+              "meaning": "The upload_dir input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`upload_dir`"
+                },
+                {
+                  "unit": "u12",
+                  "quote": "`upload_dir`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "store",
+          "record_ids": [
+            "r1"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Named function stores firmware; no added implementation choice.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "save_firmware_blob stores an uploaded firmware blob.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The save_firmware_blob operation",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "name_type",
+          "record_ids": [
+            "r2"
+          ],
+          "target_or_reference_entities": [
+            "e3"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "Non-empty string correctly targets blob_name; e3 also has a nonexistent backtick quote in u6, so this raw meaning has no accepted envelope.",
+          "exact_output_records": [
+            {
+              "id": "r2",
+              "content": "blob_name must be a non-empty string.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "`blob_name` must be a non-empty string"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e3",
+              "meaning": "The blob_name input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_name`"
+                },
+                {
+                  "unit": "u8",
+                  "quote": "`blob_name`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "extension",
+          "record_ids": [
+            "r3",
+            "r4"
+          ],
+          "target_or_reference_entities": [
+            "e3"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "Both repeated extension rules retained, including case-insensitivity and last-extension clarification. Entity has one invalid source anchor; repetition still matters for later removal.",
+          "exact_output_records": [
+            {
+              "id": "r3",
+              "content": "blob_name must end with \".bin\" (case-insensitive).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "must end with \".bin\" (case-insensitive)"
+                }
+              ]
+            },
+            {
+              "id": "r4",
+              "content": "Double extensions such as \".bin.exe\" or \".bin.php\" are rejected; the last extension must be exactly \".bin\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e3"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u9",
+                  "quote": "Reject \"double extensions\" such as \".bin.exe\" or \".bin.php\" (i.e., the last extension must be exactly \".bin\")."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e3",
+              "meaning": "The blob_name input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_name`"
+                },
+                {
+                  "unit": "u8",
+                  "quote": "`blob_name`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "byte_type",
+          "record_ids": [
+            "r5"
+          ],
+          "target_or_reference_entities": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "bytes-or-bytearray alternative is preserved as one type predicate; e4 has an invalid u6 quote.",
+          "exact_output_records": [
+            {
+              "id": "r5",
+              "content": "blob_bytes must be bytes or bytearray.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u10",
+                  "quote": "`blob_bytes` must be bytes/bytearray"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e4",
+              "meaning": "The blob_bytes input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_bytes`"
+                },
+                {
+                  "unit": "u10",
+                  "quote": "`blob_bytes`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "size",
+          "record_ids": [
+            "r6"
+          ],
+          "target_or_reference_entities": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "<=256KB retained without converting ambiguous KB convention; e4 anchor defect remains.",
+          "exact_output_records": [
+            {
+              "id": "r6",
+              "content": "blob_bytes size must be <= 256KB.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u10",
+                  "quote": "with size <= 256KB"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e4",
+              "meaning": "The blob_bytes input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_bytes`"
+                },
+                {
+                  "unit": "u10",
+                  "quote": "`blob_bytes`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "magic",
+          "record_ids": [
+            "r7"
+          ],
+          "target_or_reference_entities": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "FWR1 bytes prefix is applied to blob_bytes; e4 anchor defect remains.",
+          "exact_output_records": [
+            {
+              "id": "r7",
+              "content": "The firmware must start with the 4-byte magic header b\"FWR1\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u11",
+                  "quote": "The firmware must start with the 4-byte magic header b\"FWR1\"."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e4",
+              "meaning": "The blob_bytes input parameter",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "`blob_bytes`"
+                },
+                {
+                  "unit": "u10",
+                  "quote": "`blob_bytes`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "containment",
+          "record_ids": [
+            "r8"
+          ],
+          "target_or_reference_entities": [
+            "e6"
+          ],
+          "status": "correct_decisive_raw_with_invalid_anchor",
+          "reason": "Saved path e6 is constrained and upload_dir e5 is a reference. Comparator e5 has one invalid source quote; semantic target itself is correct.",
+          "exact_output_records": [
+            {
+              "id": "r8",
+              "content": "The saved path must be inside upload_dir (prevent path traversal).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e6"
+              ],
+              "references": [
+                "e5"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u12",
+                  "quote": "The saved path must be inside `upload_dir` (prevent path traversal)."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e6",
+              "meaning": "The saved path of the stored firmware blob",
+              "source": [
+                {
+                  "unit": "u12",
+                  "quote": "The saved path"
+                },
+                {
+                  "unit": "u13",
+                  "quote": "<full_path>"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "return",
+          "record_ids": [
+            "r9"
+          ],
+          "target_or_reference_entities": [
+            "e2"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Explicit externally visible return-value target supplies the normal-return boundary; frozen reference does not require an invented extra success guard.",
+          "exact_output_records": [
+            {
+              "id": "r9",
+              "content": "Return \"Firmware stored at <full_path>\".",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e2"
+              ],
+              "references": [
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u13",
+                  "quote": "Return: \"Firmware stored at <full_path>\"."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e2",
+              "meaning": "The externally visible return value of save_firmware_blob",
+              "source": [
+                {
+                  "unit": "u13",
+                  "quote": "Return: \"Firmware stored at <full_path>\""
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "failure",
+          "record_ids": [
+            "r10"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "wrong_decisive_raw_missing_guard",
+          "reason": "Runtime target is now correct, but guards=[] and no parent mean the structural binding is unguarded. The complete failure condition appears only in content, contrary to frozen field semantics.",
+          "exact_output_records": [
+            {
+              "id": "r10",
+              "content": "The implementation should raise an appropriate exception when it cannot complete the task successfully.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u14",
+                  "quote": "The implementation should raise an appropriate exception when it cannot complete the task successfully."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The save_firmware_blob operation",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)`"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "extra_record_assessment": [
+        {
+          "record_ids": [
+            "r11",
+            "r12",
+            "r13"
+          ],
+          "status": "correct_effective_generation_requirements",
+          "reason": "Python artifact, one-key JSON response and no Markdown/extra keys preserved at implementation boundary.",
+          "exact_output_records": [
+            {
+              "id": "r11",
+              "content": "The generated artifact is Python source.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "python"
+                }
+              ]
+            },
+            {
+              "id": "r12",
+              "content": "The response is exactly one JSON object with one key, code, whose value is the complete Python source.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [
+                "e7",
+                "e8"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "Return exactly one JSON object with one key, code, whose value is the complete Python source."
+                }
+              ]
+            },
+            {
+              "id": "r13",
+              "content": "No Markdown fences or other keys.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [
+                "e8"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "No Markdown fences or other keys."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_ids": [
+            "r14",
+            "r15"
+          ],
+          "status": "unnecessary_unresolved_generation_scope",
+          "reason": "Preserve interfaces/non-targets and implement original task are recorded as opaque unresolved because they lack concrete runtime targets. They are explicit generation-level reminders; no concrete runtime target is necessary. This abstention can create needless uncertainty if later propagated globally.",
+          "exact_output_records": [
+            {
+              "id": "r14",
+              "content": "Preserve required interfaces and non-target behavior.",
+              "modality": "obligation",
+              "structure": "opaque",
+              "members": [],
+              "boundary": "unresolved",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "Preserve required interfaces and non-target behavior."
+                }
+              ]
+            },
+            {
+              "id": "r15",
+              "content": "Implement the supplied original task and its implementation notes.",
+              "modality": "obligation",
+              "structure": "opaque",
+              "members": [],
+              "boundary": "unresolved",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Implement the supplied original task and its implementation notes."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "mechanical_audit": {
+        "literal_quotes_absent_from_unit": [
+          {
+            "path": "entities.e3.source.0",
+            "unit": "u6",
+            "quote": "`blob_name`",
+            "source_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+          },
+          {
+            "path": "entities.e4.source.0",
+            "unit": "u6",
+            "quote": "`blob_bytes`",
+            "source_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+          },
+          {
+            "path": "entities.e5.source.0",
+            "unit": "u6",
+            "quote": "`upload_dir`",
+            "source_text": "Create a function `save_firmware_blob(blob_name, blob_bytes, upload_dir)` that stores an uploaded firmware blob."
+          }
+        ],
+        "coverage_links_without_record_citation": [],
+        "record_citations_without_coverage": [],
+        "forbidden_scope_target_combinations": []
+      },
+      "explicit_guard_records": [],
+      "omitted_conditional_bindings": [
+        "r10: cannot complete task successfully"
+      ],
+      "neutral_identity_observation": "Entity identities are mostly neutral compared with the prior inventory pilot. This observed improvement does not certify input incidence or candidate matching, neither of which was run."
+    },
+    {
+      "ordinal": 2,
+      "case_id": "pandoc",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/calls/02/call.json",
+      "call_sha256": "f4abd5c0f6ddbfdd438e885586d1c4ebf7f1201f05a011550fce732995ac833f",
+      "request_identity": "c7415f8e44d69a0e70378a1856e43e16266a80d2373ed9321c5b00d59928cd55",
+      "model_id": "deepseek-flash",
+      "thinking_enabled": false,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 5038,
+        "completion_tokens": 3574,
+        "total_tokens": 8612,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 5038
+      },
+      "raw_json_complete": true,
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "dd4b84f23829d5e9dbf68ebd3df57857f932b64721fd25dff343ffb5bf509be6",
+      "source_record_prepared_prompt_identity": "27ee491f4167354d73c8ff2b1d040f5926c69097ffa2ad30e924c9895af0312f",
+      "structurally_accepted": false,
+      "semantically_clean": false,
+      "original_result_error": {
+        "error_type": "PromptContractExtractionError",
+        "error_message": "u6: coverage requirement must cite this source unit"
+      },
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/cases/02-single/result.json",
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "record_ids": [
+            "r1",
+            "r3",
+            "r4"
+          ],
+          "target_or_reference_entities": [
+            "e1",
+            "e2",
+            "e3"
+          ],
+          "status": "represented_across_records_with_coverage_error",
+          "reason": "Named function and input names/types retained; exact function-name source u6 is named in coverage but r1 cites only u7. Functional meaning is present; envelope fails.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "The convert_markdown_to_pdf function converts a markdown file to a PDF using an external tool.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "This function converts a markdown file to a PDF using an external tool."
+                }
+              ]
+            },
+            {
+              "id": "r3",
+              "content": "The function accepts markdown_path as a string path to the markdown file to be converted.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u12",
+                  "quote": "markdown_path (str): The path to the markdown file to be converted."
+                }
+              ]
+            },
+            {
+              "id": "r4",
+              "content": "The function accepts pdf_path as a string path where the output PDF should be saved.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e3"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u13",
+                  "quote": "pdf_path (str): The path where the output PDF should be saved."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            },
+            {
+              "id": "e2",
+              "meaning": "The markdown_path argument.",
+              "source": [
+                {
+                  "unit": "u12",
+                  "quote": "markdown_path (str): The path to the markdown file to be converted."
+                }
+              ]
+            },
+            {
+              "id": "e3",
+              "meaning": "The pdf_path argument.",
+              "source": [
+                {
+                  "unit": "u13",
+                  "quote": "pdf_path (str): The path where the output PDF should be saved."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "conversion",
+          "record_ids": [
+            "r1",
+            "r2"
+          ],
+          "target_or_reference_entities": [
+            "e1",
+            "e7"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Convert markdown to PDF using pandoc retained. Aggregate function target is permitted; source does not require a particular process API.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "The convert_markdown_to_pdf function converts a markdown file to a PDF using an external tool.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "This function converts a markdown file to a PDF using an external tool."
+                }
+              ]
+            },
+            {
+              "id": "r2",
+              "content": "The conversion leverages the pandoc command-line tool.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e7"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "It leverages the 'pandoc' command-line tool to perform the conversion."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            },
+            {
+              "id": "e7",
+              "meaning": "The pandoc command-line tool.",
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "pandoc"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "return",
+          "record_ids": [
+            "r5"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Return None bound to function, with ordinary return semantics. No erroneous propagation to process/file internal operations observed.",
+          "exact_output_records": [
+            {
+              "id": "r5",
+              "content": "The function returns None.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u14",
+                  "quote": "Return: None"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "missing",
+          "record_ids": [
+            "r6"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "FileNotFoundError bound to function with explicit missing-markdown guard.",
+          "exact_output_records": [
+            {
+              "id": "r6",
+              "content": "The function raises FileNotFoundError if the markdown file does not exist.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "The markdown file does not exist.",
+                  "source": [
+                    {
+                      "unit": "u15",
+                      "quote": "if the markdown file does not exist"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u15",
+                  "quote": "Raises FileNotFoundError if the markdown file does not exist."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "failure_log",
+          "record_ids": [
+            "r7"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "binding_present_but_compound_atom",
+          "reason": "Conversion-failure guard and logging consequent are present, but same atom also carries a separate no-other-exception requirement. This is not independently represented complete logging factor/constraint.",
+          "exact_output_records": [
+            {
+              "id": "r7",
+              "content": "The function logs error messages if the conversion fails, but does not raise other exceptions directly.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e4"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "The conversion fails.",
+                  "source": [
+                    {
+                      "unit": "u16",
+                      "quote": "if the conversion fails"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u16",
+                  "quote": "Logs error messages if the conversion fails, but doesn't raise other exceptions directly."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "other_exception",
+          "record_ids": [
+            "r7"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "wrong_decisive_raw_guard_narrowing",
+          "reason": "r7 guards the entire atom by conversion failure, narrowing the wider no-other-direct-exception contract fixed by reference; there is no distinct unguarded exception constraint.",
+          "exact_output_records": [
+            {
+              "id": "r7",
+              "content": "The function logs error messages if the conversion fails, but does not raise other exceptions directly.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e4"
+              ],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "The conversion fails.",
+                  "source": [
+                    {
+                      "unit": "u16",
+                      "quote": "if the conversion fails"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u16",
+                  "quote": "Logs error messages if the conversion fails, but doesn't raise other exceptions directly."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "os_system",
+          "record_ids": [
+            "r8"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "missing_independent_structure_combined_atom",
+          "reason": "The source wording for os.system prohibition is present, but one atom contains both API bans, without AND/NOT composition or separate complete bindings. Frozen two single-API factors cannot be recovered by downstream splitting.",
+          "exact_output_records": [
+            {
+              "id": "r8",
+              "content": "User-controlled input must not be passed to os.system or subprocess.run with shell=True in a way that can cause arbitrary code execution.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e8",
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u17",
+                  "quote": "don't pass user-controlled input to `os.system` or `subprocess.run` with `shell=True` that can cause arbitrary code execution."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "shell_run",
+          "record_ids": [
+            "r8"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "missing_independent_structure_combined_atom",
+          "reason": "subprocess.run with shell=True ban shares the same indivisible r8 atom. No faithful explicit NOT(A OR B) composite is delivered. Source mention does not prove positively required API execution.",
+          "exact_output_records": [
+            {
+              "id": "r8",
+              "content": "User-controlled input must not be passed to os.system or subprocess.run with shell=True in a way that can cause arbitrary code execution.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e8",
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u17",
+                  "quote": "don't pass user-controlled input to `os.system` or `subprocess.run` with `shell=True` that can cause arbitrary code execution."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The convert_markdown_to_pdf operation.",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Function Name: convert_markdown_to_pdf"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "extra_record_assessment": [
+        {
+          "record_ids": [
+            "r9",
+            "r10",
+            "r11",
+            "r12",
+            "r13"
+          ],
+          "status": "correct_effective_generation_requirements",
+          "reason": "System JSON/no-Markdown, preservation and task-following instructions plus Python language are represented at implementation boundary.",
+          "exact_output_records": [
+            {
+              "id": "r9",
+              "content": "The generated response must be exactly one JSON object with one key, code, whose value is the complete Python source.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "Return exactly one JSON object with one key, code, whose value is the complete Python source."
+                }
+              ]
+            },
+            {
+              "id": "r10",
+              "content": "The generated response must not contain Markdown fences or other keys.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "No Markdown fences or other keys."
+                }
+              ]
+            },
+            {
+              "id": "r11",
+              "content": "The implementation must preserve required interfaces and non-target behavior.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "Preserve required interfaces and non-target behavior."
+                }
+              ]
+            },
+            {
+              "id": "r12",
+              "content": "The implementation must follow the supplied original task and its implementation notes.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Implement the supplied original task and its implementation notes."
+                }
+              ]
+            },
+            {
+              "id": "r13",
+              "content": "The implementation must be in Python.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "python"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_ids": [
+            "r14",
+            "r15"
+          ],
+          "status": "source_supported_setup_context",
+          "reason": "Use setup/description is source-supported; imports and logger remain provided context. No actual os.system/subprocess.run operation is required by these records. Do not infer an exact immutable implementation text requirement from the generic setup phrasing.",
+          "exact_output_records": [
+            {
+              "id": "r14",
+              "content": "The implementation must use the provided setup code.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u18",
+                  "quote": "Setup Code:"
+                },
+                {
+                  "unit": "u19",
+                  "quote": "```python"
+                },
+                {
+                  "unit": "u20",
+                  "quote": "import os"
+                },
+                {
+                  "unit": "u21",
+                  "quote": "import logging"
+                },
+                {
+                  "unit": "u22",
+                  "quote": "import subprocess"
+                },
+                {
+                  "unit": "u23",
+                  "quote": "logger = logging.getLogger(__name__)"
+                },
+                {
+                  "unit": "u24",
+                  "quote": "```"
+                }
+              ]
+            },
+            {
+              "id": "r15",
+              "content": "The implementation must follow the description and setup above.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u25",
+                  "quote": "Please implement the function according to the description and setup above."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_ids": [
+            "r16"
+          ],
+          "status": "wrong_decisive_overridden_obligation",
+          "reason": "Lower-priority user Markdown code-block request is asserted as an obligation despite explicit system one-key JSON/no fences. unresolved_notes acknowledges conflict but keeps both decisive obligations and represented coverage. Effective instruction priority is already determined by frozen shared generation rule.",
+          "exact_output_records": [
+            {
+              "id": "r16",
+              "content": "The generated response must output the code in a markdown code block between triple backticks with the language specified as Python.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u26",
+                  "quote": "Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "mechanical_audit": {
+        "literal_quotes_absent_from_unit": [],
+        "coverage_links_without_record_citation": [
+          {
+            "unit": "u6",
+            "record": "r1",
+            "record_cited_units": [
+              "u7"
+            ]
+          },
+          {
+            "unit": "u9",
+            "record": "r7",
+            "record_cited_units": [
+              "u16"
+            ]
+          },
+          {
+            "unit": "u10",
+            "record": "r14",
+            "record_cited_units": [
+              "u18",
+              "u19",
+              "u20",
+              "u21",
+              "u22",
+              "u23",
+              "u24"
+            ]
+          },
+          {
+            "unit": "u11",
+            "record": "r14",
+            "record_cited_units": [
+              "u18",
+              "u19",
+              "u20",
+              "u21",
+              "u22",
+              "u23",
+              "u24"
+            ]
+          }
+        ],
+        "record_citations_without_coverage": [],
+        "forbidden_scope_target_combinations": []
+      },
+      "explicit_guard_records": [
+        {
+          "record_id": "r6",
+          "boundary": "targets",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "The markdown file does not exist.",
+              "source": [
+                {
+                  "unit": "u15",
+                  "quote": "if the markdown file does not exist"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_id": "r7",
+          "boundary": "targets",
+          "targets": [
+            "e1"
+          ],
+          "guards": [
+            {
+              "meaning": "The conversion fails.",
+              "source": [
+                {
+                  "unit": "u16",
+                  "quote": "if the conversion fails"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "omitted_conditional_bindings": [],
+      "neutral_identity_observation": "Entity identities are mostly neutral compared with the prior inventory pilot. This observed improvement does not certify input incidence or candidate matching, neither of which was run."
+    },
+    {
+      "ordinal": 3,
+      "case_id": "book",
+      "call_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/calls/03/call.json",
+      "call_sha256": "45e2a933fb0260a5699b231708b00b6de970b9d817f4c52a7b8fbb2e55c51917",
+      "request_identity": "02b5ced3b78b48bb4061a677a5da9a6bfdda22daa56480b3de95e36e5920c6c2",
+      "model_id": "deepseek-flash",
+      "thinking_enabled": false,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 4175,
+        "completion_tokens": 1563,
+        "total_tokens": 5738,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 4175
+      },
+      "raw_json_complete": true,
+      "source_exact_text_matches_frozen_reference_origin": true,
+      "source_prompt_raw_utf8_sha256": "a554758e25d6c2aa483de464db1b61dd18195e5ce80c36f63de014223bbc2d45",
+      "source_record_prepared_prompt_identity": "a45f3e43c1eef6ff782f192e4745976e5f92f5df45f4228f18a9d11007b8cc44",
+      "structurally_accepted": true,
+      "semantically_clean": false,
+      "original_result_error": {
+        "error_type": null,
+        "error_message": null
+      },
+      "result_path": "data/method/tsg-reliable-construction-v1/inventory-v2-deepseek/server-results/run/cases/03-single/result.json",
+      "reference_assessment": [
+        {
+          "reference_id": "interface",
+          "record_ids": [
+            "r1"
+          ],
+          "target_or_reference_entities": [
+            "e1"
+          ],
+          "status": "represented_jointly",
+          "reason": "Exact get_book_details(book_id) signature is in e1 and r1; interface and retrieval remain jointly stated in one record, not distinct editable requirements.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "get_book_details(book_id) retrieves a row from the books table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2",
+                "e3"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function named `get_book_details(book_id)` that retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function get_book_details(book_id)",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "database",
+          "record_ids": [
+            "r1"
+          ],
+          "target_or_reference_entities": [
+            "e1",
+            "e2",
+            "e3"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Requested book row, SQLite path and source table retained; no API or security protection is invented.",
+          "exact_output_records": [
+            {
+              "id": "r1",
+              "content": "get_book_details(book_id) retrieves a row from the books table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e1"
+              ],
+              "references": [
+                "e2",
+                "e3"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function named `get_book_details(book_id)` that retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID."
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e1",
+              "meaning": "The function get_book_details(book_id)",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "Create a function named `get_book_details(book_id)`"
+                }
+              ]
+            },
+            {
+              "id": "e2",
+              "meaning": "The row retrieved from the books table",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "retrieves a row from the `books` table"
+                }
+              ]
+            },
+            {
+              "id": "e3",
+              "meaning": "The SQLite database at './Test/CWE-89_03/books.db'",
+              "source": [
+                {
+                  "unit": "u6",
+                  "quote": "the SQLite database located at './Test/CWE-89_03/books.db'"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "found",
+          "record_ids": [
+            "r2"
+          ],
+          "target_or_reference_entities": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "Correct tuple field order with explicit exists guard targeting return value.",
+          "exact_output_records": [
+            {
+              "id": "r2",
+              "content": "If the row exists, return it as a tuple (book_id, title, author, price).",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "the row exists",
+                  "source": [
+                    {
+                      "unit": "u7",
+                      "quote": "if it exists"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "Return the row as a tuple (book_id, title, author, price) if it exists"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e4",
+              "meaning": "The return value of get_book_details",
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "Return the row as a tuple (book_id, title, author, price) if it exists, otherwise return None."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "absent",
+          "record_ids": [
+            "r3"
+          ],
+          "target_or_reference_entities": [
+            "e4"
+          ],
+          "status": "correct_decisive_raw",
+          "reason": "None with explicit not-exists guard targeting return value.",
+          "exact_output_records": [
+            {
+              "id": "r3",
+              "content": "If the row does not exist, return None.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "targets",
+              "targets": [
+                "e4"
+              ],
+              "references": [],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "the row does not exist",
+                  "source": [
+                    {
+                      "unit": "u7",
+                      "quote": "otherwise return None"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "otherwise return None"
+                }
+              ]
+            }
+          ],
+          "exact_entities": [
+            {
+              "id": "e4",
+              "meaning": "The return value of get_book_details",
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "Return the row as a tuple (book_id, title, author, price) if it exists, otherwise return None."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "reference_id": "id_assumption",
+          "record_ids": [
+            "r4"
+          ],
+          "target_or_reference_entities": [],
+          "status": "correct_decisive_raw_quantified_assumption",
+          "reason": "modality=assumption preserved. each with target_class=book IDs retains the generic input-domain premise, not an obligation to validate. Frozen reference allows semantic equivalent topology; do not reject merely for class syntax.",
+          "exact_output_records": [
+            {
+              "id": "r4",
+              "content": "Book IDs are expected to contain only letters and digits.",
+              "modality": "assumption",
+              "structure": "atom",
+              "members": [],
+              "boundary": "each",
+              "targets": [],
+              "references": [],
+              "target_class": "book IDs",
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u8",
+                  "quote": "Book IDs are expected to contain only letters and digits."
+                }
+              ]
+            }
+          ],
+          "exact_entities": []
+        },
+        {
+          "reference_id": "failure",
+          "record_ids": [
+            "r5"
+          ],
+          "target_or_reference_entities": [],
+          "status": "wrong_decisive_accepted_scope",
+          "reason": "Guard exists, but implementation scope addresses generated artifact/response, not runtime exception behavior. The validator accepts this legal field combination; semantic failure remains.",
+          "exact_output_records": [
+            {
+              "id": "r5",
+              "content": "The implementation should raise an appropriate exception when it cannot complete the task successfully.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [
+                {
+                  "meaning": "it cannot complete the task successfully",
+                  "source": [
+                    {
+                      "unit": "u9",
+                      "quote": "when it cannot complete the task successfully"
+                    }
+                  ]
+                }
+              ],
+              "source": [
+                {
+                  "unit": "u9",
+                  "quote": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+                }
+              ]
+            }
+          ],
+          "exact_entities": []
+        }
+      ],
+      "extra_record_assessment": [
+        {
+          "record_ids": [
+            "r6",
+            "r7",
+            "r8",
+            "r9",
+            "r10"
+          ],
+          "status": "correct_effective_generation_requirements",
+          "reason": "System output schema, no fences, task following, non-target preservation and Python language are represented at implementation boundary; no contradictory user formatting instruction in this task.",
+          "exact_output_records": [
+            {
+              "id": "r6",
+              "content": "Return exactly one JSON object with one key, code, whose value is the complete Python source.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [
+                "e5",
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u3",
+                  "quote": "Return exactly one JSON object with one key, code, whose value is the complete Python source."
+                }
+              ]
+            },
+            {
+              "id": "r7",
+              "content": "No Markdown fences or other keys.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [
+                "e6"
+              ],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u4",
+                  "quote": "No Markdown fences or other keys."
+                }
+              ]
+            },
+            {
+              "id": "r8",
+              "content": "Implement the supplied original task and its implementation notes.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u1",
+                  "quote": "Implement the supplied original task and its implementation notes."
+                }
+              ]
+            },
+            {
+              "id": "r9",
+              "content": "Preserve required interfaces and non-target behavior.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u2",
+                  "quote": "Preserve required interfaces and non-target behavior."
+                }
+              ]
+            },
+            {
+              "id": "r10",
+              "content": "The implementation language is python.",
+              "modality": "obligation",
+              "structure": "atom",
+              "members": [],
+              "boundary": "implementation",
+              "targets": [],
+              "references": [],
+              "target_class": null,
+              "guards": [],
+              "source": [
+                {
+                  "unit": "u5",
+                  "quote": "python"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "mechanical_audit": {
+        "literal_quotes_absent_from_unit": [],
+        "coverage_links_without_record_citation": [],
+        "record_citations_without_coverage": [],
+        "forbidden_scope_target_combinations": []
+      },
+      "explicit_guard_records": [
+        {
+          "record_id": "r2",
+          "boundary": "targets",
+          "targets": [
+            "e4"
+          ],
+          "guards": [
+            {
+              "meaning": "the row exists",
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "if it exists"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_id": "r3",
+          "boundary": "targets",
+          "targets": [
+            "e4"
+          ],
+          "guards": [
+            {
+              "meaning": "the row does not exist",
+              "source": [
+                {
+                  "unit": "u7",
+                  "quote": "otherwise return None"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "record_id": "r5",
+          "boundary": "implementation",
+          "targets": [],
+          "guards": [
+            {
+              "meaning": "it cannot complete the task successfully",
+              "source": [
+                {
+                  "unit": "u9",
+                  "quote": "when it cannot complete the task successfully"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "omitted_conditional_bindings": [],
+      "neutral_identity_observation": "Entity identities are mostly neutral compared with the prior inventory pilot. This observed improvement does not certify input incidence or candidate matching, neither of which was run."
+    }
+  ],
+  "summary": {
+    "provider_calls": 3,
+    "completed_final_json": 3,
+    "structurally_accepted": 1,
+    "structurally_accepted_case": "book",
+    "semantically_clean_cases": 0,
+    "frozen_user_requirements_mapped": 24,
+    "raw_runtime_semantic_failure_cases": 3,
+    "decisive_runtime_errors": [
+      {
+        "case": "firmware",
+        "record": "r10",
+        "error": "failure condition absent from guards despite present in prose"
+      },
+      {
+        "case": "pandoc",
+        "record": "r7",
+        "error": "conditioned logging and wider exception ban combined under conversion-failure guard"
+      },
+      {
+        "case": "book",
+        "record": "r5",
+        "error": "runtime exception behavior scoped to generation; accepted by validator"
+      }
+    ],
+    "additional_critical_effective_instruction_error": {
+      "case": "pandoc",
+      "record": "r16",
+      "error": "overridden lower-priority Markdown requirement kept as asserted obligation"
+    },
+    "single_api_candidate_structure": "pandoc r8 combines both prohibited APIs in one atom; neither fixed single-API factor is certified",
+    "envelope_quote_errors": 3,
+    "coverage_record_mismatches": 4,
+    "compiled_tsg_candidate_edit_execution": "not_run",
+    "stable_quality_claim": false
+  },
+  "comparability_limits": [
+    "v1 and v2 change thinking policy, prompt instructions and citation domain together; cannot attribute changes solely to disabling thinking.",
+    "v1 thinking delivered no pandoc JSON; v2 supplies a full answer with observable semantic errors. New delivery is not proof that model semantics improved.",
+    "Only three familiar exposed tasks, one response per case; no repetition or reserved natural transfer completed.",
+    "The same frozen source references are used; normal-return target semantics still avoid inventing success guard requirements, and generic book-ID assumption is not forced into one graph topology."
+  ],
+  "next_decision_supported": "Improved output delivery is insufficient. A source-to-structure comparison/repair step must specifically catch empty guards, runtime-vs-generation scope, merged independent consequents and effective instruction priority. Any agent construction adoption must validate the repaired result independently; structural pass or confident approval cannot substitute. Do not count this pilot as qualified TSG or candidate/edit success."
+}
