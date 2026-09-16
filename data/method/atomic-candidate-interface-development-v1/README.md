@@ -1,0 +1,25 @@
+# Atomic candidate interface diagnostic
+
+Three previously exposed natural task units; zero provider calls. This is
+response-informed development, not independent qualification, automatic candidate
+discovery, a model comparison, or a formal experiment.
+
+- `inputs.json`: exact prompts, saved automatic contracts, source-audited focal
+  references, original catalogs, fixed probes and decision boundaries.
+- `reproduce.py`: thin driver of the existing candidate and edit functions.
+- `results/`: compiled graphs, binding drafts/errors, actual download edit and
+  execution/provenance report.
+
+From the repository root with Python 3.12 and the declared dependencies:
+
+```text
+python data/method/atomic-candidate-interface-development-v1/reproduce.py NEW_OUTPUT_DIRECTORY
+```
+
+Use a fresh directory; never replace the saved result. The driver has no provider
+invocation. Credentials, generated-code outcomes and protected tasks are not inputs.
+Its static source decisions are developer-authored diagnostic references, not
+model verdicts or independent human labels. No probe is an approved intervention.
+
+See the [Chinese report](../../../docs/experiments/2026-09-16-atomic-candidate-interface.md)
+for interpretation and source limitations.

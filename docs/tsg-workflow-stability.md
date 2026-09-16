@@ -132,6 +132,16 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
+The latest [Atomic interface diagnostic](experiments/2026-09-16-atomic-candidate-interface.md)
+replayed three exposed tasks without provider calls. Correct requirement-only
+guards could not cross the candidate context gate, but those return/exception
+requirements were non-target functionality, not valid editable security factors.
+A directory-containment probe mechanically removed a security sentence while
+retaining required outside-directory rejection. No intervention was approved.
+The next diagnostic must first establish that one safety requirement can actually
+change while non-target behavior stays fixed, then compare automatic and
+source-reviewed graph use. Draft construction is not semantic approval.
+
 The [cross-task comparison](experiments/2026-09-16-tsg-binding-coverage-transfer.md)
 made16 review calls on eight authored variants of two previously exposed tasks,
 with no extraction or repair calls. Detailed review detected3/4 corruptions versus
@@ -196,5 +206,6 @@ source qualification and an authorized frozen protocol exist.
 Each frozen development batch includes inputs, exact execution source, provider
 requests/responses and retained failures. The record trace permits exact mechanical
 replay including review and patch. Independent source references and assertion review
-remain necessary to judge the resulting semantics. The default suite remains110
-cases in90 functions; update relevant boundary fixtures instead of expanding it.
+remain necessary to judge the resulting semantics. The current Atomic default suite
+has 101 cases in 81 functions; historical counts above retain their original meaning.
+Update relevant boundary fixtures instead of expanding it.
