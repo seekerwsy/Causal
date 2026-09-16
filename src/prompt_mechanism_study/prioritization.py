@@ -130,7 +130,6 @@ class AtomicFCIGateStatus(StrEnum):
 
 class CandidateKind(StrEnum):
     ATOMIC = "ATOMIC"
-    PAIR = "PAIR"
 
 
 class DiscoverabilityStatus(StrEnum):
@@ -141,7 +140,6 @@ class DiscoverabilityStatus(StrEnum):
 class DiscoverabilityReason(StrEnum):
     SOURCE_SCOPE_SUPPORT_FAILED = "SOURCE_SCOPE_SUPPORT_FAILED"
     ATOMIC_NATURAL_SUPPORT_FAILED = "ATOMIC_NATURAL_SUPPORT_FAILED"
-    FACTORIAL_INCOMPATIBLE = "FACTORIAL_INCOMPATIBLE"
     MISSING_OBSERVATIONS = "MISSING_OBSERVATIONS"
     DUPLICATE_TASK_UNIT = "DUPLICATE_TASK_UNIT"
     CANDIDATE_COORDINATE_MISMATCH = "CANDIDATE_COORDINATE_MISMATCH"
@@ -149,7 +147,6 @@ class DiscoverabilityReason(StrEnum):
     COVARIATE_SCHEMA_MISMATCH = "COVARIATE_SCHEMA_MISMATCH"
     EXTRACTOR_RELIABILITY_BELOW_THRESHOLD = "EXTRACTOR_RELIABILITY_BELOW_THRESHOLD"
     FACTOR_STATE_NOT_BINARY = "FACTOR_STATE_NOT_BINARY"
-    INSUFFICIENT_FOUR_CELL_SUPPORT = "INSUFFICIENT_FOUR_CELL_SUPPORT"
     INSUFFICIENT_SOURCE_LINEAGE_OVERLAP = "INSUFFICIENT_SOURCE_LINEAGE_OVERLAP"
     LANGUAGE_NONOVERLAP = "LANGUAGE_NONOVERLAP"
     ARCHETYPE_NONOVERLAP = "ARCHETYPE_NONOVERLAP"
@@ -175,17 +172,10 @@ class CandidateCoverageSummary:
         require_text(self.candidate_id, "coverage-summary candidate_id")
         if type(self.candidate_kind) is not CandidateKind:
             raise TypeError("coverage-summary candidate kind must be typed")
-        expected_cells = (
-            ("0", "1")
-            if self.candidate_kind is CandidateKind.ATOMIC
-            else ("00", "01", "10", "11")
-        )
-        if tuple(cell for cell, _ in self.state_or_cell_task_units) != expected_cells:
-            raise ValueError("candidate coverage cells do not match Atomic/Pair kind")
-        if any(
-            type(value) is not int or value < 0
-            for _, value in self.state_or_cell_task_units
-        ):
+        expected_cells = ("0", "1")
+        if tuple((cell for cell, _ in self.state_or_cell_task_units)) != expected_cells:
+            raise ValueError("candidate coverage cells do not match Atomic kind")
+        if any((type(value) is not int or value < 0 for _, value in self.state_or_cell_task_units)):
             raise ValueError("candidate coverage counts must be nonnegative")
         for value, name in (
             (self.unique_source_lineages, "unique source lineages"),
@@ -197,16 +187,20 @@ class CandidateCoverageSummary:
         ):
             if type(value) is not int or value < 0:
                 raise ValueError(f"candidate coverage {name} must be nonnegative")
-        if sum(value for _, value in self.state_or_cell_task_units) > self.total_task_units:
-            raise ValueError("candidate binary state/cell counts cannot exceed the complete task denominator")
+        if sum((value for _, value in self.state_or_cell_task_units)) > self.total_task_units:
+            raise ValueError(
+                "candidate binary state/cell counts cannot exceed the complete task denominator"
+            )
         if any(
-            value > self.total_task_units
-            for value in (
-                self.unique_source_lineages,
-                self.near_duplicate_safe_task_units,
-                self.representation_resolved_task_units,
-                self.oracle_ready_task_units,
-                self.confirmation_baseline_task_units,
+            (
+                value > self.total_task_units
+                for value in (
+                    self.unique_source_lineages,
+                    self.near_duplicate_safe_task_units,
+                    self.representation_resolved_task_units,
+                    self.oracle_ready_task_units,
+                    self.confirmation_baseline_task_units,
+                )
             )
         ):
             raise ValueError("candidate coverage diagnostics cannot exceed total task units")
@@ -222,7 +216,7 @@ class CandidateCoverageSummary:
 
 @dataclass(frozen=True, slots=True)
 class DiscoverabilityDecision:
-    """Shared outcome-blind Atomic/Pair candidate eligibility record."""
+    """Shared outcome-blind Atomic candidate eligibility record."""
 
     candidate_id: str
     candidate_kind: CandidateKind
@@ -282,35 +276,28 @@ class AtomicCandidateUniverseManifest:
     representation_adapter_id: str
 
     def __post_init__(self) -> None:
-        if any(
-            type(item) is not AtomicPolicyKey for item in self.policy_keys
-        ):
+        if any((type(item) is not AtomicPolicyKey for item in self.policy_keys)):
             raise TypeError("Atomic universe requires typed policy keys")
-        candidate_ids = tuple(item.policy_key for item in self.policy_keys)
+        candidate_ids = tuple((item.policy_key for item in self.policy_keys))
         _canonical_unique(candidate_ids, "Atomic policy keys")
         _canonical_unique(self.supported_policy_keys, "supported Atomic policy keys")
         if not set(self.supported_policy_keys) <= set(candidate_ids):
             raise ValueError("supported Atomic policies must belong to the universe")
-        if tuple(item.candidate_id for item in self.coverage_summaries) != candidate_ids or any(
-            type(item) is not CandidateCoverageSummary
-            or item.candidate_kind is not CandidateKind.ATOMIC
-            for item in self.coverage_summaries
+        if tuple((item.candidate_id for item in self.coverage_summaries)) != candidate_ids or any(
+            (type(item) is not CandidateCoverageSummary for item in self.coverage_summaries)
         ):
             raise ValueError("Atomic coverage summaries must exactly follow the universe")
-        if tuple(item.policy_key for item in self.model_bound_records) != candidate_ids:
+        if tuple((item.policy_key for item in self.model_bound_records)) != candidate_ids:
             raise ValueError("model-bound records must exactly follow Atomic policies")
-        if any(
-            type(item) is not ModelBoundCandidateRecord
-            for item in self.model_bound_records
-        ):
+        if any((type(item) is not ModelBoundCandidateRecord for item in self.model_bound_records)):
             raise TypeError("Atomic model-bound records must be typed")
         for bindings, name in (
             (self.realization_policy_ids, "realization-policy bindings"),
             (self.candidate_family_ids, "candidate-family bindings"),
         ):
-            if tuple(candidate_id for candidate_id, _ in bindings) != candidate_ids:
+            if tuple((candidate_id for candidate_id, _ in bindings)) != candidate_ids:
                 raise ValueError(f"{name} must exactly follow Atomic policies")
-            if any(not isinstance(value, str) or not value.strip() for _, value in bindings):
+            if any((not isinstance(value, str) or not value.strip() for _, value in bindings)):
                 raise ValueError(f"{name} must contain non-empty values")
         for value, name in (
             (self.preoutcome_data_sha256, "Atomic discovery data"),
@@ -479,46 +466,42 @@ class AtomicFoldFreeze:
             (self.plan_id, "Atomic fold-freeze plan_id"),
         ):
             require_text(value, name)
-        _require_digest(
-            self.preoutcome_data_sha256,
-            "Atomic fold-freeze pre-outcome data",
-        )
-        _require_digest(
-            self.discovery_population_sha256,
-            "Atomic fold-freeze Discovery population",
-        )
-        if tuple(
-            sorted(self.manifests, key=lambda item: item.candidate_id)
-        ) != self.manifests:
+        _require_digest(self.preoutcome_data_sha256, "Atomic fold-freeze pre-outcome data")
+        _require_digest(self.discovery_population_sha256, "Atomic fold-freeze Discovery population")
+        if tuple(sorted(self.manifests, key=lambda item: item.candidate_id)) != self.manifests:
             raise ValueError("Atomic frozen folds must use canonical candidate order")
-        if tuple(
-            sorted(
-                self.failures,
-                key=lambda item: (item.candidate_id or "", item.reason_code),
+        if (
+            tuple(
+                sorted(self.failures, key=lambda item: (item.candidate_id or "", item.reason_code))
             )
-        ) != self.failures:
+            != self.failures
+        ):
             raise ValueError("Atomic fold failures must use canonical candidate order")
-        manifest_ids = tuple(item.candidate_id for item in self.manifests)
-        failure_ids = tuple(item.candidate_id for item in self.failures)
+        manifest_ids = tuple((item.candidate_id for item in self.manifests))
+        failure_ids = tuple((item.candidate_id for item in self.failures))
         if (
             len(set(manifest_ids)) != len(manifest_ids)
-            or any(candidate_id is None for candidate_id in failure_ids)
+            or any((candidate_id is None for candidate_id in failure_ids))
             or len(set(failure_ids)) != len(failure_ids)
             or set(manifest_ids) & set(failure_ids)
         ):
             raise ValueError("Atomic fold freeze must account for each candidate once")
         if any(
-            item.reason_code not in {"atomic_fold_non_evaluable", "scoped_source_support_failed"}
-            for item in self.failures
+            (
+                item.reason_code
+                not in {"atomic_fold_non_evaluable", "scoped_source_support_failed"}
+                for item in self.failures
+            )
         ):
             raise ValueError("Atomic fold freeze contains an unknown source-support/fold failure")
-        decision_ids = tuple(item.candidate_id for item in self.discoverability)
+        decision_ids = tuple((item.candidate_id for item in self.discoverability))
         if decision_ids != tuple(sorted(set(decision_ids))) or any(
-            type(item) is not DiscoverabilityDecision
-            or item.candidate_kind is not CandidateKind.ATOMIC
-            or item.discovery_population_sha256 != self.discovery_population_sha256
-            or item.universe_id != self.universe_id
-            for item in self.discoverability
+            (
+                type(item) is not DiscoverabilityDecision
+                or item.discovery_population_sha256 != self.discovery_population_sha256
+                or item.universe_id != self.universe_id
+                for item in self.discoverability
+            )
         ):
             raise ValueError("Atomic discoverability decisions are not canonical or bound")
         discoverable = {
@@ -719,7 +702,6 @@ class AtomicShadowQualificationResult:
 
 class PolicyTrack(StrEnum):
     ATOMIC = "atomic"
-    PAIR = "pair"
 
 
 @dataclass(frozen=True, slots=True)
@@ -817,7 +799,7 @@ class FixedSlotRecord:
 
 @dataclass(frozen=True, slots=True)
 class FixedSlotLedger:
-    """All Atomic and Pair selector denominators before bridge or confirmation."""
+    """All Atomic selector denominators before bridge or confirmation."""
 
     protocol_id: str
     schema_version: str
@@ -1020,7 +1002,7 @@ def freeze_fixed_slot_ledger(
     schema_version: str,
     sources: Sequence[FixedSlotSource],
 ) -> FixedSlotLedger:
-    """Bind model-specific Atomic/Pair selector slots without replacement."""
+    """Bind model-specific Atomic selector slots without replacement."""
 
     frozen_sources = tuple(
         sorted(
@@ -1028,18 +1010,16 @@ def freeze_fixed_slot_ledger(
             key=lambda item: (item.track.value, item.model_id, item.selector_id),
         )
     )
-    if len(
-        {(item.track, item.model_id, item.selector_id) for item in frozen_sources}
-    ) != len(frozen_sources):
+    if len({(item.track, item.model_id, item.selector_id) for item in frozen_sources}) != len(
+        frozen_sources
+    ):
         raise ValueError("fixed-slot source coordinates must be unique")
     fixed = []
     for source in frozen_sources:
         record_by_policy = {item.policy_key: item for item in source.model_bound_records}
         for slot in source.slots:
             candidate = (
-                record_by_policy[slot.candidate_id]
-                if slot.status is SlotStatus.FILLED
-                else None
+                record_by_policy[slot.candidate_id] if slot.status is SlotStatus.FILLED else None
             )
             fixed.append(
                 FixedSlotRecord(
@@ -1893,8 +1873,6 @@ def _ridge_probabilities(
         _sigmoid(weights[0] + sum(weight * value for weight, value in zip(weights[1:], row, strict=True)))
         for row in test_x
     ]
-
-
 
 
 def _validate_source_gate_failures(row) -> None:

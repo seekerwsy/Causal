@@ -15,16 +15,11 @@ from prompt_mechanism_study.prioritization import (
     ConfirmationDispatchManifest,
     PolicyTrack,
 )
-from prompt_mechanism_study.randomization import (
-    ATOMIC_CONFIRMATORY_ARMS,
-    PAIR_CONFIRMATORY_ARMS,
-    AssignedArmITTRecord,
-)
+from prompt_mechanism_study.randomization import ATOMIC_CONFIRMATORY_ARMS, AssignedArmITTRecord
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.study_design import FormalBudgetPreflight
 from prompt_mechanism_study.study_planning import (
     ATOMIC_POWER_ARMS,
-    PAIR_POWER_ARMS,
     ProviderCallKind,
     QualificationProfileKind,
     QualificationStatus,
@@ -830,46 +825,87 @@ def verify_source_use(output, source_bundle, reservation_bundle, catalog_path, r
 
 def _verify_source_sufficiency_review(task, quality, review, rule_hash):
     from prompt_mechanism_study.records import content_id
-    required = {"task_unit_id", "candidate_id", "candidate_family", "candidate_policy", "source_prompt_sha256",
-                "source_use_rule_sha256", "reviewer_id", "axes", "arms_or_outcomes_used"}
-    if (set(review) != required or review["task_unit_id"] != task["task_unit_id"]
-            or review["source_prompt_sha256"] != content_hash(task["model_visible_input"]["natural_prompt"])
-            or review["source_use_rule_sha256"] != rule_hash or review["arms_or_outcomes_used"] is not False
-            or not isinstance(review["reviewer_id"], str) or not review["reviewer_id"].strip()):
+
+    required = {
+        "task_unit_id",
+        "candidate_id",
+        "candidate_family",
+        "candidate_policy",
+        "source_prompt_sha256",
+        "source_use_rule_sha256",
+        "reviewer_id",
+        "axes",
+        "arms_or_outcomes_used",
+    }
+    if (
+        set(review) != required
+        or review["task_unit_id"] != task["task_unit_id"]
+        or review["source_prompt_sha256"]
+        != content_hash(task["model_visible_input"]["natural_prompt"])
+        or (review["source_use_rule_sha256"] != rule_hash)
+        or (review["arms_or_outcomes_used"] is not False)
+        or (not isinstance(review["reviewer_id"], str))
+        or (not review["reviewer_id"].strip())
+    ):
         raise ValueError("source sufficiency review provenance is invalid")
-    family = {"Atomic": "atomic", "Pair": "pair"}.get(review["candidate_family"])
-    if family is None or review["candidate_id"] != content_id(family + "_policy_key_", review["candidate_policy"]):
+    family = {"Atomic": "atomic"}.get(review["candidate_family"])
+    if family is None or review["candidate_id"] != content_id(
+        family + "_policy_key_", review["candidate_policy"]
+    ):
         raise ValueError("source sufficiency review candidate definition differs")
-    if task["pre_treatment_source_metadata"]["language"] not in review["candidate_policy"]["analysis_scope"]["language_scope"]:
+    if (
+        task["pre_treatment_source_metadata"]["language"]
+        not in review["candidate_policy"]["analysis_scope"]["language_scope"]
+    ):
         raise ValueError("source sufficiency review language is outside its policy")
-    axes = ["context", "target_operation", "security_boundary", "non_target_invariants", "arm_compatibility"]
+    axes = [
+        "context",
+        "target_operation",
+        "security_boundary",
+        "non_target_invariants",
+        "arm_compatibility",
+    ]
     if not isinstance(review["axes"], dict) or not set(review["axes"]) <= set(axes):
         raise ValueError("source sufficiency review has unknown axes")
     states = {}
     for axis in axes:
-        decision = review["axes"].get(axis, {"state": "unresolved", "evidence": [], "reason": "unreviewed"})
-        if (set(decision) != {"state", "evidence", "reason"}
-                or decision["state"] not in {"supported", "unresolved", "contradicted"}
-                or not isinstance(decision["reason"], str) or not decision["reason"].strip()
-                or not isinstance(decision["evidence"], list)
-                or decision["state"] != "unresolved" and not decision["evidence"]):
+        decision = review["axes"].get(
+            axis, {"state": "unresolved", "evidence": [], "reason": "unreviewed"}
+        )
+        if (
+            set(decision) != {"state", "evidence", "reason"}
+            or decision["state"] not in {"supported", "unresolved", "contradicted"}
+            or (not isinstance(decision["reason"], str))
+            or (not decision["reason"].strip())
+            or (not isinstance(decision["evidence"], list))
+            or (decision["state"] != "unresolved" and (not decision["evidence"]))
+        ):
             raise ValueError("source sufficiency review has an unsupported judgment")
         for span in decision["evidence"]:
             prompt = task["model_visible_input"]["natural_prompt"]
-            if (set(span) != {"start", "end", "text"}
-                    or type(span["start"]) is not int or type(span["end"]) is not int
-                    or not 0 <= span["start"] < span["end"] <= len(prompt)
-                    or prompt[span["start"]:span["end"]] != span["text"]):
+            if (
+                set(span) != {"start", "end", "text"}
+                or type(span["start"]) is not int
+                or type(span["end"]) is not int
+                or (not 0 <= span["start"] < span["end"] <= len(prompt))
+                or (prompt[span["start"] : span["end"]] != span["text"])
+            ):
                 raise ValueError("source sufficiency evidence does not bind to the original prompt")
         states[axis] = decision["state"]
     blockers = [axis + "_" + states[axis] for axis in axes if states[axis] != "supported"]
     if quality["quality_disposition"] == "QUALITY_EXCLUDED_SOURCE_DEFECT":
         blockers.append("original_source_defect_requires_independent_correction")
-    return {"task_unit_id": task["task_unit_id"], "candidate_id": review["candidate_id"],
-            "candidate_family": review["candidate_family"], "axis_states": states,
-            "status": "SOURCE_BLOCKED" if blockers else "SOURCE_SUFFICIENT_PENDING_QUALIFICATION",
-            "blockers": blockers, "review_sha256": content_hash(review),
-            "source_quality_unchanged": quality["quality_disposition"], "formal_admission": False}
+    return {
+        "task_unit_id": task["task_unit_id"],
+        "candidate_id": review["candidate_id"],
+        "candidate_family": review["candidate_family"],
+        "axis_states": states,
+        "status": "SOURCE_BLOCKED" if blockers else "SOURCE_SUFFICIENT_PENDING_QUALIFICATION",
+        "blockers": blockers,
+        "review_sha256": content_hash(review),
+        "source_quality_unchanged": quality["quality_disposition"],
+        "formal_admission": False,
+    }
 
 
 def _verify_restored_source_input(task, restoration, source_roots):
@@ -1046,17 +1082,23 @@ def verify_target_power_simulation(result: TargetPowerSimulationResult) -> dict[
     from prompt_mechanism_study.inference import ConfirmatoryEffectStatus
     from prompt_mechanism_study.outcomes import Outcome
     from prompt_mechanism_study.verification.effects import _v3_work, _v3_family
+
     if type(result) is not TargetPowerSimulationResult:
         raise TypeError("power verifier requires a TargetPowerSimulationResult")
     plan = result.plan
     rows_by_coordinate = _independent_power_assignments(plan)
     record_ids = [[row.assignment_id for row in rows] for rows in rows_by_coordinate]
     for assumption, reported in zip(plan.assumptions, result.scenarios):
-        seed = int(hashlib.sha256(f"{plan.simulation_seed}|{assumption.scenario_id}".encode()).hexdigest()[:16], 16)
+        seed = int(
+            hashlib.sha256(f"{plan.simulation_seed}|{assumption.scenario_id}".encode()).hexdigest()[
+                :16
+            ],
+            16,
+        )
         generator = random.Random(seed)
         successes = [0 for _ in rows_by_coordinate]
         statuses = Counter()
-        errors, criticals = [], []
+        errors, criticals = ([], [])
         digest = hashlib.sha256()
         for _ in range(plan.simulation_replicates):
             uniforms = _independent_task_draws(generator, assumption, plan, rows_by_coordinate)
@@ -1064,49 +1106,93 @@ def verify_target_power_simulation(result: TargetPowerSimulationResult) -> dict[
             for coordinate, rows in enumerate(rows_by_coordinate):
                 outcomes = {}
                 for j, row in enumerate(rows):
-                    arm_index = (j % plan.total_block_slots) // (plan.total_block_slots // 4)
+                    arm_index = j % plan.total_block_slots // (plan.total_block_slots // 4)
                     r = int(row.realization_id.split("-")[-1])
-                    probability = assumption.arm_secure_yield_probabilities[arm_index][1] + assumption.realization_arm_probability_offsets[r][arm_index]
+                    probability = (
+                        assumption.arm_secure_yield_probabilities[arm_index][1]
+                        + assumption.realization_arm_probability_offsets[r][arm_index]
+                    )
                     u = uniforms[coordinate][j]
-                    thresholds = (assumption.terminal_no_code_rate,
-                                  assumption.terminal_no_code_rate + assumption.oracle_unknown_rate,
-                                  assumption.terminal_no_code_rate + assumption.oracle_unknown_rate + probability)
+                    thresholds = (
+                        assumption.terminal_no_code_rate,
+                        assumption.terminal_no_code_rate + assumption.oracle_unknown_rate,
+                        assumption.terminal_no_code_rate
+                        + assumption.oracle_unknown_rate
+                        + probability,
+                    )
                     state = next((s for s, t in zip((0, 1, 3), thresholds) if u < t), 2)
                     digest.update(bytes([state]))
                     key = record_ids[coordinate][j]
-                    outcomes[key] = Outcome(key, int(state != 0), int(state in (2, 3)),
-                        int(state == 3), int(state in (1, 3)), 0, 0, 0,
-                        "no_code" if state == 0 else None)
-                work[str(coordinate)] = _v3_work(plan.track, rows, outcomes, set(), plan.analysis_plan)
+                    outcomes[key] = Outcome(
+                        key,
+                        int(state != 0),
+                        int(state in (2, 3)),
+                        int(state == 3),
+                        int(state in (1, 3)),
+                        0,
+                        0,
+                        0,
+                        "no_code" if state == 0 else None,
+                    )
+                work[str(coordinate)] = _v3_work(
+                    plan.track, rows, outcomes, set(), plan.analysis_plan
+                )
             family = _v3_family(plan.track, work, plan.analysis_plan)
             statuses[family["family_status"].value] += 1
-            errors.extend(w["standard_error"] for w in work.values() if w["standard_error"] is not None)
+            errors.extend(
+                (w["standard_error"] for w in work.values() if w["standard_error"] is not None)
+            )
             if family["critical"] is not None:
                 criticals.append(family["critical"])
             for coordinate in range(len(successes)):
                 successes[coordinate] += family["statuses"][str(coordinate)] in (
-                    ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL, ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL)
+                    ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL,
+                    ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL,
+                )
         power = min(successes) / plan.simulation_replicates
         probabilities = [p for _, p in assumption.arm_secure_yield_probabilities]
-        effect = probabilities[0] - probabilities[1] if plan.track is PolicyTrack.ATOMIC else (
-            probabilities[3] - probabilities[1] - probabilities[2] + probabilities[0])
-        expected = (float(effect), sum(errors) / len(errors) if errors else None,
-                    sum(criticals) / len(criticals) if criticals else None,
-                    power, 1.96 * math.sqrt(power * (1 - power) / plan.simulation_replicates))
-        actual = (reported.effect, reported.task_unit_standard_error, reported.simultaneous_critical_value,
-                  reported.achieved_power, reported.monte_carlo_half_width_95)
-        mismatch = any((x is None) != (y is None) or (x is not None and not math.isclose(x, y, rel_tol=0, abs_tol=1e-12))
-                       for x, y in zip(actual, expected))
-        if (mismatch or reported.meaningful_replicates_by_coordinate != tuple(successes)
+        effect = probabilities[0] - probabilities[1]
+        expected = (
+            float(effect),
+            sum(errors) / len(errors) if errors else None,
+            sum(criticals) / len(criticals) if criticals else None,
+            power,
+            1.96 * math.sqrt(power * (1 - power) / plan.simulation_replicates),
+        )
+        actual = (
+            reported.effect,
+            reported.task_unit_standard_error,
+            reported.simultaneous_critical_value,
+            reported.achieved_power,
+            reported.monte_carlo_half_width_95,
+        )
+        mismatch = any(
+            (
+                (x is None) != (y is None)
+                or (x is not None and (not math.isclose(x, y, rel_tol=0, abs_tol=1e-12)))
+                for x, y in zip(actual, expected)
+            )
+        )
+        if (
+            mismatch
+            or reported.meaningful_replicates_by_coordinate != tuple(successes)
             or reported.family_status_counts != tuple(sorted(statuses.items()))
-            or reported.simulated_outcome_sha256 != digest.hexdigest()):
+            or (reported.simulated_outcome_sha256 != digest.hexdigest())
+        ):
             raise ValueError("power simulation result failed independent replay")
-    minimum = min(row.achieved_power for row in result.scenarios)
-    if result.minimum_achieved_power != minimum or result.power_gate_passed != (minimum >= plan.target_power):
+    minimum = min((row.achieved_power for row in result.scenarios))
+    if result.minimum_achieved_power != minimum or result.power_gate_passed != (
+        minimum >= plan.target_power
+    ):
         raise ValueError("power Gate failed independent replay")
-    return {"status": "TARGET_POWER_SIMULATION_VERIFIED", "plan_id": plan.power_simulation_plan_id,
-            "result_id": result.power_simulation_result_id, "scenario_count": len(result.scenarios),
-            "minimum_achieved_power": result.minimum_achieved_power, "power_gate_passed": result.power_gate_passed}
+    return {
+        "status": "TARGET_POWER_SIMULATION_VERIFIED",
+        "plan_id": plan.power_simulation_plan_id,
+        "result_id": result.power_simulation_result_id,
+        "scenario_count": len(result.scenarios),
+        "minimum_achieved_power": result.minimum_achieved_power,
+        "power_gate_passed": result.power_gate_passed,
+    }
 
 
 def _independent_task_draws(generator, assumption, plan, coordinate_rows):
@@ -1140,7 +1226,8 @@ def _independent_uniform_block(rng, assumption, slots):
 
 def _independent_power_assignments(plan):
     from prompt_mechanism_study.randomization import ConfirmatoryArm
-    names = ATOMIC_POWER_ARMS if plan.track is PolicyTrack.ATOMIC else PAIR_POWER_ARMS
+
+    names = ATOMIC_POWER_ARMS
     result = []
     for coordinate in range(plan.family_size_upper_bound):
         policy = f"power-coordinate-{coordinate:03d}"
@@ -1153,71 +1240,91 @@ def _independent_power_assignments(plan):
             labels = [f"realization-{r}" for r in range(plan.global_realizations)]
             quotas = {r: math.floor(count * q) for r, q in zip(labels, plan.realization_weights)}
             weights = dict(zip(labels, plan.realization_weights))
-            order = sorted(labels, key=lambda r: (-(count * weights[r] - quotas[r]),
-                content_hash(("realization_remainder", plan.simulation_seed, policy, stratum, r))))
-            for r in order[:count - sum(quotas.values())]:
+            order = sorted(
+                labels,
+                key=lambda r: (
+                    -(count * weights[r] - quotas[r]),
+                    content_hash(
+                        ("realization_remainder", plan.simulation_seed, policy, stratum, r)
+                    ),
+                ),
+            )
+            for r in order[: count - sum(quotas.values())]:
                 quotas[r] += 1
-            shuffled = sorted(units, key=lambda unit: (content_hash(("realization_task", plan.simulation_seed, policy, stratum, unit)), unit))
+            shuffled = sorted(
+                units,
+                key=lambda unit: (
+                    content_hash(("realization_task", plan.simulation_seed, policy, stratum, unit)),
+                    unit,
+                ),
+            )
             allocations = dict(zip(shuffled, [r for r in sorted(labels) for _ in range(quotas[r])]))
             for unit in units:
                 definition.append((unit, stratum, allocations[unit]))
         if plan.task_support is not None:
-            definition = [(unit, stratum, f"realization-{r}")
-                          for j, unit, stratum, r in plan.task_support if j == coordinate]
+            definition = [
+                (unit, stratum, f"realization-{r}")
+                for j, unit, stratum, r in plan.task_support
+                if j == coordinate
+            ]
         for unit, stratum, r in definition:
             for arm_index, name in enumerate(names):
                 for slot in range(plan.total_block_slots // 4):
-                    rows.append(AssignedArmITTRecord(policy, policy, policy, "planning-model", plan.track,
-                        unit, unit, stratum, r, "planning-bundle", "planning-protocol", arm_index * (plan.total_block_slots // 4) + slot,
-                        ConfirmatoryArm(name), 1.0, weights[r], "0" * 64))
+                    rows.append(
+                        AssignedArmITTRecord(
+                            policy,
+                            policy,
+                            policy,
+                            "planning-model",
+                            plan.track,
+                            unit,
+                            unit,
+                            stratum,
+                            r,
+                            "planning-bundle",
+                            "planning-protocol",
+                            arm_index * (plan.total_block_slots // 4) + slot,
+                            ConfirmatoryArm(name),
+                            1.0,
+                            weights[r],
+                            "0" * 64,
+                        )
+                    )
         result.append(tuple(rows))
     return tuple(result)
 
 
-def verify_rq1_budget_qualification(
-    budget: RQ1BudgetQualification,
-) -> dict[str, object]:
+def verify_rq1_budget_qualification(budget: RQ1BudgetQualification) -> dict[str, object]:
     """Independently recompute selector bounds, calls, cost, and blockers."""
-
     if type(budget) is not RQ1BudgetQualification:
         raise TypeError("budget verifier requires an RQ1BudgetQualification")
     verify_target_power_simulation(budget.power_and_margin_memo.atomic_power)
-    verify_target_power_simulation(budget.power_and_margin_memo.pair_power)
     selector_count = {
         RQ1BudgetScenario.CORE: 2,
         RQ1BudgetScenario.CORE_EXPERT: 3,
         RQ1BudgetScenario.CORE_EXPERT_RANDOM: 4,
     }[budget.scenario]
     atomic_expected = ["atomic_full", "atomic_rd_only"]
-    pair_expected = ["pair_full", "pair_no_relation"]
     if selector_count >= 3:
         atomic_expected.append("atomic_blind_expert")
-        pair_expected.append("pair_blind_expert")
     if selector_count == 4:
         atomic_expected.append("atomic_seeded_random")
-        pair_expected.append("pair_seeded_random")
-    if budget.atomic_selector_ids != tuple(sorted(atomic_expected)) or (
-        budget.pair_selector_ids != tuple(sorted(pair_expected))
-    ):
+    if budget.atomic_selector_ids != tuple(sorted(atomic_expected)):
         raise ValueError("budget selector set failed independent replay")
-    core_selector_ids = {
-        "atomic_full",
-        "atomic_rd_only",
-        "pair_full",
-        "pair_no_relation",
-    }
-    external_selector_ids = set((*atomic_expected, *pair_expected)) - core_selector_ids
+    core_selector_ids = {"atomic_full", "atomic_rd_only"}
+    external_selector_ids = set((*atomic_expected,)) - core_selector_ids
     expected_baseline_coordinates = tuple(
         sorted(
-            (selector_id, model_id)
-            for selector_id in external_selector_ids
-            for model_id in budget.dimensions.model_ids
+            (
+                (selector_id, model_id)
+                for selector_id in external_selector_ids
+                for model_id in budget.dimensions.model_ids
+            )
         )
     )
     baseline = budget.baseline_qualification
     actual_baseline_coordinates = tuple(
-        (selector_id, model_id)
-        for selector_id, model_id, _ in baseline.contract_references
+        ((selector_id, model_id) for selector_id, model_id, _ in baseline.contract_references)
     )
     baseline_blockers = set()
     if actual_baseline_coordinates != expected_baseline_coordinates:
@@ -1232,14 +1339,9 @@ def verify_rq1_budget_qualification(
     dimensions = budget.dimensions
     model_count = len(dimensions.model_ids)
     atomic_effects = selector_count * model_count * dimensions.atomic_top_k
-    pair_effects = selector_count * model_count * dimensions.pair_top_k
     atomic_bundles = atomic_effects * dimensions.atomic_task_units_per_effect
-    pair_bundles = pair_effects * dimensions.pair_task_units_per_effect
-    materialization = 2 * (atomic_bundles + pair_bundles)
-    generation = (
-        atomic_bundles * dimensions.atomic_total_block_slots
-        + pair_bundles * dimensions.pair_total_block_slots
-    )
+    materialization = 2 * atomic_bundles
+    generation = atomic_bundles * dimensions.atomic_total_block_slots
     functional = generation
     external = materialization + generation + functional
     currencies = set()
@@ -1249,8 +1351,8 @@ def verify_rq1_budget_qualification(
             type(basis.currency) is not str
             or len(basis.currency) != 3
             or basis.currency != basis.currency.upper()
-            or not basis.currency.isascii()
-            or not basis.currency.isalpha()
+            or (not basis.currency.isascii())
+            or (not basis.currency.isalpha())
         ):
             raise ValueError("provider pricing currency failed independent replay")
         currencies.add(basis.currency)
@@ -1261,33 +1363,31 @@ def verify_rq1_budget_qualification(
             basis.input_price_microunits_per_million_tokens,
             basis.output_price_microunits_per_million_tokens,
         )
-        if any(type(value) is not int or value < 0 for value in integers):
+        if any((type(value) is not int or value < 0 for value in integers)):
             raise ValueError("provider token cost basis failed independent type replay")
         if (
             basis.pricing_tier_maximum_input_tokens <= 0
-            or basis.maximum_input_tokens
-            > basis.pricing_tier_maximum_input_tokens
+            or basis.maximum_input_tokens > basis.pricing_tier_maximum_input_tokens
             or basis.maximum_input_tokens + basis.maximum_output_tokens <= 0
-            or basis.input_price_microunits_per_million_tokens
-            + basis.output_price_microunits_per_million_tokens
-            <= 0
-            or basis.target_outcomes_used is not False
+            or (
+                basis.input_price_microunits_per_million_tokens
+                + basis.output_price_microunits_per_million_tokens
+                <= 0
+            )
+            or (basis.target_outcomes_used is not False)
         ):
             raise ValueError("provider token cost basis failed independent boundary replay")
         numerator = (
-            basis.maximum_input_tokens
-            * basis.input_price_microunits_per_million_tokens
-            + basis.maximum_output_tokens
-            * basis.output_price_microunits_per_million_tokens
+            basis.maximum_input_tokens * basis.input_price_microunits_per_million_tokens
+            + basis.maximum_output_tokens * basis.output_price_microunits_per_million_tokens
         )
-        maximum_cost = (numerator + 999_999) // 1_000_000
+        maximum_cost = (numerator + 999999) // 1000000
         if rate.maximum_unit_cost_microunits != maximum_cost:
             raise ValueError("provider unit cost failed independent token-price replay")
     if len(currencies) != 1:
         raise ValueError("provider budget currency failed independent replay")
     rates = {
-        item.call_kind: item.maximum_unit_cost_microunits
-        for item in budget.provider_ceilings.rates
+        item.call_kind: item.maximum_unit_cost_microunits for item in budget.provider_ceilings.rates
     }
     cost = (
         materialization * rates[ProviderCallKind.MATERIALIZATION]
@@ -1297,12 +1397,11 @@ def verify_rq1_budget_qualification(
     stored = budget.reservation
     if (
         stored.atomic_effect_record_upper_bound != atomic_effects
-        or stored.pair_effect_record_upper_bound != pair_effects
         or stored.materialization_call_upper_bound != materialization
         or stored.generation_call_upper_bound != generation
-        or stored.functional_judge_call_upper_bound != functional
-        or stored.external_call_upper_bound != external
-        or stored.external_cost_upper_bound_microunits != cost
+        or (stored.functional_judge_call_upper_bound != functional)
+        or (stored.external_call_upper_bound != external)
+        or (stored.external_cost_upper_bound_microunits != cost)
     ):
         raise ValueError("budget reservation failed independent replay")
     blockers = set()
@@ -1315,51 +1414,57 @@ def verify_rq1_budget_qualification(
     if not (
         baseline.protocol_id == budget.power_and_margin_memo.protocol_id
         and baseline.scenario is budget.scenario
-        and baseline.model_ids == dimensions.model_ids
+        and (baseline.model_ids == dimensions.model_ids)
     ):
         blockers.add("baseline_qualification_scope_mismatch")
     power_profile = next(
-        profile
-        for profile in budget.qualification_bundle.profiles
-        if profile.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
+        (
+            profile
+            for profile in budget.qualification_bundle.profiles
+            if profile.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
+        )
     )
     if not (
-        power_profile.artifact.artifact_id
-        == budget.power_and_margin_memo.power_and_margin_memo_id
-        and power_profile.artifact.sha256
-        == content_hash(budget.power_and_margin_memo)
-        and power_profile.qualification_accept_data_id
-        == budget.power_and_margin_memo.qualification_accept_data_id
-        and power_profile.code_commit == budget.power_and_margin_memo.code_commit
-        and budget.qualification_bundle.data_role_manifest.artifact_id
-        == budget.power_and_margin_memo.data_role_manifest_id
-        and budget.qualification_bundle.qualification_accept_data_id
-        == budget.power_and_margin_memo.qualification_accept_data_id
+        power_profile.artifact.artifact_id == budget.power_and_margin_memo.power_and_margin_memo_id
+        and power_profile.artifact.sha256 == content_hash(budget.power_and_margin_memo)
+        and (
+            power_profile.qualification_accept_data_id
+            == budget.power_and_margin_memo.qualification_accept_data_id
+        )
+        and (power_profile.code_commit == budget.power_and_margin_memo.code_commit)
+        and (
+            budget.qualification_bundle.data_role_manifest.artifact_id
+            == budget.power_and_margin_memo.data_role_manifest_id
+        )
+        and (
+            budget.qualification_bundle.qualification_accept_data_id
+            == budget.power_and_margin_memo.qualification_accept_data_id
+        )
     ):
         blockers.add("power_profile_lineage_mismatch")
     baseline_profile = next(
-        profile
-        for profile in budget.qualification_bundle.profiles
-        if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+        (
+            profile
+            for profile in budget.qualification_bundle.profiles
+            if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+        )
     )
     expected_baseline_profile_id = {
         RQ1BudgetScenario.CORE: "rq1_baseline_set_core_v1",
         RQ1BudgetScenario.CORE_EXPERT: "rq1_baseline_set_core_expert_v1",
-        RQ1BudgetScenario.CORE_EXPERT_RANDOM: (
-            "rq1_baseline_set_core_expert_random_v1"
-        ),
+        RQ1BudgetScenario.CORE_EXPERT_RANDOM: "rq1_baseline_set_core_expert_random_v1",
     }[budget.scenario]
     if not (
         baseline.selected_profile_id == expected_baseline_profile_id
         and baseline_profile.selected_profile_id == expected_baseline_profile_id
-        and baseline_profile.artifact.artifact_id
-        == baseline.rq1_baseline_qualification_id
-        and baseline_profile.artifact.sha256 == content_hash(baseline)
-        and baseline_profile.qualification_accept_data_id
-        == baseline.qualification_accept_data_id
-        and baseline_profile.code_commit == baseline.code_commit
-        and budget.qualification_bundle.qualification_accept_data_id
-        == baseline.qualification_accept_data_id
+        and (baseline_profile.artifact.artifact_id == baseline.rq1_baseline_qualification_id)
+        and (baseline_profile.artifact.sha256 == content_hash(baseline))
+        and (baseline_profile.qualification_accept_data_id == baseline.qualification_accept_data_id)
+        and (baseline_profile.code_commit == baseline.code_commit)
+        and (
+            budget.qualification_bundle.qualification_accept_data_id
+            == baseline.qualification_accept_data_id
+        )
     ):
         blockers.add("baseline_profile_lineage_mismatch")
     if budget.independent_verifier_status != "PASS":
@@ -1372,14 +1477,6 @@ def verify_rq1_budget_qualification(
             dimensions.atomic_global_realizations,
             dimensions.atomic_total_block_slots,
             "atomic",
-        ),
-        (
-            budget.power_and_margin_memo.pair_power.plan,
-            pair_effects,
-            dimensions.pair_task_units_per_effect,
-            dimensions.pair_global_realizations,
-            dimensions.pair_total_block_slots,
-            "pair",
         ),
     ):
         if plan.family_size_upper_bound != family:
@@ -1444,7 +1541,6 @@ def _check_formal_budget_preflight(
     preflight: FormalBudgetPreflight,
 ) -> dict[str, object]:
     """Independently replay the actual dispatch, assignment blocks, calls, and cost."""
-
     if budget.status is not QualificationStatus.ACCEPTED:
         raise ValueError("formal preflight requires an accepted budget")
     if type(dispatch) is not ConfirmationDispatchManifest:
@@ -1452,19 +1548,15 @@ def _check_formal_budget_preflight(
     if type(preflight) is not FormalBudgetPreflight:
         raise TypeError("preflight verifier requires a FormalBudgetPreflight")
     frozen = tuple(assignments)
-    if any(type(item) is not AssignedArmITTRecord for item in frozen):
+    if any((type(item) is not AssignedArmITTRecord for item in frozen)):
         raise TypeError("preflight verifier requires assigned-arm records")
-    assignment_ids = tuple(item.assignment_id for item in frozen)
+    assignment_ids = tuple((item.assignment_id for item in frozen))
     if len(set(assignment_ids)) != len(assignment_ids):
         raise ValueError("formal assignment identities failed independent replay")
     records = {item.candidate_record_id: item for item in dispatch.records}
-    tracks = {
-        item.candidate_record_id: item.track for item in dispatch.union.entries
-    }
+    tracks = {item.candidate_record_id: item.track for item in dispatch.union.entries}
     successful = {
-        item.candidate_record_id
-        for item in dispatch.records
-        if item.status is BridgeStatus.SUCCESS
+        item.candidate_record_id for item in dispatch.records if item.status is BridgeStatus.SUCCESS
     }
     by_candidate: dict[str, list[AssignedArmITTRecord]] = defaultdict(list)
     for item in frozen:
@@ -1475,9 +1567,9 @@ def _check_formal_budget_preflight(
             item.effect_coordinate_id != record.effect_coordinate_id
             or item.policy_key != record.policy_key
             or item.model_id != record.model_id
-            or item.protocol_record_id != record.protocol_record_id
-            or item.track is not tracks[item.candidate_record_id]
-            or item.model_id not in budget.dimensions.model_ids
+            or (item.protocol_record_id != record.protocol_record_id)
+            or (item.track is not tracks[item.candidate_record_id])
+            or (item.model_id not in budget.dimensions.model_ids)
         ):
             raise ValueError("assignment model-bound lineage failed independent replay")
         by_candidate[item.candidate_record_id].append(item)
@@ -1485,107 +1577,123 @@ def _check_formal_budget_preflight(
         raise ValueError("successful dispatch coverage failed independent replay")
     for candidate_id, rows in by_candidate.items():
         track = tracks[candidate_id]
-        task_count = (
-            budget.dimensions.atomic_task_units_per_effect
-            if track is PolicyTrack.ATOMIC
-            else budget.dimensions.pair_task_units_per_effect
-        )
-        block_slots = (
-            budget.dimensions.atomic_total_block_slots
-            if track is PolicyTrack.ATOMIC
-            else budget.dimensions.pair_total_block_slots
-        )
-        arms = (
-            ATOMIC_CONFIRMATORY_ARMS
-            if track is PolicyTrack.ATOMIC
-            else PAIR_CONFIRMATORY_ARMS
-        )
+        task_count = budget.dimensions.atomic_task_units_per_effect
+        block_slots = budget.dimensions.atomic_total_block_slots
+        arms = ATOMIC_CONFIRMATORY_ARMS
         task_ids = {item.task_unit_id for item in rows}
         if len(task_ids) != task_count:
             raise ValueError("formal task count failed independent replay")
-        power_plan = (budget.power_and_margin_memo.atomic_power.plan if track is PolicyTrack.ATOMIC
-                      else budget.power_and_margin_memo.pair_power.plan)
-        r_support, cell_support, q_values = defaultdict(set), defaultdict(set), defaultdict(set)
+        power_plan = budget.power_and_margin_memo.atomic_power.plan
+        r_support, cell_support, q_values = (defaultdict(set), defaultdict(set), defaultdict(set))
         for item in rows:
             r_support[item.realization_id].add(item.task_unit_id)
-            cell_support[(item.realization_id, item.stratum_id)].add(item.task_unit_id)
+            cell_support[item.realization_id, item.stratum_id].add(item.task_unit_id)
             q_values[item.realization_id].add(float(item.realization_weight))
         if (
             len(r_support) != power_plan.global_realizations
-            or any(len(ids) < power_plan.minimum_task_units_per_realization for ids in r_support.values())
-            or any(len(ids) < power_plan.minimum_task_units_per_stratum for ids in cell_support.values())
-            or any(len(q) != 1 for q in q_values.values())
-            or not math.isclose(sum(next(iter(q)) for q in q_values.values()), 1, rel_tol=0, abs_tol=1e-12)
+            or any(
+                (
+                    len(ids) < power_plan.minimum_task_units_per_realization
+                    for ids in r_support.values()
+                )
+            )
+            or any(
+                (
+                    len(ids) < power_plan.minimum_task_units_per_stratum
+                    for ids in cell_support.values()
+                )
+            )
+            or any((len(q) != 1 for q in q_values.values()))
+            or (
+                not math.isclose(
+                    sum((next(iter(q)) for q in q_values.values())), 1, rel_tol=0, abs_tol=1e-12
+                )
+            )
         ):
             raise ValueError("formal realization support/weighting failed independent replay")
         observed_strata = defaultdict(set)
         for item in rows:
             observed_strata[item.stratum_id].add(item.task_unit_id)
-        if (tuple(next(iter(q_values[r])) for r in sorted(q_values)) != power_plan.realization_weights
-            or tuple(sorted((s, len(units)) for s, units in observed_strata.items())) != power_plan.stratum_task_counts):
+        if (
+            tuple((next(iter(q_values[r])) for r in sorted(q_values)))
+            != power_plan.realization_weights
+            or tuple(sorted(((s, len(units)) for s, units in observed_strata.items())))
+            != power_plan.stratum_task_counts
+        ):
             raise ValueError("formal power allocation/strata failed independent replay")
         for task_unit_id in task_ids:
             block = [item for item in rows if item.task_unit_id == task_unit_id]
-            counts = Counter(item.arm for item in block)
+            counts = Counter((item.arm for item in block))
             if (
                 len(block) != block_slots
                 or len({item.realization_id for item in block}) != 1
                 or len({item.task_bundle_id for item in block}) != 1
-                or set(counts) != set(arms)
-                or len(set(counts.values())) != 1
-                or {item.request_randomness_slot for item in block}
-                != set(range(block_slots))
+                or (set(counts) != set(arms))
+                or (len(set(counts.values())) != 1)
+                or ({item.request_randomness_slot for item in block} != set(range(block_slots)))
             ):
                 raise ValueError("formal four-arm block failed independent replay")
     if preflight.actual_power_results is None:
-        # Historical non-claim packages used only the two qualified synthetic layouts.
-        # Current preflights always carry an independently replayed actual-support result.
         for track in PolicyTrack:
-            task_sets = [{row.task_unit_id for row in rows} for candidate, rows in by_candidate.items()
-                         if tracks[candidate] is track]
-            mode = (budget.power_and_margin_memo.atomic_power.plan if track is PolicyTrack.ATOMIC
-                    else budget.power_and_margin_memo.pair_power.plan).family_task_overlap
+            task_sets = [
+                {row.task_unit_id for row in rows}
+                for candidate, rows in by_candidate.items()
+                if tracks[candidate] is track
+            ]
+            mode = budget.power_and_margin_memo.atomic_power.plan.family_task_overlap
             if mode not in {"shared", "disjoint"}:
                 raise ValueError("explicit task support requires an actual-power preflight")
             for i, left in enumerate(task_sets):
-                for right in task_sets[i + 1:]:
-                    if (mode == "shared" and left != right) or (mode == "disjoint" and left.intersection(right)):
+                for right in task_sets[i + 1 :]:
+                    if (
+                        mode == "shared"
+                        and left != right
+                        or (mode == "disjoint" and left.intersection(right))
+                    ):
                         raise ValueError("formal power task overlap failed independent replay")
     else:
-        expected_tracks = tuple(track for track in PolicyTrack if any(tracks[key] is track for key in by_candidate))
-        if tuple(result.plan.track for result in preflight.actual_power_results) != expected_tracks:
+        expected_tracks = tuple(
+            (track for track in PolicyTrack if any((tracks[key] is track for key in by_candidate)))
+        )
+        if (
+            tuple((result.plan.track for result in preflight.actual_power_results))
+            != expected_tracks
+        ):
             raise ValueError("actual power does not cover the nonempty families")
         for result in preflight.actual_power_results:
             track = result.plan.track
-            template = (budget.power_and_margin_memo.atomic_power.plan if track is PolicyTrack.ATOMIC
-                        else budget.power_and_margin_memo.pair_power.plan)
-            candidates = sorted(key for key in by_candidate if tracks[key] is track)
+            template = budget.power_and_margin_memo.atomic_power.plan
+            candidates = sorted((key for key in by_candidate if tracks[key] is track))
             support = []
             for number, key in enumerate(candidates):
                 members = by_candidate[key]
                 labels = sorted({row.realization_id for row in members})
-                support += sorted({(number, row.task_unit_id, row.stratum_id, labels.index(row.realization_id))
-                                   for row in members})
-            expected_plan = replace(template, family_size_upper_bound=len(candidates),
-                                    family_task_overlap="explicit", task_support=tuple(support))
+                support += sorted(
+                    {
+                        (number, row.task_unit_id, row.stratum_id, labels.index(row.realization_id))
+                        for row in members
+                    }
+                )
+            expected_plan = replace(
+                template,
+                family_size_upper_bound=len(candidates),
+                family_task_overlap="explicit",
+                task_support=tuple(support),
+            )
             if result.plan != expected_plan or len(candidates) > template.family_size_upper_bound:
-                raise ValueError("actual power support or frozen assumptions failed independent replay")
+                raise ValueError(
+                    "actual power support or frozen assumptions failed independent replay"
+                )
             verify_target_power_simulation(result)
             if not result.power_gate_passed:
                 raise ValueError("actual task-support power failed; confirmation is blocked")
-    atomic_effects = sum(
-        tracks[candidate_id] is PolicyTrack.ATOMIC for candidate_id in successful
-    )
-    pair_effects = sum(
-        tracks[candidate_id] is PolicyTrack.PAIR for candidate_id in successful
-    )
+    atomic_effects = sum((True for candidate_id in successful))
     generation = len(frozen)
     materialization = 2 * len({item.task_bundle_id for item in frozen})
     functional = generation
     external = materialization + generation + functional
     rates = {
-        item.call_kind: item.maximum_unit_cost_microunits
-        for item in budget.provider_ceilings.rates
+        item.call_kind: item.maximum_unit_cost_microunits for item in budget.provider_ceilings.rates
     }
     cost = (
         materialization * rates[ProviderCallKind.MATERIALIZATION]
@@ -1597,7 +1705,6 @@ def _check_formal_budget_preflight(
         dispatch.confirmation_dispatch_manifest_id,
         content_hash(tuple(sorted(frozen, key=lambda item: item.assignment_id))),
         atomic_effects,
-        pair_effects,
         materialization,
         generation,
         functional,
@@ -1611,7 +1718,6 @@ def _check_formal_budget_preflight(
         preflight.confirmation_dispatch_manifest_id,
         preflight.assignment_manifest_sha256,
         preflight.atomic_effect_records,
-        preflight.pair_effect_records,
         preflight.materialization_calls,
         preflight.generation_calls,
         preflight.functional_judge_call_reservation,
@@ -1626,17 +1732,16 @@ def _check_formal_budget_preflight(
     ceilings = budget.provider_ceilings
     if (
         atomic_effects > reservation.atomic_effect_record_upper_bound
-        or pair_effects > reservation.pair_effect_record_upper_bound
         or materialization > reservation.materialization_call_upper_bound
         or generation > reservation.generation_call_upper_bound
-        or functional > reservation.functional_judge_call_upper_bound
-        or external > reservation.external_call_upper_bound
-        or cost > reservation.external_cost_upper_bound_microunits
-        or materialization > ceilings.materialization_call_ceiling
-        or generation > ceilings.generation_call_ceiling
-        or functional > ceilings.functional_judge_call_ceiling
-        or external > ceilings.external_call_ceiling
-        or cost > ceilings.external_cost_ceiling_microunits
+        or (functional > reservation.functional_judge_call_upper_bound)
+        or (external > reservation.external_call_upper_bound)
+        or (cost > reservation.external_cost_upper_bound_microunits)
+        or (materialization > ceilings.materialization_call_ceiling)
+        or (generation > ceilings.generation_call_ceiling)
+        or (functional > ceilings.functional_judge_call_ceiling)
+        or (external > ceilings.external_call_ceiling)
+        or (cost > ceilings.external_cost_ceiling_microunits)
     ):
         raise ValueError("formal preflight exceeds its independently replayed reservation")
     return {
@@ -1646,6 +1751,7 @@ def _check_formal_budget_preflight(
         "external_call_reservation": external,
         "external_cost_reservation_microunits": cost,
     }
+
 
 __all__ = [
     "verify_formal_budget_preflight",

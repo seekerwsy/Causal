@@ -127,7 +127,6 @@ def _add_curation_group(groups: Any) -> None:
     _add_curation_finalize(stages)
 
 
-
 def _add_curation_prepare(stages: Any) -> None:
     group = stages.add_parser("prepare", help="prepare natural tasks, contracts and blind reservations")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
@@ -226,7 +225,6 @@ def _add_curation_prepare(stages: Any) -> None:
     reserve_future.add_argument("--producer-commit", required=True)
 
 
-
 def _add_curation_review(stages: Any) -> None:
     group = stages.add_parser("review", help="prepare and close independent blind reviews")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
@@ -312,7 +310,6 @@ def _add_curation_review(stages: Any) -> None:
     review_bindings.add_argument("registry", type=Path)
     review_bindings.add_argument("output", type=Path)
     _add_curation_runtime_options(review_bindings)
-
 
 
 def _add_curation_repair(stages: Any) -> None:
@@ -454,7 +451,6 @@ def _add_curation_repair(stages: Any) -> None:
     binding_adjudications.add_argument("output", type=Path)
 
 
-
 def _add_curation_finalize(stages: Any) -> None:
     group = stages.add_parser("finalize", help="assemble and verify the frozen reviewer data")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
@@ -501,9 +497,7 @@ def _add_representation_group(groups: Any) -> None:
     group = groups.add_parser(
         "representation",
         help="freeze task roles and extract evidence-bound Prompt TSG representations",
-        description=(
-            "Freeze task roles and extract evidence-bound Prompt TSG representations."
-        ),
+        description=("Freeze task roles and extract evidence-bound Prompt TSG representations."),
     )
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
 
@@ -577,13 +571,21 @@ def _add_representation_group(groups: Any) -> None:
     extract_contracts.add_argument("selection", type=Path)
     extract_contracts.add_argument("output", type=Path)
     extract_contracts.add_argument("--workers", type=int, default=1)
-    extract_contracts.add_argument("--qualification-reference", type=Path,
-                                   help="bind an independent source reference before any extraction calls")
-    extract_contracts.add_argument("--development-exposed", action="store_true",
-                                   help="use already exposed development tasks; never grants formal admission")
+    extract_contracts.add_argument(
+        "--qualification-reference",
+        type=Path,
+        help="bind an independent source reference before any extraction calls",
+    )
+    extract_contracts.add_argument(
+        "--development-exposed",
+        action="store_true",
+        help="use already exposed development tasks; never grants formal admission",
+    )
 
     candidate_request = _leaf(
-        actions, "candidate-request", _run_candidate_request,
+        actions,
+        "candidate-request",
+        _run_candidate_request,
         "prepare an outcome-blind candidate request from source tasks and extracted graphs",
     )
     candidate_request.add_argument("tasks", type=Path)
@@ -592,39 +594,52 @@ def _add_representation_group(groups: Any) -> None:
     candidate_request.add_argument("--input-catalog", type=Path)
 
     candidates = _leaf(
-        actions, "build-candidates", _run_build_candidates,
+        actions,
+        "build-candidates",
+        _run_build_candidates,
         "build source-bound candidate definitions from one retained or development response",
     )
     candidates.add_argument("request", type=Path)
     candidates.add_argument("design", type=Path)
     candidates.add_argument("output", type=Path)
     candidate_response = candidates.add_mutually_exclusive_group(required=True)
-    candidate_response.add_argument("--response", type=Path,
-                                    help="replay a retained candidate response without model calls")
-    candidate_response.add_argument("--evaluator", type=Path,
-                                    help="make one explicitly bounded development model call")
+    candidate_response.add_argument(
+        "--response", type=Path, help="replay a retained candidate response without model calls"
+    )
+    candidate_response.add_argument(
+        "--evaluator", type=Path, help="make one explicitly bounded development model call"
+    )
     candidates.add_argument("--review", type=Path)
 
     candidate_bindings = _leaf(
-        actions, "bind-candidates", _run_bind_candidates,
+        actions,
+        "bind-candidates",
+        _run_bind_candidates,
         "bind reviewed candidate definitions to exact task scopes for the shared support audit",
     )
     candidate_bindings.add_argument("candidates", type=Path)
     candidate_bindings.add_argument("tasks", type=Path)
     candidate_bindings.add_argument("output", type=Path)
-    candidate_bindings.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
+    candidate_bindings.add_argument(
+        "--prompt-tsg-bundle", type=Path, action="append", required=True
+    )
     candidate_bindings.add_argument("--qualification-bundle", type=Path)
-    candidate_bindings.add_argument("--pair-review", type=Path)
 
-    visualize = _leaf(actions, "visualize", _run_visualize_tsg,
-                      "export an offline source-evidence, instance-graph and assigned-arm result viewer")
+    visualize = _leaf(
+        actions,
+        "visualize",
+        _run_visualize_tsg,
+        "export an offline source-evidence, instance-graph and assigned-arm result viewer",
+    )
     visualize.add_argument("tasks", type=Path)
     visualize.add_argument("extraction", type=Path)
     visualize.add_argument("output", type=Path)
     visualize.add_argument("--additional-extraction", type=Path, action="append", default=[])
     visualize.add_argument("--results", type=Path)
     visualize.add_argument("--catalog", type=Path)
-    visualize.add_argument("--review", type=Path, help="saved development analysis bundle for graph debugging")
+    visualize.add_argument(
+        "--review", type=Path, help="saved development analysis bundle for graph debugging"
+    )
 
     bindings = _leaf(
         actions,
@@ -793,7 +808,6 @@ def _add_qualification_group(groups: Any) -> None:
         type=Path,
         help="optional BaxBench-compatible source snapshot for backend data inventory",
     )
-
 
 
 def _add_artifact_group(groups: Any) -> None:
@@ -1010,8 +1024,6 @@ def _run_reserve_future_evaluation(
             producer_commit=args.producer_commit,
         )
     )
-
-
 
 
 def _run_prepare_restored_contracts(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
@@ -1492,10 +1504,15 @@ def _run_build_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) 
 def _run_bind_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     from prompt_mechanism_study.candidate_construction import bind_candidate_scopes
 
-    return _emit_json(bind_candidate_scopes(
-        args.candidates, args.tasks, args.prompt_tsg_bundle, args.output,
-        qualification_bundle=args.qualification_bundle, pair_review_path=args.pair_review,
-    ))
+    return _emit_json(
+        bind_candidate_scopes(
+            args.candidates,
+            args.tasks,
+            args.prompt_tsg_bundle,
+            args.output,
+            qualification_bundle=args.qualification_bundle,
+        )
+    )
 
 
 def _run_freeze_bindings(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
@@ -1672,8 +1689,6 @@ def _run_dataset_eligibility(args: argparse.Namespace, _: argparse.ArgumentParse
         backend_root=args.backend_root,
     )
     return _emit_status(report)
-
-
 
 
 def _run_artifact_verify(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:

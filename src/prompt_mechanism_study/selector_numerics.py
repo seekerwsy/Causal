@@ -22,9 +22,8 @@ def fit_ridge_logit(
 ) -> list[float]:
     """Fit an already constructed design; column zero is an unpenalized intercept.
 
-    Atomic and Pair callers retain their distinct standardization, design columns,
-    iteration limits and prediction arithmetic. Row order and floating-point
-    accumulation match the original two solvers.
+    The Atomic caller supplies standardization, design columns and iteration limits.
+    Row order and floating-point accumulation are preserved for reproducibility.
     """
     width = len(design[0]) if design else 1
     weights = [0.0] * width
@@ -33,7 +32,9 @@ def fit_ridge_logit(
     for _ in range(maximum_iterations):
         gradient = [0.0] * width
         for row, outcome in zip(design, outcomes, strict=True):
-            probability = sigmoid(sum(weight * value for weight, value in zip(weights, row, strict=True)))
+            probability = sigmoid(
+                sum(weight * value for weight, value in zip(weights, row, strict=True))
+            )
             for index, value in enumerate(row):
                 gradient[index] += (probability - outcome) * value / len(design)
         for index in range(1, width):

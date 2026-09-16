@@ -12,7 +12,7 @@ source records: requirements include composition, guards and target scope
   -> exposed development source graphs
   -> source-only LLM selection and normalization of equivalent atoms
   -> semantic review of the generated factors
-  -> existing concept freeze, generated Atomic/Pair policy records
+  -> existing concept freeze, generated Atomic policy records
   -> fresh extraction using that catalogue
   -> automatic, state-blind task-scope binding
   -> existing qualification positivity, folds and prioritization
@@ -85,20 +85,14 @@ All exclusions and unknowns remain in the proposal.
 
 ## From reviewed factors to the existing method
 
+Main now generates Atomic policies only. Pair design and compatibility review
+remain on `codex/pair-interaction-research`; old Pair bundles are not main inputs.
+
 The accepted definitions enter `prompt_contract.freeze_open_concepts`; source
 concepts and derived factor concepts retain separate provenance. The programme
 generates both ADD and REMOVE `AtomicPolicyKey` records for each accepted factor.
 Development exemplars can all express the requirement: the builder does not claim
 that any other task lacks it or that either operation has natural support.
-
-When `include_pairs` is true, unordered pairs of all accepted factors generate
-the four ADD/REMOVE operator combinations without reading Atomic support or
-rank. Pair compatibility is separately reviewed, never inferred from co-occurrence
-or atomization. Missing compatibility remains blocked in the existing support
-gate. Pair context queries declare joint operation-type presence; each factor's
-independent source-scope selector carries its own input and condition constraints.
-This avoids equating different operation/input instances merely because they
-share a concept ID. Both exact scopes must resolve before a Pair row is usable.
 
 Scope selection uses only operation concepts, input-use edges, subject concepts
 and source-supported execution guards or non-gating `context_for` conditions. The
@@ -149,7 +143,6 @@ candidate names or handpicked requirements:
   "api_scope": ["database"],
   "task_archetype_scope": ["query"],
   "operations": ["add", "remove"],
-  "include_pairs": true,
   "model_id": "FROZEN_MODEL_ID",
   "covariate_names": [],
   "support_rule": {
@@ -174,9 +167,8 @@ prompt-mechanism-study representation bind-candidates REVIEWED FRESH_TASKS BINDI
 prompt-mechanism-study qualification positivity FRESH_TASKS REVIEWED/catalog.json SUPPORT --prompt-tsg-bundle FRESH_EXTRACTION --scope-bindings BINDINGS/scopes.json
 ```
 
-An optional `--pair-review` binds compatibility decisions to the exact candidate
-bundle. Missing representation qualification or Pair compatibility produces
-blocked support; neither is fabricated by the builder. No edit wording, neutral
+Missing representation qualification produces blocked support; it is never
+fabricated by the builder. No edit wording, neutral
 counterpart, Oracle support or confirmation assignment is inferred here: those
 remain the existing protocolization and measurement responsibilities.
 
@@ -185,7 +177,7 @@ remain the existing protocolization and measurement responsibilities.
 The candidate tests cover atomic source nodes, rejection of downstream splitting,
 equivalent occurrence grouping, the same atomic meaning at distinct scopes,
 source-only inputs, source/condition grounding, review boundaries, both operators,
-independent Pair construction, a complete file path into positivity, old-catalogue
+a complete file path into positivity, old-catalogue
 rejection, missing graphs, ambiguous bindings, empty universes and retained model
 failures. All responses are synthetic fixtures; they test implementation behavior
 without asserting model accuracy or natural candidate support.

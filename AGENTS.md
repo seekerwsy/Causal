@@ -66,15 +66,14 @@ deployment machinery, or several competing execution paths.
    selector-blind round under a frozen coverage target, and must never use
    paraphrases, interventions, synthetic cell filling, FCI/RD scores, selector
    ranks, or Prompt-TSG relation support to choose acquisitions.
-8. Use one outcome-blind discoverability Gate family for Atomic and Pair
-   candidates. Pair eligibility never requires either factor to have been
-   selected, ranked, or supported as an Atomic candidate; pure interactions
-   remain admissible when their own context, compatibility, four-cell support,
-   lineage-overlap, and fold requirements pass.
-9. Keep context-modifier inference and Pair response-pattern labels inactive
-   until their exact task assignment, joint bootstrap/multiplicity rule, and
-   deterministic predicates are prospectively frozen. Missing rules must yield
-   an explicit blocked status, never a guessed default, null label, or claim.
+8. Keep main Atomic-only: one editable requirement per policy. Pair interaction
+   research is deferred to `codex/pair-interaction-research` at `e6833027` under
+   the owner's 2026-09-16 scope decision. Do not restore Pair candidates, factorial
+   execution, interaction inference, or their qualification/budget requirements
+   to the active path without a new research decision.
+9. Keep context-modifier inference inactive until its exact task assignment and
+   joint bootstrap/multiplicity rule are prospectively frozen. Missing rules
+   must yield an explicit blocked status, never a guessed default or claim.
 
 ## Proportional Data, Intervention, and Oracle Requirements
 
@@ -93,7 +92,7 @@ deployment machinery, or several competing execution paths.
    Removal requires an identifiable source requirement. Define these semantics
    prospectively; never silently convert an unresolved semantic fact to absence.
 3. Separate source screening from intervention protocolization. Natural sources
-   need not contain a neutral control, placebo, or exact four-cell wording.
+   need not contain a neutral control, placebo, or exact intervention wording.
    Define and validate those comparisons in the intervention design, preserve
    non-target requirements, and freeze the applicable rules before formal use.
    Pending design work is not a source defect. Failures after assignment remain
@@ -106,10 +105,10 @@ deployment machinery, or several competing execution paths.
    proof of universal accuracy. Use bounded representative validation and report
    measurement limitations; do not demand complete program verification or lower
    accuracy requirements solely to obtain more favorable results.
-5. Apply the same source-screening principle to Atomic and Pair. Pair still
-   needs its own interpretable joint context and a valid four-cell design; it
-   does not need supported Atomic parents. Keep response-surface claims separate
-   from stronger mechanism claims and require only the evidence each claim needs.
+5. Apply source screening consistently to Atomic ADD and REMOVE while retaining
+   their distinct source-state and edit requirements. Primary policy effects do
+   not establish stronger mechanism, robustness or adoption claims without the
+   corresponding prospective evidence.
 6. After a methodological revision, start with a small, explicit development
    scope that tests the scientific change. Prefer already exposed development
    material; record any new method-development exposure before using task-level

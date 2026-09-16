@@ -24,9 +24,11 @@ from prompt_mechanism_study.prompt_contract_extract import contract_decision_req
 from prompt_mechanism_study.prompt_tsg import load_catalog
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id, require_text
 from prompt_mechanism_study.representation import (
-    AnalysisScope, AtomicPolicyKey, Operation, PairPolicyKey, PolicyFactor,
+    AnalysisScope,
+    AtomicPolicyKey,
+    Operation,
+    PolicyFactor,
 )
-
 
 _QUALIFICATION_RULE = {
     "minimum_exact_context_accuracy": 0.9,
@@ -52,8 +54,13 @@ SOURCE_USE_RULE = {
     "source_population": "all_frozen_task_units_all_declared_languages_and_quality_dispositions",
     "source_quality": "retain_the_original_independent_review_and_all_quality_labels",
     "candidate_sufficiency": {
-        "required_axes": ["context", "target_operation", "security_boundary",
-                          "non_target_invariants", "arm_compatibility"],
+        "required_axes": [
+            "context",
+            "target_operation",
+            "security_boundary",
+            "non_target_invariants",
+            "arm_compatibility",
+        ],
         "axis_states": ["supported", "unresolved", "contradicted"],
         "missing_axis": "unresolved",
         "evidence": "exact_prompt_bound_source_spans_and_a_candidate_bound_blind_review",
@@ -256,52 +263,90 @@ def _source_role_inputs(source_bundle: Path, reservation_bundle: Path):
 
 
 def review_candidate_source_sufficiency(
-    task: Mapping[str, Any], quality: Mapping[str, Any], review: Mapping[str, Any],
+    task: Mapping[str, Any],
+    quality: Mapping[str, Any],
+    review: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate one source-only Atomic or Pair review; unknown never becomes absent.
+    """Validate one source-only Atomic review; unknown never becomes absent.
 
     This determines source sufficiency only. It cannot grant formal admission,
-    certify an Oracle, select an Atomic ancestor for a Pair, or revise a source.
+    certify an Oracle or revise a source. The frozen source-use rule stays unchanged.
     """
-    required = {"task_unit_id", "candidate_id", "candidate_family", "candidate_policy", "source_prompt_sha256",
-                "source_use_rule_sha256", "reviewer_id", "axes", "arms_or_outcomes_used"}
-    if (quality.get("task_unit_id") != task["task_unit_id"] or quality.get("quality_disposition") not in {
-        "QUALITY_INCLUDED", "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION", "QUALITY_EXCLUDED_SOURCE_DEFECT",
-    }):
+    required = {
+        "task_unit_id",
+        "candidate_id",
+        "candidate_family",
+        "candidate_policy",
+        "source_prompt_sha256",
+        "source_use_rule_sha256",
+        "reviewer_id",
+        "axes",
+        "arms_or_outcomes_used",
+    }
+    if quality.get("task_unit_id") != task["task_unit_id"] or quality.get(
+        "quality_disposition"
+    ) not in {
+        "QUALITY_INCLUDED",
+        "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION",
+        "QUALITY_EXCLUDED_SOURCE_DEFECT",
+    }:
         raise ValueError("candidate source review quality identity or disposition differs")
     if set(review) != required or review["arms_or_outcomes_used"] is not False:
         raise ValueError("candidate source review is not a blind source-only record")
     prompt = task["model_visible_input"]["natural_prompt"]
-    if (review["task_unit_id"] != task["task_unit_id"]
-            or review["source_prompt_sha256"] != content_hash(prompt)
-            or review["source_use_rule_sha256"] != content_hash(SOURCE_USE_RULE)
-            or review["candidate_family"] not in {"Atomic", "Pair"}):
+    if (
+        review["task_unit_id"] != task["task_unit_id"]
+        or review["source_prompt_sha256"] != content_hash(prompt)
+        or review["source_use_rule_sha256"] != content_hash(SOURCE_USE_RULE)
+        or review["candidate_family"] != "Atomic"
+    ):
         raise ValueError("candidate source review identity or prospective rule differs")
     require_text(review["candidate_id"], "candidate_id")
     require_text(review["reviewer_id"], "reviewer_id")
     value = review["candidate_policy"]
-    factor_field = "factor" if review["candidate_family"] == "Atomic" else "factors"
-    if not isinstance(value, Mapping) or set(value) != {"analysis_scope", factor_field, "outcome_id"}:
+    factor_field = "factor"
+    if not isinstance(value, Mapping) or set(value) != {
+        "analysis_scope",
+        factor_field,
+        "outcome_id",
+    }:
         raise ValueError("candidate source review lacks its exact policy definition")
     scope_value = value["analysis_scope"]
     if not isinstance(scope_value, Mapping) or set(scope_value) != {
-        "security_pattern_id", "context_query_id", "language_scope", "api_scope", "task_archetype_scope",
+        "security_pattern_id",
+        "context_query_id",
+        "language_scope",
+        "api_scope",
+        "task_archetype_scope",
     }:
         raise ValueError("candidate source review analysis scope is invalid")
-    if any(not isinstance(scope_value[key], list)
-           for key in ("language_scope", "api_scope", "task_archetype_scope")):
+    if any(
+        not isinstance(scope_value[key], list)
+        for key in ("language_scope", "api_scope", "task_archetype_scope")
+    ):
         raise ValueError("candidate source review scopes must be canonical lists")
-    scope = AnalysisScope(**{key: tuple(item) if key.endswith("_scope") else item
-                             for key, item in scope_value.items()})
-    factors = [value["factor"]] if factor_field == "factor" else value["factors"]
-    if not isinstance(factors, list) or any(not isinstance(factor, Mapping) or set(factor) != {
-        "actionable_feature_id", "operation",
-    } for factor in factors):
+    scope = AnalysisScope(
+        **{
+            key: tuple(item) if key.endswith("_scope") else item
+            for key, item in scope_value.items()
+        }
+    )
+    factors = [value["factor"]]
+    if not isinstance(factors, list) or any(
+        not isinstance(factor, Mapping)
+        or set(factor)
+        != {
+            "actionable_feature_id",
+            "operation",
+        }
+        for factor in factors
+    ):
         raise ValueError("candidate source review factors are invalid")
-    parsed = tuple(PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"]))
-                   for factor in factors)
-    candidate = (AtomicPolicyKey(scope, parsed[0], value["outcome_id"]) if factor_field == "factor"
-                 else PairPolicyKey(scope, parsed, value["outcome_id"]))
+    parsed = tuple(
+        PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"]))
+        for factor in factors
+    )
+    candidate = AtomicPolicyKey(scope, parsed[0], value["outcome_id"])
     if review["candidate_id"] != candidate.policy_key:
         raise ValueError("candidate source review policy identity differs from its definition")
     if task["pre_treatment_source_metadata"]["language"] not in scope.language_scope:
@@ -315,29 +360,40 @@ def review_candidate_source_sufficiency(
         if value is None:
             states[axis] = "unresolved"
             continue
-        if (not isinstance(value, Mapping) or set(value) != {"state", "evidence", "reason"}
-                or value["state"] not in {"supported", "unresolved", "contradicted"}
-                or not isinstance(value["evidence"], list)):
+        if (
+            not isinstance(value, Mapping)
+            or set(value) != {"state", "evidence", "reason"}
+            or value["state"] not in {"supported", "unresolved", "contradicted"}
+            or not isinstance(value["evidence"], list)
+        ):
             raise ValueError("candidate source sufficiency judgment is invalid")
         require_text(value["reason"], "candidate source review reason")
         if value["state"] != "unresolved" and not value["evidence"]:
             raise ValueError("resolved source judgment requires exact source evidence")
         for span in value["evidence"]:
-            if (not isinstance(span, Mapping) or set(span) != {"start", "end", "text"}
-                    or type(span["start"]) is not int or type(span["end"]) is not int
-                    or not 0 <= span["start"] < span["end"] <= len(prompt)
-                    or prompt[span["start"]:span["end"]] != span["text"]):
+            if (
+                not isinstance(span, Mapping)
+                or set(span) != {"start", "end", "text"}
+                or type(span["start"]) is not int
+                or type(span["end"]) is not int
+                or not 0 <= span["start"] < span["end"] <= len(prompt)
+                or prompt[span["start"] : span["end"]] != span["text"]
+            ):
                 raise ValueError("candidate source evidence is not bound to the original prompt")
         states[axis] = value["state"]
     blockers = [axis + "_" + states[axis] for axis in axes if states[axis] != "supported"]
     if quality["quality_disposition"] == "QUALITY_EXCLUDED_SOURCE_DEFECT":
         blockers.append("original_source_defect_requires_independent_correction")
     return {
-        "task_unit_id": task["task_unit_id"], "candidate_id": review["candidate_id"],
-        "candidate_family": review["candidate_family"], "axis_states": states,
+        "task_unit_id": task["task_unit_id"],
+        "candidate_id": review["candidate_id"],
+        "candidate_family": review["candidate_family"],
+        "axis_states": states,
         "status": "SOURCE_SUFFICIENT_PENDING_QUALIFICATION" if not blockers else "SOURCE_BLOCKED",
-        "blockers": blockers, "review_sha256": content_hash(review),
-        "source_quality_unchanged": quality["quality_disposition"], "formal_admission": False,
+        "blockers": blockers,
+        "review_sha256": content_hash(review),
+        "source_quality_unchanged": quality["quality_disposition"],
+        "formal_admission": False,
     }
 
 
@@ -1365,5 +1421,11 @@ def _artifact_sha256(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-__all__ = ["SOURCE_USE_RULE", "prepare_source_use", "review_candidate_source_sufficiency",
-           "prepare_qualification_source_review", "summarize_source_role_capacity", "screen_prepared_source_pool"]
+__all__ = [
+    "SOURCE_USE_RULE",
+    "prepare_source_use",
+    "review_candidate_source_sufficiency",
+    "prepare_qualification_source_review",
+    "summarize_source_role_capacity",
+    "screen_prepared_source_pool",
+]

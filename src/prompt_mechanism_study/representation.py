@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prompt_tsg import (
-    FeatureScope, PromptTSG, QueryState, feature_state as scoped_state,
-    query_bindings, query_context, scoped_feature_assessment,
-    validate_feature_scope, validate_prompt_tsg,
+    FeatureScope,
+    PromptTSG,
+    QueryState,
+    feature_state as scoped_state,
+    query_bindings,
+    query_context,
+    scoped_feature_assessment,
+    validate_feature_scope,
+    validate_prompt_tsg,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 
@@ -106,44 +112,6 @@ class AtomicPolicyKey:
     @property
     def policy_key(self) -> str:
         return content_id("atomic_policy_key_", self)
-
-
-@dataclass(frozen=True, slots=True)
-class PairPolicyKey:
-    """Model-independent semantic identity of one second-order policy question."""
-
-    analysis_scope: AnalysisScope
-    factors: tuple[PolicyFactor, PolicyFactor]
-    outcome_id: str
-
-    def __post_init__(self) -> None:
-        if type(self.analysis_scope) is not AnalysisScope:
-            raise TypeError("analysis_scope must be an AnalysisScope")
-        if len(self.factors) != 2 or any(type(item) is not PolicyFactor for item in self.factors):
-            raise TypeError("pair policy must contain exactly two PolicyFactor values")
-        if self.factors[0].actionable_feature_id == self.factors[1].actionable_feature_id:
-            raise ValueError("pair policy factors must be distinct")
-        if tuple(sorted(self.factors, key=lambda item: item.sort_key)) != self.factors:
-            raise ValueError("pair policy factors must use canonical order")
-        require_text(self.outcome_id, "outcome_id")
-
-    @property
-    def policy_key(self) -> str:
-        return content_id("pair_policy_key_", self)
-
-
-def pair_policy_key(
-    analysis_scope: AnalysisScope,
-    factors: Iterable[PolicyFactor],
-    *,
-    outcome_id: str,
-) -> PairPolicyKey:
-    """Canonicalize input order without making factor order scientific identity."""
-
-    ordered = tuple(sorted(factors, key=lambda item: item.sort_key))
-    if len(ordered) != 2:
-        raise ValueError("pair policy requires exactly two factors")
-    return PairPolicyKey(analysis_scope, ordered, outcome_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,7 +371,7 @@ class SourceEligibilityDecision(StrEnum):
 class SourceEligibility:
     """Source-state gate for one exact factor scope; controls are designed later.
 
-    Pair factors use their own scopes and the Pair policy identity directly.
+    Each Atomic factor uses its own scope and policy identity.
     This is neither intervention readiness nor proof of independent qualification.
     """
 
@@ -487,7 +455,7 @@ class SourceEligibility:
 
 
 def freeze_source_eligibility(
-    policy: AtomicPolicyKey | PairPolicyKey,
+    policy: AtomicPolicyKey,
     *,
     task_id: str,
     task_unit_id: str,
@@ -503,22 +471,27 @@ def freeze_source_eligibility(
     Scope selection must already be frozen under the global factor definition.
     This function does not select among operations using their feature states.
     """
-    if type(policy) not in {AtomicPolicyKey, PairPolicyKey}:
-        raise TypeError("source eligibility requires an Atomic or Pair policy")
-    factors = (policy.factor,) if type(policy) is AtomicPolicyKey else policy.factors
+    if type(policy) not in {AtomicPolicyKey}:
+        raise TypeError("source eligibility requires an Atomic policy")
+    factors = (policy.factor,)
     if factor_feature_id is None and len(factors) == 1:
         factor_feature_id = factors[0].actionable_feature_id
     selected = [factor for factor in factors if factor.actionable_feature_id == factor_feature_id]
     if len(selected) != 1:
         raise ValueError("source eligibility must identify its own policy factor")
     operation = selected[0].operation
-    queries = [query for query in catalog["queries"]
-               if query["query_id"] == policy.analysis_scope.context_query_id]
+    queries = [
+        query
+        for query in catalog["queries"]
+        if query["query_id"] == policy.analysis_scope.context_query_id
+    ]
     if len(queries) != 1 or catalog.get("schema_version") != "2.0":
         raise ValueError("source eligibility requires one frozen open-graph context query")
     query = queries[0]
     context_semantics = set(query["required_semantics"]) | set(query["forbidden_semantics"])
-    context_semantics |= {item for source, _, target in query["required_relations"] for item in (source, target)}
+    context_semantics |= {
+        item for source, _, target in query["required_relations"] for item in (source, target)
+    }
     if context_semantics & {factor.actionable_feature_id for factor in factors}:
         raise ValueError("source context must be independent of all policy feature states")
     context_state = feature_state = QueryState.UNRESOLVED
@@ -530,8 +503,13 @@ def freeze_source_eligibility(
         context_state = query_context(graph, query=query, cwe="", task_family="").state
         if factor_scope is not None:
             validate_feature_scope(graph, factor_scope)
-            if context_state is QueryState.PRESENT and not any(
-                factor_scope.operation_node_id in nodes for nodes, _ in query_bindings(graph, query=query)
+            if context_state is QueryState.PRESENT and (
+                not any(
+                    (
+                        factor_scope.operation_node_id in nodes
+                        for nodes, _ in query_bindings(graph, query=query)
+                    )
+                )
             ):
                 context_state = QueryState.UNRESOLVED
             feature_state = scoped_state(graph, factor_feature_id, scope=factor_scope)
@@ -565,10 +543,13 @@ def freeze_source_eligibility(
         factor_scope,
         evidence,
         eligibility_policy_sha256,
-        SourceEligibilityDecision.ELIGIBLE if reason is None else SourceEligibilityDecision.EXCLUDED,
+        (
+            SourceEligibilityDecision.ELIGIBLE
+            if reason is None
+            else SourceEligibilityDecision.EXCLUDED
+        ),
         reason,
     )
-
 
 
 __all__ = [
@@ -580,12 +561,10 @@ __all__ = [
     "ModelBoundCandidateRecord",
     "ModelEffectCoordinate",
     "Operation",
-    "PairPolicyKey",
     "PolicyFactor",
     "SourceEligibility",
     "SourceEligibilityDecision",
     "TaskUnitDataRoleRecord",
     "freeze_source_eligibility",
-    "pair_policy_key",
     "validate_data_role_firewall",
 ]

@@ -1,5 +1,10 @@
 # Prospective research dataset contract
 
+Current main accepts Atomic candidates only. Pair counts and review rules below
+identify frozen historical source artifacts; they are not active eligibility or
+work requirements. Their complete reproduction path is preserved on
+`codex/pair-interaction-research` (`e6833027`). Historical judgments are unchanged.
+
 This document describes source admission and role capacity for the single
 [active protocol](protocol.md).
 It does not freeze a formal sample size, assign experimental roles, or authorize

@@ -4,28 +4,46 @@ The model selects and normalizes source graph atoms; it never supplies policy ke
 review acceptance, support or ranks. Existing policy/catalogue/support records are
 the outputs. New vocabulary requires fresh extraction, not relabelling saved graphs.
 """
+
 from __future__ import annotations
 
 from collections import Counter
 from itertools import combinations, product
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from prompt_mechanism_study.artifact_io import (
-    bundle_digest, file_sha256, json_object, read_json_exact, verify_bundle, write_bundle,
+    bundle_digest,
+    file_sha256,
+    json_object,
+    read_json_exact,
+    verify_bundle,
+    write_bundle,
 )
 from prompt_mechanism_study.prompt_contract import (
-    OpenTaskContract, compile_task_context_contract, freeze_open_concepts, open_concept_catalog,
-    task_context_contract_from_record, task_context_contract_record,
+    OpenTaskContract,
+    compile_task_context_contract,
+    freeze_open_concepts,
+    open_concept_catalog,
+    task_context_contract_from_record,
+    task_context_contract_record,
 )
 from prompt_mechanism_study.prompt_tsg import (
-    FeatureScope, catalog_from_record, catalog_sha256, feature_scope_from_record,
-    prompt_tsg_from_record, validate_feature_scope, validate_prompt_tsg,
+    FeatureScope,
+    catalog_from_record,
+    catalog_sha256,
+    feature_scope_from_record,
+    prompt_tsg_from_record,
+    validate_feature_scope,
+    validate_prompt_tsg,
     _occurrence_span,
 )
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 from prompt_mechanism_study.representation import (
-    AnalysisScope, AtomicPolicyKey, Operation, PolicyFactor, pair_policy_key,
+    AnalysisScope,
+    AtomicPolicyKey,
+    Operation,
+    PolicyFactor,
 )
 
 _REQUIREMENTS = {"safety_requirement", "task_requirement", "constraint", "presentation_control"}
@@ -230,7 +248,9 @@ def _query(selector: dict, feature_id: str) -> dict:
                 forbidden_semantics=[], required_relations=[list(r) for r in relations], actionable_feature_id=feature_id)
 
 
-def compile_candidate_proposal(request: dict, response: dict, design: dict, review: dict | None = None) -> dict:
+def compile_candidate_proposal(
+    request: dict, response: dict, design: dict, review: dict | None = None
+) -> dict:
     """Normalize source atoms into scoped factors; missing review stays pending."""
     _fields(response, {"factors", "dispositions"}, "candidate response")
     if not isinstance(response["factors"], list) or not isinstance(response["dispositions"], list):
@@ -238,17 +258,31 @@ def compile_candidate_proposal(request: dict, response: dict, design: dict, revi
     if request.get("arms_or_outcomes_used") is not False:
         raise ValueError("candidate request must be source-only")
     if request.get("requirement_granularity") != "atomic_source_requirement":
-        raise ValueError("candidate request must require atomic source requirements; prepare a new request from the source TSG")
+        raise ValueError(
+            "candidate request must require atomic source requirements; prepare a new request from the source TSG"
+        )
     _validate_design(design)
     aliases, definitions, types = _canonical_concepts(request)
     sources = {source["task_id"]: source for source in request["sources"]}
-    expected = {(source["task_id"], n["node_id"]) for source in sources.values()
-                for n in source["nodes"] if n["node_type"] in _REQUIREMENTS}
+    expected = {
+        (source["task_id"], n["node_id"])
+        for source in sources.values()
+        for n in source["nodes"]
+        if n["node_type"] in _REQUIREMENTS
+    }
     dispositions = {}
     for row in response["dispositions"]:
-        _fields(row, {"task_id", "requirement_node_id", "status", "rationale"}, "requirement disposition")
+        _fields(
+            row,
+            {"task_id", "requirement_node_id", "status", "rationale"},
+            "requirement disposition",
+        )
         key = row["task_id"], row["requirement_node_id"]
-        if key not in expected or key in dispositions or row["status"] not in {"included", "not_actionable", "unresolved"}:
+        if (
+            key not in expected
+            or key in dispositions
+            or row["status"] not in {"included", "not_actionable", "unresolved"}
+        ):
             raise ValueError("every requirement needs exactly one explicit disposition")
         require_text(row["rationale"], "requirement disposition rationale")
         dispositions[key] = row
@@ -256,7 +290,9 @@ def compile_candidate_proposal(request: dict, response: dict, design: dict, revi
         raise ValueError("requirement dispositions do not cover every source requirement")
     proposals, covered, source_meanings = {}, set(), {}
     for row in response["factors"]:
-        _fields(row, {"label", "definition", "atomicity_rationale", "occurrences"}, "proposed factor")
+        _fields(
+            row, {"label", "definition", "atomicity_rationale", "occurrences"}, "proposed factor"
+        )
         for key in ("label", "definition", "atomicity_rationale"):
             require_text(row[key], key)
         if not isinstance(row["occurrences"], list) or not row["occurrences"]:
@@ -269,13 +305,30 @@ def compile_candidate_proposal(request: dict, response: dict, design: dict, revi
             for node_id in evidence["requirement_node_ids"]:
                 source_key = (evidence["task_id"], node_id)
                 if source_key in source_meanings and source_meanings[source_key] != meaning:
-                    raise ValueError("source requirement node cannot be split into different candidate meanings; correct the source TSG first")
+                    raise ValueError(
+                        "source requirement node cannot be split into different candidate meanings; correct the source TSG first"
+                    )
                 source_meanings[source_key] = meaning
-            feature = content_id("feature_", dict(definition=row["definition"], scope_selector=selector,
-                                                   node_type=evidence["requirement_type"]))
-            proposal = proposals.setdefault(feature, dict(feature_id=feature, label=row["label"],
-                definition=row["definition"], node_type=evidence["requirement_type"], scope_selector=selector,
-                atomicity_rationales=[], source_occurrences=[]))
+            feature = content_id(
+                "feature_",
+                dict(
+                    definition=row["definition"],
+                    scope_selector=selector,
+                    node_type=evidence["requirement_type"],
+                ),
+            )
+            proposal = proposals.setdefault(
+                feature,
+                dict(
+                    feature_id=feature,
+                    label=row["label"],
+                    definition=row["definition"],
+                    node_type=evidence["requirement_type"],
+                    scope_selector=selector,
+                    atomicity_rationales=[],
+                    source_occurrences=[],
+                ),
+            )
             proposal["label"] = min(proposal["label"], row["label"])
             proposal["atomicity_rationales"].append(row["atomicity_rationale"])
             proposal["source_occurrences"].append(evidence)
@@ -284,7 +337,9 @@ def compile_candidate_proposal(request: dict, response: dict, design: dict, revi
         raise ValueError("included requirements and factor evidence disagree")
     for proposal in proposals.values():
         proposal["atomicity_rationales"] = sorted(set(proposal["atomicity_rationales"]))
-        proposal["source_occurrences"] = list({content_hash(e): e for e in proposal["source_occurrences"]}.values())
+        proposal["source_occurrences"] = list(
+            {content_hash(e): e for e in proposal["source_occurrences"]}.values()
+        )
         proposal["source_occurrences"].sort(key=content_hash)
     decisions = _review_decisions(request, response, proposals, review)
     accepted = [value for key, value in sorted(proposals.items()) if decisions.get(key) == "accept"]
@@ -296,33 +351,71 @@ def compile_candidate_proposal(request: dict, response: dict, design: dict, revi
         query["query_id"] = content_id("context_", (query["query_id"], factor["feature_id"]))
         factor["query"] = query
         queries.append(query)
-    policies, pair_queries = _policies(accepted, design)
-    queries.extend(pair_queries)
-    return dict(request_sha256=content_hash(request), response_sha256=content_hash(response),
-        design=canonical_value(design), review=review, status="REVIEWED" if review is not None else "PENDING_SEMANTIC_REVIEW",
-        factors=[dict(value, review_decision=decisions.get(key, "pending")) for key, value in sorted(proposals.items())],
-        normalization_map=aliases, source_definitions=definitions, source_types=types, queries=queries,
-        policies=canonical_value(policies), dispositions=sorted(dispositions.values(), key=lambda r: (r["task_id"], r["requirement_node_id"])),
-        missing_graph_task_ids=request["missing_graph_task_ids"], scientific_claim_allowed=False,
-        formal_execution_authorized=False)
+    policies = _policies(accepted, design)
+    return dict(
+        request_sha256=content_hash(request),
+        response_sha256=content_hash(response),
+        design=canonical_value(design),
+        review=review,
+        status="REVIEWED" if review is not None else "PENDING_SEMANTIC_REVIEW",
+        factors=[
+            dict(value, review_decision=decisions.get(key, "pending"))
+            for key, value in sorted(proposals.items())
+        ],
+        normalization_map=aliases,
+        source_definitions=definitions,
+        source_types=types,
+        queries=queries,
+        policies=canonical_value(policies),
+        dispositions=sorted(
+            dispositions.values(), key=lambda r: (r["task_id"], r["requirement_node_id"])
+        ),
+        missing_graph_task_ids=request["missing_graph_task_ids"],
+        scientific_claim_allowed=False,
+        formal_execution_authorized=False,
+    )
 
 
 def _validate_design(design: dict) -> None:
-    _fields(design, {"outcome_id", "language_scope", "api_scope", "task_archetype_scope", "operations",
-                     "include_pairs", "model_id", "support_rule", "covariate_names"}, "candidate design")
+    _fields(
+        design,
+        {
+            "outcome_id",
+            "language_scope",
+            "api_scope",
+            "task_archetype_scope",
+            "operations",
+            "model_id",
+            "support_rule",
+            "covariate_names",
+        },
+        "candidate design",
+    )
     for key in ("outcome_id", "model_id"):
         require_text(design[key], key)
     for key in ("language_scope", "api_scope", "task_archetype_scope", "covariate_names"):
         values = design[key]
-        if (not isinstance(values, list) or values != sorted(set(values))
-                or (key != "covariate_names" and not values)):
+        if (
+            not isinstance(values, list)
+            or values != sorted(set(values))
+            or (key != "covariate_names" and not values)
+        ):
             raise ValueError("design scopes must be canonical finite sets")
         for value in values:
             require_text(value, key)
-    if design["operations"] != ["add", "remove"] or type(design["include_pairs"]) is not bool:
-        raise ValueError("source-derived candidates preserve both ADD and REMOVE; pair inclusion is explicit")
+    if design["operations"] != ["add", "remove"]:
+        raise ValueError("source-derived candidates preserve both ADD and REMOVE")
     rule = design["support_rule"]
-    _fields(rule, {"minimum_state_task_units", "minimum_shared_lineages", "maximum_unresolved_fraction", "minimum_feature_reliability"}, "support rule")
+    _fields(
+        rule,
+        {
+            "minimum_state_task_units",
+            "minimum_shared_lineages",
+            "maximum_unresolved_fraction",
+            "minimum_feature_reliability",
+        },
+        "support rule",
+    )
     for key in ("minimum_state_task_units", "minimum_shared_lineages"):
         if type(rule[key]) is not int or rule[key] < 1:
             raise ValueError("support counts must be positive integers")
@@ -359,33 +452,30 @@ def _review_decisions(request, response, proposals, review):
 
 
 def _policies(factors, design):
-    policies, queries = [], []
+    policies = []
+
     def scope(query_id, identity):
-        return AnalysisScope(identity, query_id, tuple(design["language_scope"]), tuple(design["api_scope"]), tuple(design["task_archetype_scope"]))
+        return AnalysisScope(
+            identity,
+            query_id,
+            tuple(design["language_scope"]),
+            tuple(design["api_scope"]),
+            tuple(design["task_archetype_scope"]),
+        )
+
     for factor in factors:
-        analysis_scope = scope(factor["query"]["query_id"], content_id("pattern_", factor["scope_selector"]))
+        analysis_scope = scope(
+            factor["query"]["query_id"], content_id("pattern_", factor["scope_selector"])
+        )
         for operation in design["operations"]:
-            policies.append(AtomicPolicyKey(analysis_scope, PolicyFactor(factor["feature_id"], Operation(operation)), design["outcome_id"]))
-    if design["include_pairs"]:
-        for left, right in combinations(factors, 2):
-            # Pair hypotheses are constructed without reading Atomic eligibility or
-            # relation support. Compatibility and natural four-cell support stay pending.
-            query = dict(left["query"])
-            # This query declares joint operation presence. Each factor retains
-            # its own complete input/condition geometry in its independent scope
-            # selector. Unioning semantic triples here would incorrectly equate
-            # two different operation or input instances sharing one concept.
-            query["required_semantics"] = sorted({left["scope_selector"]["operation_semantic_id"],
-                                                   right["scope_selector"]["operation_semantic_id"]})
-            query["required_relations"] = []
-            query["query_id"] = content_id("pair_context_", (left["feature_id"], right["feature_id"]))
-            query["realization_id"] = content_id("pair_query_", query["query_id"])
-            queries.append(query)
-            analysis_scope = scope(query["query_id"], content_id("pattern_", (left["scope_selector"], right["scope_selector"])))
-            for a, b in product(design["operations"], repeat=2):
-                policies.append(pair_policy_key(analysis_scope,
-                    (PolicyFactor(left["feature_id"], Operation(a)), PolicyFactor(right["feature_id"], Operation(b))), outcome_id=design["outcome_id"]))
-    return sorted(policies, key=lambda p: p.policy_key), queries
+            policies.append(
+                AtomicPolicyKey(
+                    analysis_scope,
+                    PolicyFactor(factor["feature_id"], Operation(operation)),
+                    design["outcome_id"],
+                )
+            )
+    return sorted(policies, key=lambda p: p.policy_key)
 
 
 def prepare_candidate_request(tasks_path: Path, extraction_bundle: Path, output: Path, *, input_catalog_path: Path | None = None) -> dict:
@@ -418,9 +508,15 @@ def prepare_candidate_request(tasks_path: Path, extraction_bundle: Path, output:
     return report
 
 
-def build_candidate_catalog(request_bundle: Path, design_path: Path, output: Path, *,
-        response_path: Path | None = None, evaluator_path: Path | None = None,
-        review_path: Path | None = None) -> dict:
+def build_candidate_catalog(
+    request_bundle: Path,
+    design_path: Path,
+    output: Path,
+    *,
+    response_path: Path | None = None,
+    evaluator_path: Path | None = None,
+    review_path: Path | None = None,
+) -> dict:
     """Compile a retained response or make one explicit development proposal call.
 
     Omission of an evaluator means zero calls. Review replays the retained response;
@@ -433,8 +529,13 @@ def build_candidate_catalog(request_bundle: Path, design_path: Path, output: Pat
         raise ValueError("provide a retained response or one explicit development evaluator")
     request = read_json_exact(request_bundle / "request.json")
     tasks = read_json_exact(request_bundle / "tasks.json")
-    contracts = [task_context_contract_from_record(row) for row in read_json_exact(request_bundle / "contracts.json")]
-    if request != candidate_request(tasks, contracts, input_catalog=read_json_exact(request_bundle / "input-catalog.json")):
+    contracts = [
+        task_context_contract_from_record(row)
+        for row in read_json_exact(request_bundle / "contracts.json")
+    ]
+    if request != candidate_request(
+        tasks, contracts, input_catalog=read_json_exact(request_bundle / "input-catalog.json")
+    ):
         raise ValueError("candidate request cannot be replayed from its source contracts")
     design = read_json_exact(design_path)
     _validate_design(design)
@@ -444,10 +545,14 @@ def build_candidate_catalog(request_bundle: Path, design_path: Path, output: Pat
             raw = response_path.read_bytes()
         else:
             from prompt_mechanism_study.functional_judge import bailian_complete
+
             evaluator = _proposal_evaluator(evaluator_path)
             calls = 1
-            raw = bailian_complete(request, {**evaluator, "response_format": candidate_response_format()},
-                                   read_json_exact(request_bundle / "prompt.json"))
+            raw = bailian_complete(
+                request,
+                {**evaluator, "response_format": candidate_response_format()},
+                read_json_exact(request_bundle / "prompt.json"),
+            )
         response = json_object(raw)
         review = read_json_exact(review_path) if review_path is not None else None
         proposal = compile_candidate_proposal(request, response, design, review)
@@ -456,33 +561,83 @@ def build_candidate_catalog(request_bundle: Path, design_path: Path, output: Pat
         # A rejected provider response remains an inspectable failure, not an empty
         # candidate universe or a prompt-repair/retry opportunity.
         rejected = getattr(error, "provider_response", None)
-        report = dict(status="CANDIDATE_PROPOSAL_FAILED", provider_calls=calls,
-            error_type=type(error).__name__, error_message=str(error),
-            request_bundle_sha256=bundle_digest(request_bundle), scientific_claim_allowed=False,
-            formal_execution_authorized=False)
-        write_bundle(output, {"report.json": report, "request.json": request, "design.json": design,
-            "response-text.json": raw.decode("utf-8", errors="replace") if raw is not None else None,
-            "rejected-response.json": rejected.decode("utf-8", errors="replace") if isinstance(rejected, bytes) else None})
+        report = dict(
+            status="CANDIDATE_PROPOSAL_FAILED",
+            provider_calls=calls,
+            error_type=type(error).__name__,
+            error_message=str(error),
+            request_bundle_sha256=bundle_digest(request_bundle),
+            scientific_claim_allowed=False,
+            formal_execution_authorized=False,
+        )
+        write_bundle(
+            output,
+            {
+                "report.json": report,
+                "request.json": request,
+                "design.json": design,
+                "response-text.json": (
+                    raw.decode("utf-8", errors="replace") if raw is not None else None
+                ),
+                "rejected-response.json": (
+                    rejected.decode("utf-8", errors="replace")
+                    if isinstance(rejected, bytes)
+                    else None
+                ),
+            },
+        )
         return report
     accepted = [f for f in proposal["factors"] if f["review_decision"] == "accept"]
-    report = dict(status=proposal["status"], source_requirement_nodes=len(proposal["dispositions"]),
-        proposed_factors=len(proposal["factors"]), accepted_factors=len(accepted),
+    report = dict(
+        status=proposal["status"],
+        source_requirement_nodes=len(proposal["dispositions"]),
+        proposed_factors=len(proposal["factors"]),
+        accepted_factors=len(accepted),
         atomic_policies=sum("factor" in row for row in proposal["policies"]),
-        pair_policies=sum("factors" in row for row in proposal["policies"]),
-        provider_calls=calls, request_bundle_sha256=bundle_digest(request_bundle),
-        request_sha256=proposal["request_sha256"], response_sha256=proposal["response_sha256"],
-        design_sha256=file_sha256(design_path), catalog_sha256=catalog_sha256(catalog) if catalog else None,
-        implementation_sha256=file_sha256(Path(__file__)), arms_or_outcomes_used=False,
-        requires_fresh_extraction=True, scientific_claim_allowed=False, formal_execution_authorized=False)
-    review_template = dict(request_sha256=proposal["request_sha256"], response_sha256=proposal["response_sha256"],
-        reviewer_id="", arms_or_outcomes_used=False, decisions=[dict(feature_id=f["feature_id"],
-            decision="unresolved", rationale="", source_supported=False, single_requirement=False,
-            normalization_valid=False, context_independent=False, scope_preserves_task=False) for f in proposal["factors"]])
-    artifacts = {"report.json": report, "proposal.json": proposal, "request.json": request,
-        "response.json": response, "response-text.json": raw.decode("utf-8"), "design.json": design,
+        provider_calls=calls,
+        request_bundle_sha256=bundle_digest(request_bundle),
+        request_sha256=proposal["request_sha256"],
+        response_sha256=proposal["response_sha256"],
+        design_sha256=file_sha256(design_path),
+        catalog_sha256=catalog_sha256(catalog) if catalog else None,
+        implementation_sha256=file_sha256(Path(__file__)),
+        arms_or_outcomes_used=False,
+        requires_fresh_extraction=True,
+        scientific_claim_allowed=False,
+        formal_execution_authorized=False,
+    )
+    review_template = dict(
+        request_sha256=proposal["request_sha256"],
+        response_sha256=proposal["response_sha256"],
+        reviewer_id="",
+        arms_or_outcomes_used=False,
+        decisions=[
+            dict(
+                feature_id=f["feature_id"],
+                decision="unresolved",
+                rationale="",
+                source_supported=False,
+                single_requirement=False,
+                normalization_valid=False,
+                context_independent=False,
+                scope_preserves_task=False,
+            )
+            for f in proposal["factors"]
+        ],
+    )
+    artifacts = {
+        "report.json": report,
+        "proposal.json": proposal,
+        "request.json": request,
+        "response.json": response,
+        "response-text.json": raw.decode("utf-8"),
+        "design.json": design,
         "prompt.json": read_json_exact(request_bundle / "prompt.json"),
-        "response-format.json": candidate_response_format(), "review-template.json": review_template,
-        "evaluator.json": evaluator, "policies.json": proposal["policies"]}
+        "response-format.json": candidate_response_format(),
+        "review-template.json": review_template,
+        "evaluator.json": evaluator,
+        "policies.json": proposal["policies"],
+    }
     if catalog is not None:
         artifacts["catalog.json"] = catalog
     write_bundle(output, artifacts)
@@ -558,8 +713,14 @@ def choose_candidate_scope(graph, selector: dict) -> FeatureScope | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def bind_candidate_scopes(candidate_bundle: Path, tasks_path: Path, graph_bundles: Sequence[Path], output: Path, *,
-        qualification_bundle: Path | None = None, pair_review_path: Path | None = None) -> dict:
+def bind_candidate_scopes(
+    candidate_bundle: Path,
+    tasks_path: Path,
+    graph_bundles: Sequence[Path],
+    output: Path,
+    *,
+    qualification_bundle: Path | None = None,
+) -> dict:
     """Generate the existing positivity configuration from a reviewed candidate bundle."""
     verify_bundle(candidate_bundle)
     report = read_json_exact(candidate_bundle / "report.json")
@@ -568,7 +729,9 @@ def bind_candidate_scopes(candidate_bundle: Path, tasks_path: Path, graph_bundle
     proposal = read_json_exact(candidate_bundle / "proposal.json")
     request = read_json_exact(candidate_bundle / "request.json")
     response = read_json_exact(candidate_bundle / "response.json")
-    if proposal != compile_candidate_proposal(request, response, proposal["design"], proposal["review"]):
+    if proposal != compile_candidate_proposal(
+        request, response, proposal["design"], proposal["review"]
+    ):
         raise ValueError("candidate bundle does not replay its source-derived proposal")
     catalog = catalog_from_record(read_json_exact(candidate_bundle / "catalog.json"))
     if catalog_sha256(catalog) != report["catalog_sha256"]:
@@ -583,8 +746,14 @@ def bind_candidate_scopes(candidate_bundle: Path, tasks_path: Path, graph_bundle
         digests.append(bundle_digest(bundle))
         for row in read_json_exact(bundle / "graphs.json"):
             graph = prompt_tsg_from_record(row)
-            if graph.task_id in graphs or graph.task_id not in task_ids or graph.catalog_sha256 != catalog_sha256(catalog):
-                raise ValueError("fresh source graphs must bind the exact candidate catalogue and task set")
+            if (
+                graph.task_id in graphs
+                or graph.task_id not in task_ids
+                or graph.catalog_sha256 != catalog_sha256(catalog)
+            ):
+                raise ValueError(
+                    "fresh source graphs must bind the exact candidate catalogue and task set"
+                )
             graphs[graph.task_id] = graph
     factors = [f for f in proposal["factors"] if f["review_decision"] == "accept"]
     bindings, unbound = [], []
@@ -594,37 +763,83 @@ def bind_candidate_scopes(candidate_bundle: Path, tasks_path: Path, graph_bundle
             validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
         scopes = {}
         for factor in factors:
-            scope = choose_candidate_scope(graph, factor["scope_selector"]) if graph is not None else None
+            scope = (
+                choose_candidate_scope(graph, factor["scope_selector"])
+                if graph is not None
+                else None
+            )
             if scope is not None:
                 validate_feature_scope(graph, scope)
             scopes[factor["feature_id"]] = canonical_value(scope)
             if scope is None:
-                unbound.append(dict(task_id=task["task_id"], feature_id=factor["feature_id"],
-                                    reason="source_graph_missing" if graph is None else "no_unique_source_geometry_match"))
-        bindings.append(dict(task_id=task["task_id"], prompt_tsg_id=graph.tsg_id if graph else None, factor_scopes=scopes))
-    pair_decisions = _pair_reviews(proposal, candidate_bundle, pair_review_path)
-    definitions = {f["feature_id"]: dict(definition=f["definition"],
-        scope_rule="Unique exact operation/input/condition geometry; no requirement or feature-state reads.",
-        scope_selector=f["scope_selector"], atomicity_review="SOURCE_REVIEWED_SINGLE_REQUIREMENT",
-        candidate_bundle_sha256=bundle_digest(candidate_bundle)) for f in factors}
+                unbound.append(
+                    dict(
+                        task_id=task["task_id"],
+                        feature_id=factor["feature_id"],
+                        reason=(
+                            "source_graph_missing"
+                            if graph is None
+                            else "no_unique_source_geometry_match"
+                        ),
+                    )
+                )
+        bindings.append(
+            dict(
+                task_id=task["task_id"],
+                prompt_tsg_id=graph.tsg_id if graph else None,
+                factor_scopes=scopes,
+            )
+        )
+    definitions = {
+        f["feature_id"]: dict(
+            definition=f["definition"],
+            scope_rule="Unique exact operation/input/condition geometry; no requirement or feature-state reads.",
+            scope_selector=f["scope_selector"],
+            atomicity_review="SOURCE_REVIEWED_SINGLE_REQUIREMENT",
+            candidate_bundle_sha256=bundle_digest(candidate_bundle),
+        )
+        for f in factors
+    }
     design = proposal["design"]
-    config = dict(source_tasks_sha256=file_sha256(tasks_path), catalog_sha256=catalog_sha256(catalog),
-        graph_bundle_sha256=sorted(digests), model_id=design["model_id"], covariate_names=design["covariate_names"],
-        policies=proposal["policies"], factor_definitions=definitions, task_bindings=bindings,
-        support_rule=design["support_rule"], arms_or_outcomes_used=False, scope_choice_used_feature_states=False,
-        pair_compatibility=pair_decisions,
-        candidate_construction=dict(bundle=str(candidate_bundle.resolve()), bundle_sha256=bundle_digest(candidate_bundle)))
+    config = dict(
+        source_tasks_sha256=file_sha256(tasks_path),
+        catalog_sha256=catalog_sha256(catalog),
+        graph_bundle_sha256=sorted(digests),
+        model_id=design["model_id"],
+        covariate_names=design["covariate_names"],
+        policies=proposal["policies"],
+        factor_definitions=definitions,
+        task_bindings=bindings,
+        support_rule=design["support_rule"],
+        arms_or_outcomes_used=False,
+        scope_choice_used_feature_states=False,
+        candidate_construction=dict(
+            bundle=str(candidate_bundle.resolve()), bundle_sha256=bundle_digest(candidate_bundle)
+        ),
+    )
     if qualification_bundle is not None:
         # Absolute local reference survives moving only the generated scope config.
         # Qualification is rechecked by the existing producer, never trusted here.
-        config["representation_qualification"] = dict(bundle=str(qualification_bundle.resolve()),
-                                                       bundle_sha256=bundle_digest(qualification_bundle))
-    result = dict(status="CANDIDATE_SCOPES_BOUND", task_units=len(tasks), factors=len(factors),
-        policies=len(proposal["policies"]), unresolved_scope_bindings=len(unbound),
-        candidate_bundle_sha256=bundle_digest(candidate_bundle), arms_or_outcomes_used=False,
-        scope_choice_used_feature_states=False, provider_calls=0,
-        scientific_claim_allowed=False, formal_execution_authorized=False)
-    write_bundle(output, {"report.json": result, "scopes.json": config, "unbound-scopes.json": unbound})
+        config["representation_qualification"] = dict(
+            bundle=str(qualification_bundle.resolve()),
+            bundle_sha256=bundle_digest(qualification_bundle),
+        )
+    result = dict(
+        status="CANDIDATE_SCOPES_BOUND",
+        task_units=len(tasks),
+        factors=len(factors),
+        policies=len(proposal["policies"]),
+        unresolved_scope_bindings=len(unbound),
+        candidate_bundle_sha256=bundle_digest(candidate_bundle),
+        arms_or_outcomes_used=False,
+        scope_choice_used_feature_states=False,
+        provider_calls=0,
+        scientific_claim_allowed=False,
+        formal_execution_authorized=False,
+    )
+    write_bundle(
+        output, {"report.json": result, "scopes.json": config, "unbound-scopes.json": unbound}
+    )
     return result
 
 
@@ -654,25 +869,3 @@ def validate_generated_scope_config(config, tasks, graphs, catalog, *, relative_
                     for key, factor in factors.items()}
         if by_task[task["task_id"]]["factor_scopes"] != expected:
             raise ValueError("generated scope binding differs from state-blind source geometry")
-
-
-def _pair_reviews(proposal, candidate_bundle, review_path):
-    from prompt_mechanism_study.discovery_population import _source_policy
-    pairs = {_source_policy(row).policy_key for row in proposal["policies"] if "factors" in row}
-    if review_path is None:
-        return {}
-    review = read_json_exact(review_path)
-    _fields(review, {"candidate_bundle_sha256", "reviewer_id", "arms_or_outcomes_used", "decisions"}, "Pair compatibility review")
-    if review["candidate_bundle_sha256"] != bundle_digest(candidate_bundle) or review["arms_or_outcomes_used"] is not False:
-        raise ValueError("Pair review must bind the exact source-only candidate bundle")
-    require_text(review["reviewer_id"], "Pair reviewer")
-    decisions = {}
-    for row in review["decisions"]:
-        _fields(row, {"policy_key", "decision", "rationale"}, "Pair compatibility decision")
-        if row["policy_key"] not in pairs or row["policy_key"] in decisions or row["decision"] not in {
-                "compatible", "nested", "mutually_exclusive", "entailment_collapse", "conflicting", "unresolved"}:
-            raise ValueError("Pair compatibility refers to an invalid or duplicate generated policy")
-        require_text(row["rationale"], "Pair compatibility rationale")
-        decisions[row["policy_key"]] = dict(decision=row["decision"], outcomes_or_arms_used=False,
-                                            evidence_sha256=content_hash(review))
-    return decisions

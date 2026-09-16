@@ -208,13 +208,7 @@
       "score",
       "selector_id"
     ],
-    "model_independent": true,
-    "pair_factor_order": "canonical_by_actionable_feature_id_then_operation",
-    "pair_fields": [
-      "analysis_scope",
-      "canonical_factor_operation_pair",
-      "outcome_id"
-    ]
+    "model_independent": true
   },
   "protocol_id": "phase-context-policy-v3",
   "realization_allocation": {

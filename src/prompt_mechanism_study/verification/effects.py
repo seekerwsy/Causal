@@ -1,36 +1,28 @@
-"""Independent Atomic/Pair effect, status, and Yield@K reconstruction."""
+"""Independent Atomic effect, status, and Yield@K reconstruction."""
 
 from __future__ import annotations
 
 import math
 import random
-import statistics
 from collections import Counter, defaultdict
 from functools import lru_cache
 
 from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
     ContextAnalysisStatus,
-    PairResponsePatternPlanStatus,
-    ResponsePatternStatus,
     SharedEvidenceRecord,
     TargetFamilyStatus,
     TargetSelectorYieldResult,
 )
-from prompt_mechanism_study.prioritization import BridgeStatus, PolicyTrack
-from prompt_mechanism_study.randomization import (
-    ATOMIC_CONFIRMATORY_ARMS,
-    PAIR_CONFIRMATORY_ARMS,
-    ConfirmatoryArm,
-)
+from prompt_mechanism_study.prioritization import BridgeStatus
+from prompt_mechanism_study.randomization import ATOMIC_CONFIRMATORY_ARMS, ConfirmatoryArm
 from prompt_mechanism_study.records import content_hash
 
+
 def verify_target_shared_evidence(
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
+    evidence: SharedEvidenceRecord, yields: TargetSelectorYieldResult
 ) -> dict[str, object]:
     """Independently replay target v3 ITT, max-|T|, five statuses, and Yield@K."""
-
     if type(evidence) is not SharedEvidenceRecord or type(yields) is not TargetSelectorYieldResult:
         raise TypeError("target verifier requires typed shared evidence and yield records")
     if yields.shared_evidence_record_id != evidence.shared_evidence_record_id:
@@ -39,8 +31,6 @@ def verify_target_shared_evidence(
     plan = evidence.plan
     if plan.context_analysis.status is not ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
         raise ValueError("context analysis lacks an independently implemented frozen rule")
-    if plan.pair_response_patterns.status is not PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
-        raise ValueError("Pair response predicates lack an independent implementation")
     outcome_by_id = {item.assignment_id: item for item in ledger.outcomes}
     failed = {item.assignment_id for item in ledger.infrastructure_failures}
     assignments_by_candidate = defaultdict(list)
@@ -85,25 +75,17 @@ def verify_target_shared_evidence(
             if item.status is not expected_status:
                 raise ValueError("target five-level status does not independently recompute")
             status_by_candidate[candidate_id] = item.status
-            margin = (
-                plan.atomic_practical_margin
-                if family.track is PolicyTrack.ATOMIC
-                else plan.pair_practical_margin
-            )
+            margin = plan.atomic_practical_margin
             _v3_same(item.practical_margin, margin, "practical margin")
             _v3_same(item.point, value["point"], "point estimate")
             _v3_same(item.standard_error, value["standard_error"], "standard error")
             _v3_same(item.latent_lower, value["latent_lower"], "latent lower bound")
             _v3_same(item.latent_upper, value["latent_upper"], "latent upper bound")
             _v3_same(
-                item.simultaneous_lower,
-                expected["intervals"][candidate_id][0],
-                "interval lower",
+                item.simultaneous_lower, expected["intervals"][candidate_id][0], "interval lower"
             )
             _v3_same(
-                item.simultaneous_upper,
-                expected["intervals"][candidate_id][1],
-                "interval upper",
+                item.simultaneous_upper, expected["intervals"][candidate_id][1], "interval upper"
             )
             if item.reasons != expected["reasons"][candidate_id]:
                 raise ValueError("target non-evaluable reasons do not independently recompute")
@@ -113,11 +95,6 @@ def verify_target_shared_evidence(
                 raise ValueError("target assignment or task-unit accounting drift")
             _v3_check_contributions(item.task_unit_contributions, value["contributions"])
             _v3_check_arm_summaries(item.arm_summaries, value["arm_summaries"])
-            _v3_check_response_pattern(
-                item.response_pattern,
-                family.track,
-                value["arm_summaries"],
-            )
     _v3_verify_yields(evidence, yields, status_by_candidate)
     return {
         "status": "TARGET_SHARED_EVIDENCE_VERIFIED",
@@ -128,6 +105,7 @@ def verify_target_shared_evidence(
         "fixed_slots": len(yields.slots),
         "shared_evidence_record_id": evidence.shared_evidence_record_id,
     }
+
 
 def _v3_work(track, assignments, outcomes, failed, plan):
     assignment_ids = {item.assignment_id for item in assignments}
@@ -147,60 +125,72 @@ def _v3_work(track, assignments, outcomes, failed, plan):
             "arm_summaries": (),
         }
     local = {assignment_id: outcomes[assignment_id] for assignment_id in assignment_ids}
-    arms = ATOMIC_CONFIRMATORY_ARMS if track is PolicyTrack.ATOMIC else PAIR_CONFIRMATORY_ARMS
+    arms = ATOMIC_CONFIRMATORY_ARMS
     lower = _v3_unit_values(assignments, local, lambda item: float(item.secure_yield))
     upper = _v3_unit_values(assignments, local, lambda item: float(item.latent_secure_upper))
     strata = defaultdict(set)
     for item in assignments:
         strata[item.task_unit_id].add(item.stratum_id)
-    if any(len(values) != 1 for values in strata.values()):
+    if any((len(values) != 1 for values in strata.values())):
         raise ValueError("independent verifier found cross-stratum task units")
     allocations, unit_weights = _v3_mixture(assignments)
     contributions = tuple(
         (
-            task_unit_id,
-            next(iter(strata[task_unit_id])),
-            _v3_contrast(track, values, values),
-            _v3_contrast(track, lower[task_unit_id], upper[task_unit_id]),
-            _v3_upper_contrast(track, lower[task_unit_id], upper[task_unit_id]),
-            *allocations[task_unit_id],
+            (
+                task_unit_id,
+                next(iter(strata[task_unit_id])),
+                _v3_contrast(track, values, values),
+                _v3_contrast(track, lower[task_unit_id], upper[task_unit_id]),
+                _v3_upper_contrast(track, lower[task_unit_id], upper[task_unit_id]),
+                *allocations[task_unit_id],
+            )
+            for task_unit_id, values in sorted(lower.items())
         )
-        for task_unit_id, values in sorted(lower.items())
     )
-    counts = Counter((item[5], item[1]) for item in contributions)
-    if any(count < plan.minimum_task_units_per_stratum for count in counts.values()):
+    counts = Counter(((item[5], item[1]) for item in contributions))
+    if any((count < plan.minimum_task_units_per_stratum for count in counts.values())):
         reasons.add("insufficient_task_units_per_stratum")
-    r_counts = Counter(item[5] for item in contributions)
-    minimum = (plan.atomic_minimum_task_units_per_realization if track is PolicyTrack.ATOMIC
-               else plan.pair_minimum_task_units_per_realization)
-    if any(count < minimum for count in r_counts.values()):
+    r_counts = Counter((item[5] for item in contributions))
+    minimum = plan.atomic_minimum_task_units_per_realization
+    if any((count < minimum for count in r_counts.values())):
         reasons.add("insufficient_task_units_per_realization")
     q = {item[5]: item[6] for item in contributions}
     if not math.isclose(sum(q.values()), 1.0, abs_tol=1e-12):
-        return {"track": track, "point": None, "standard_error": None, "latent_lower": None,
-                "latent_upper": None, "contributions": contributions, "weights": (),
-                "assignments": len(assignments), "reasons": ("incomplete_realization_support",),
-                "arm_summaries": ()}
+        return {
+            "track": track,
+            "point": None,
+            "standard_error": None,
+            "latent_lower": None,
+            "latent_upper": None,
+            "contributions": contributions,
+            "weights": (),
+            "assignments": len(assignments),
+            "reasons": ("incomplete_realization_support",),
+            "arm_summaries": (),
+        }
     point, error, weights = _v3_point_error(contributions)
     if error == 0:
         reasons.add("zero_standard_error")
     summaries = _v3_arm_summaries(assignments, local, arms)
-    if any(arm[3] and (arm[3] - arm[4]) / arm[3] > plan.maximum_unknown_fraction_among_valid
-           for arm in summaries):
+    if any(
+        (
+            arm[3] and (arm[3] - arm[4]) / arm[3] > plan.maximum_unknown_fraction_among_valid
+            for arm in summaries
+        )
+    ):
         reasons.add("maximum_unknown_fraction_exceeded")
     return {
         "track": track,
         "point": point,
         "standard_error": error,
-        "latent_lower": sum(unit_weights[item[0]] * item[3] for item in contributions),
-        "latent_upper": sum(unit_weights[item[0]] * item[4] for item in contributions),
+        "latent_lower": sum((unit_weights[item[0]] * item[3] for item in contributions)),
+        "latent_upper": sum((unit_weights[item[0]] * item[4] for item in contributions)),
         "contributions": contributions,
         "weights": weights,
         "assignments": len(assignments),
         "reasons": tuple(sorted(reasons)),
         "arm_summaries": summaries,
     }
-
 
 
 def _v3_family(track, work, plan):
@@ -217,22 +207,20 @@ def _v3_family(track, work, plan):
     reasons = {reason for value in work.values() for reason in value["reasons"]}
     if "missing_or_failed_assigned_outcome" in reasons:
         return _v3_failed_family(
-            TargetFamilyStatus.INVALID_PROVENANCE,
-            work,
-            "primary_family_invalid_provenance",
+            TargetFamilyStatus.INVALID_PROVENANCE, work, "primary_family_invalid_provenance"
         )
-    if reasons & {"insufficient_task_units_per_stratum", "insufficient_task_units_per_realization",
-                   "incomplete_realization_support", "maximum_unknown_fraction_exceeded"}:
+    if reasons & {
+        "insufficient_task_units_per_stratum",
+        "insufficient_task_units_per_realization",
+        "incomplete_realization_support",
+        "maximum_unknown_fraction_exceeded",
+    }:
         return _v3_failed_family(
-            TargetFamilyStatus.INSUFFICIENT_SUPPORT,
-            work,
-            "primary_family_insufficient_support",
+            TargetFamilyStatus.INSUFFICIENT_SUPPORT, work, "primary_family_insufficient_support"
         )
     if "zero_standard_error" in reasons:
         return _v3_failed_family(
-            TargetFamilyStatus.ZERO_STANDARD_ERROR,
-            work,
-            "primary_family_zero_standard_error",
+            TargetFamilyStatus.ZERO_STANDARD_ERROR, work, "primary_family_zero_standard_error"
         )
     maxima, invalid = _v3_bootstrap(track, work, plan)
     minimum = math.ceil(plan.bootstrap_draws * plan.minimum_valid_bootstrap_fraction)
@@ -246,11 +234,7 @@ def _v3_family(track, work, plan):
         result["invalid"] = invalid
         return result
     critical = _q(maxima, 1 - plan.alpha)
-    margin = (
-        plan.atomic_practical_margin
-        if track is PolicyTrack.ATOMIC
-        else plan.pair_practical_margin
-    )
+    margin = plan.atomic_practical_margin
     intervals = {
         candidate_id: (
             value["point"] - critical * value["standard_error"],
@@ -353,25 +337,11 @@ def _v3_unit_values(assignments, outcomes, getter):
 
 
 def _v3_contrast(track, lower, upper):
-    if track is PolicyTrack.ATOMIC:
-        return lower[ConfirmatoryArm.ATOMIC_TARGET] - upper[ConfirmatoryArm.ATOMIC_NOOP]
-    return (
-        lower[ConfirmatoryArm.PAIR_11]
-        - upper[ConfirmatoryArm.PAIR_10]
-        - upper[ConfirmatoryArm.PAIR_01]
-        + lower[ConfirmatoryArm.PAIR_00]
-    )
+    return lower[ConfirmatoryArm.ATOMIC_TARGET] - upper[ConfirmatoryArm.ATOMIC_NOOP]
 
 
 def _v3_upper_contrast(track, lower, upper):
-    if track is PolicyTrack.ATOMIC:
-        return upper[ConfirmatoryArm.ATOMIC_TARGET] - lower[ConfirmatoryArm.ATOMIC_NOOP]
-    return (
-        upper[ConfirmatoryArm.PAIR_11]
-        - lower[ConfirmatoryArm.PAIR_10]
-        - lower[ConfirmatoryArm.PAIR_01]
-        + upper[ConfirmatoryArm.PAIR_00]
-    )
+    return upper[ConfirmatoryArm.ATOMIC_TARGET] - lower[ConfirmatoryArm.ATOMIC_NOOP]
 
 
 def _v3_point_error(contributions):
@@ -423,39 +393,54 @@ def _v3_bootstrap(track, work, plan):
     for value in work.values():
         for task_unit_id, stratum, *_ in value["contributions"]:
             global_units[stratum].add(task_unit_id)
-    seed = int(content_hash({
-        "domain": "target_max_t_task_unit_bootstrap_v1",
-        "seed": plan.bootstrap_seed,
-        "track": track,
-        "plan_id": plan.target_itt_plan_id,
-    })[-16:], 16)
-    populations = tuple((stratum, tuple(sorted(values))) for stratum, values in sorted(global_units.items()))
-    indexed_work = [(value, {item[0]: (item[5], item[2]) for item in value['contributions']})
-                    for value in work.values()]
+    seed = int(
+        content_hash(
+            {
+                "domain": "target_max_t_task_unit_bootstrap_v1",
+                "seed": plan.bootstrap_seed,
+                "track": track,
+                "plan_id": plan.target_itt_plan_id,
+            }
+        )[-16:],
+        16,
+    )
+    populations = tuple(
+        ((stratum, tuple(sorted(values))) for stratum, values in sorted(global_units.items()))
+    )
+    indexed_work = [
+        (value, {item[0]: (item[5], item[2]) for item in value["contributions"]})
+        for value in work.values()
+    ]
     maxima = []
     invalid = 0
     for sampled in _v3_resampling_draws(populations, seed, plan.bootstrap_draws):
         draw_statistics = []
         for value, contribution_by_unit in indexed_work:
-            means, variances, realization_counts = {}, {}, Counter()
+            means, variances, realization_counts = ({}, {}, Counter())
             draw_valid = True
             for r, stratum, weight in value["weights"]:
-                points = [contribution_by_unit[unit][1] for unit in sampled[stratum]
-                          if unit in contribution_by_unit and contribution_by_unit[unit][0] == r]
+                points = [
+                    contribution_by_unit[unit][1]
+                    for unit in sampled[stratum]
+                    if unit in contribution_by_unit and contribution_by_unit[unit][0] == r
+                ]
                 if len(points) < plan.minimum_task_units_per_stratum:
                     draw_valid = False
                     break
                 realization_counts[r] += len(points)
                 mean = sum(points) / len(points)
-                means[(r, stratum)] = mean
-                variances[(r, stratum)] = sum((point - mean) ** 2 for point in points) / (len(points) * (len(points) - 1))
-            minimum = (plan.atomic_minimum_task_units_per_realization if track is PolicyTrack.ATOMIC
-                       else plan.pair_minimum_task_units_per_realization)
-            if not draw_valid or any(n < minimum for n in realization_counts.values()):
+                means[r, stratum] = mean
+                variances[r, stratum] = sum(((point - mean) ** 2 for point in points)) / (
+                    len(points) * (len(points) - 1)
+                )
+            minimum = plan.atomic_minimum_task_units_per_realization
+            if not draw_valid or any((n < minimum for n in realization_counts.values())):
                 draw_statistics = []
                 break
-            point = sum(weight * means[(r, stratum)] for r, stratum, weight in value["weights"])
-            error = math.sqrt(sum(weight ** 2 * variances[(r, stratum)] for r, stratum, weight in value["weights"]))
+            point = sum((weight * means[r, stratum] for r, stratum, weight in value["weights"]))
+            error = math.sqrt(
+                sum((weight**2 * variances[r, stratum] for r, stratum, weight in value["weights"]))
+            )
             if error <= 0:
                 draw_statistics = []
                 break
@@ -464,7 +449,7 @@ def _v3_bootstrap(track, work, plan):
             maxima.append(max(draw_statistics))
         else:
             invalid += 1
-    return maxima, invalid
+    return (maxima, invalid)
 
 
 @lru_cache(maxsize=16)
@@ -525,68 +510,6 @@ def _v3_check_arm_summaries(reported, expected):
             raise ValueError("target arm summary accounting drift")
         for actual_value, expected_value in zip(observed[2:-2], values[2:-2], strict=True):
             _v3_same(actual_value, expected_value, "arm endpoint summary")
-
-
-def _v3_check_response_pattern(reported, track, arm_summaries):
-    if track is PolicyTrack.ATOMIC:
-        if (
-            reported.status is not ResponsePatternStatus.NOT_APPLICABLE
-            or reported.surface is not None
-            or reported.label is not None
-            or reported.predicate_sha256 is not None
-            or reported.reasons
-        ):
-            raise ValueError("Atomic response-pattern status failed independent replay")
-        return
-    if tuple(item[0] for item in arm_summaries) != PAIR_CONFIRMATORY_ARMS:
-        if (
-            reported.status is not ResponsePatternStatus.NON_EVALUABLE
-            or reported.surface is not None
-            or reported.label is not None
-            or reported.predicate_sha256 is not None
-            or reported.reasons != ("pair_response_surface_unavailable",)
-        ):
-            raise ValueError("unavailable Pair response surface failed independent replay")
-        return
-    means = {item[0]: float(item[2]) for item in arm_summaries}
-    mean_00 = means[ConfirmatoryArm.PAIR_00]
-    mean_10 = means[ConfirmatoryArm.PAIR_10]
-    mean_01 = means[ConfirmatoryArm.PAIR_01]
-    mean_11 = means[ConfirmatoryArm.PAIR_11]
-    expected = (
-        mean_00,
-        mean_10,
-        mean_01,
-        mean_11,
-        mean_10 - mean_00,
-        mean_01 - mean_00,
-        mean_11 - mean_00,
-        mean_11 - mean_01,
-        mean_11 - mean_10,
-        mean_11 - mean_10 - mean_01 + mean_00,
-    )
-    if (
-        reported.status is not ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE
-        or reported.surface is None
-        or reported.label is not None
-        or reported.predicate_sha256 is not None
-        or reported.reasons
-    ):
-        raise ValueError("blocked Pair response-pattern status failed independent replay")
-    observed = (
-        reported.surface.mean_00,
-        reported.surface.mean_10,
-        reported.surface.mean_01,
-        reported.surface.mean_11,
-        reported.surface.factor_1_at_0,
-        reported.surface.factor_2_at_0,
-        reported.surface.joint,
-        reported.surface.factor_1_at_1,
-        reported.surface.factor_2_at_1,
-        reported.surface.interaction,
-    )
-    for actual, wanted in zip(observed, expected, strict=True):
-        _v3_same(actual, wanted, "Pair response surface")
 
 
 def _v3_verify_yields(evidence, yields, statuses):
@@ -654,5 +577,6 @@ def _v3_same(actual, expected, name):
 def _q(values, probability):
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, max(0, math.ceil(probability * len(ordered)) - 1))]
+
 
 __all__ = ["verify_target_shared_evidence"]

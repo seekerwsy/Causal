@@ -13,8 +13,6 @@ from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
     ContextAnalysisPlan,
     EvidenceLevel,
-    PairResponsePatternPlan,
-    ResponsePatternStatus,
     TargetFamilyStatus,
     TargetITTPlan,
     TargetTaskUnitContribution,
@@ -38,11 +36,7 @@ from prompt_mechanism_study.prioritization import (
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
 )
-from prompt_mechanism_study.randomization import (
-    ATOMIC_CONFIRMATORY_ARMS,
-    PAIR_CONFIRMATORY_ARMS,
-    AssignedArmITTRecord,
-)
+from prompt_mechanism_study.randomization import ATOMIC_CONFIRMATORY_ARMS, AssignedArmITTRecord
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import ModelBoundCandidateRecord
 from prompt_mechanism_study.selector_analysis import build_target_rq_tables
@@ -55,7 +49,8 @@ from prompt_mechanism_study.verification.reporting import (
     verify_target_execution_artifacts,
 )
 from prompt_mechanism_study.target_security_profiles import (
-    evaluate_target_security_profile, target_security_profile_producer_sha256,
+    evaluate_target_security_profile,
+    target_security_profile_producer_sha256,
 )
 
 
@@ -77,26 +72,38 @@ def test_repeated_fixed_assignments_recompute_every_outcome() -> None:
     verify_target_shared_evidence(restored, build_target_selector_yields(restored))
 
 
-@pytest.mark.parametrize('weight', [
-    0.25,
-])
+@pytest.mark.parametrize("weight", [0.25])
 def test_realization_mixture_keeps_frozen_weights_under_unequal_support(weight) -> None:
     ledger, plan = _target_v3_fixture()
     old_outcomes = {item.assignment_id: item for item in ledger.outcomes}
-    assignments, outcomes = [], []
+    assignments, outcomes = ([], [])
     for old in ledger.assignments:
         index = int(old.task_unit_id.rsplit("-", 1)[1])
         if index >= 8:
             continue
         first = index < 6
-        new = replace(old, realization_id="r1" if first else "r2",
-                      realization_weight=weight if first else 1 - weight)
-        secure = int(first and old.arm.value in {"atomic_target", "pair_11"})
+        new = replace(
+            old,
+            realization_id="r1" if first else "r2",
+            realization_weight=weight if first else 1 - weight,
+        )
+        secure = int(first and old.arm.value in {"atomic_target"})
         assignments.append(new)
-        outcomes.append(replace(old_outcomes[old.assignment_id], assignment_id=new.assignment_id,
-                                secure_yield=secure, oracle_evaluable=1, latent_secure_upper=secure,
-                                functionality=int(first), joint=secure, latent_joint_upper=secure))
-    result = estimate_target_itt(freeze_assigned_arm_evidence(ledger.dispatch, assignments, outcomes), plan)
+        outcomes.append(
+            replace(
+                old_outcomes[old.assignment_id],
+                assignment_id=new.assignment_id,
+                secure_yield=secure,
+                oracle_evaluable=1,
+                latent_secure_upper=secure,
+                functionality=int(first),
+                joint=secure,
+                latent_joint_upper=secure,
+            )
+        )
+    result = estimate_target_itt(
+        freeze_assigned_arm_evidence(ledger.dispatch, assignments, outcomes), plan
+    )
     for family in result.families:
         effect = family.estimates[0]
         assert effect.point == pytest.approx(weight)
@@ -105,7 +112,7 @@ def test_realization_mixture_keeps_frozen_weights_under_unequal_support(weight) 
         for arm in effect.arm_summaries:
             assert arm.code_validity == pytest.approx(1)
             assert arm.functionality_yield == pytest.approx(weight)
-            if arm.arm.value in {"atomic_target", "pair_11"}:
+            if arm.arm.value in {"atomic_target"}:
                 assert arm.secure_yield == pytest.approx(weight)
                 assert arm.joint_success_yield == pytest.approx(weight)
     verify_target_shared_evidence(result, build_target_selector_yields(result))
@@ -128,27 +135,51 @@ def test_missing_realization_is_non_evaluable_without_weight_renormalization() -
 def test_joint_bootstrap_applies_frozen_minimum_to_every_effect() -> None:
     _, plan = _target_v3_fixture()
     plan = replace(plan, bootstrap_seed=7, bootstrap_draws=1000)
-    works = tuple(SimpleNamespace(
-        track=PolicyTrack.PAIR, point=0.5, stratum_weights=(("r1", "s", 1.0),),
-        contributions=tuple(TargetTaskUnitContribution(f"{prefix}{i}", "s", float(i - 1),
-                                                       float(i - 1), float(i - 1), "r1", 1.0)
-                            for i in range(4)),
-    ) for prefix in ("a", "b"))
+    works = tuple(
+        (
+            SimpleNamespace(
+                track=PolicyTrack.ATOMIC,
+                point=0.5,
+                stratum_weights=(("r1", "s", 1.0),),
+                contributions=tuple(
+                    (
+                        TargetTaskUnitContribution(
+                            f"{prefix}{i}", "s", float(i - 1), float(i - 1), float(i - 1), "r1", 1.0
+                        )
+                        for i in range(4)
+                    )
+                ),
+            )
+            for prefix in ("a", "b")
+        )
+    )
     assert _target_resampled_point_standard_error(works[0], {"s": ("a0", "a1", "a2")}, plan) is None
-    maxima, invalid = _target_family_bootstrap(PolicyTrack.PAIR, works, plan)
-    population = tuple(f"{prefix}{i}" for prefix in ("a", "b") for i in range(4))
-    rng = random.Random(int(content_hash({"domain": "target_max_t_task_unit_bootstrap_v1",
-                                         "seed": 7, "track": PolicyTrack.PAIR,
-                                         "plan_id": plan.target_itt_plan_id})[-16:], 16))
+    population = tuple((f"{prefix}{i}" for prefix in ("a", "b") for i in range(4)))
+    rng = random.Random(
+        int(
+            content_hash(
+                {
+                    "domain": "target_max_t_task_unit_bootstrap_v1",
+                    "seed": 7,
+                    "track": PolicyTrack.ATOMIC,
+                    "plan_id": plan.target_itt_plan_id,
+                }
+            )[-16:],
+            16,
+        )
+    )
     expected_valid = 0
     old_minimum_valid = 0
     for _ in range(1000):
         draw = [population[rng.randrange(8)] for _ in range(8)]
-        cells = [[int(unit[1:]) for unit in draw if unit.startswith(prefix)] for prefix in ("a", "b")]
-        if all(len(values) >= 2 and len(set(values)) >= 2 for values in cells):
+        cells = [
+            [int(unit[1:]) for unit in draw if unit.startswith(prefix)] for prefix in ("a", "b")
+        ]
+        if all((len(values) >= 2 and len(set(values)) >= 2 for values in cells)):
             old_minimum_valid += 1
-        if all(len(values) >= 4 and len(set(values)) >= 2 for values in cells):
+        if all((len(values) >= 4 and len(set(values)) >= 2 for values in cells)):
             expected_valid += 1
+    maxima, invalid = _target_family_bootstrap(PolicyTrack.ATOMIC, works, plan)
     assert len(maxima) == expected_valid
     assert invalid == 1000 - expected_valid
     assert expected_valid < 800 <= old_minimum_valid
@@ -273,12 +304,10 @@ def test_independent_verifier_imports_schema_not_production_estimators() -> None
         Path(__file__).parents[1] / "src" / "prompt_mechanism_study" / "verification"
     )
     allowed_inference_schema = {
-            "ConfirmatoryEffectStatus",
-            "ContextAnalysisStatus",
-            "EvidenceLevel",
-            "PairResponsePatternPlanStatus",
-            "ResponsePatternStatus",
-            "SharedEvidenceRecord",
+        "ConfirmatoryEffectStatus",
+        "ContextAnalysisStatus",
+        "EvidenceLevel",
+        "SharedEvidenceRecord",
         "TargetFamilyStatus",
         "TargetITTPlan",
         "TargetSelectorYieldResult",
@@ -292,27 +321,20 @@ def test_independent_verifier_imports_schema_not_production_estimators() -> None
                     assert {item.name for item in node.names} <= allowed_inference_schema
             elif isinstance(node, ast.Import):
                 assert all(
-                    item.name
-                    not in {
-                        "prompt_mechanism_study.inference",
-                        "prompt_mechanism_study.selector_analysis",
-                    }
-                    for item in node.names
+                    (
+                        item.name
+                        not in {
+                            "prompt_mechanism_study.inference",
+                            "prompt_mechanism_study.selector_analysis",
+                        }
+                        for item in node.names
+                    )
                 )
 
 
 def _target_v3_fixture():
     atomic_record = ModelBoundCandidateRecord(
-        "atomic-policy-v3",
-        "model.atomic",
-        "phase-context-policy-v3",
-        "3.0",
-    )
-    pair_record = ModelBoundCandidateRecord(
-        "pair-policy-v3",
-        "model.pair",
-        "phase-context-policy-v3",
-        "3.0",
+        "atomic-policy-v3", "model.atomic", "phase-context-policy-v3", "3.0"
     )
     sources = (
         FixedSlotSource(
@@ -331,46 +353,17 @@ def _target_v3_fixture():
             (SelectorSlot(1, SlotStatus.FILLED, atomic_record.policy_key, None),),
             (atomic_record,),
         ),
-        FixedSlotSource(
-            PolicyTrack.PAIR,
-            "pair_full",
-            pair_record.discovery_model_id,
-            "pair-universe-v3",
-            (SelectorSlot(1, SlotStatus.FILLED, pair_record.policy_key, None),),
-            (pair_record,),
-        ),
-        FixedSlotSource(
-            PolicyTrack.PAIR,
-            "pair_no_relation",
-            pair_record.discovery_model_id,
-            "pair-universe-v3",
-            (SelectorSlot(1, SlotStatus.FILLED, pair_record.policy_key, None),),
-            (pair_record,),
-        ),
     )
-    ledger = freeze_fixed_slot_ledger(
-        "phase-context-policy-v3",
-        "3.0",
-        sources,
-    )
+    ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
     union = freeze_shared_confirmation_union(ledger)
     dispatch = freeze_confirmation_dispatch(
-        union,
-        {
-            atomic_record.candidate_record_id: "atomic-protocol-record-v3",
-            pair_record.candidate_record_id: "pair-protocol-record-v3",
-        },
+        union, {atomic_record.candidate_record_id: "atomic-protocol-record-v3"}
     )
     entry_by_track = {item.track: item for item in union.entries}
-    dispatch_by_candidate = {
-        item.candidate_record_id: item for item in dispatch.records
-    }
+    dispatch_by_candidate = {item.candidate_record_id: item for item in dispatch.records}
     assignments = []
     outcomes = []
-    for track, arms in (
-        (PolicyTrack.ATOMIC, ATOMIC_CONFIRMATORY_ARMS),
-        (PolicyTrack.PAIR, PAIR_CONFIRMATORY_ARMS),
-    ):
+    for track, arms in ((PolicyTrack.ATOMIC, ATOMIC_CONFIRMATORY_ARMS),):
         entry = entry_by_track[track]
         dispatched = dispatch_by_candidate[entry.candidate_record_id]
         for index in range(12):
@@ -394,28 +387,18 @@ def _target_v3_fixture():
                     content_hash((track.value, index, arm.value)),
                 )
                 assignments.append(assignment)
-                if track is PolicyTrack.ATOMIC:
-                    secure = (
-                        index < 10
-                        if arm.value == "atomic_target"
-                        else index < 1
-                        if arm.value == "atomic_noop"
-                        else index % 3 == 0
-                    )
-                    unknown = arm.value == "atomic_target" and index == 11
-                else:
-                    secure = (
-                        index < 10
-                        if arm.value == "pair_11"
-                        else index < 1
-                    )
-                    unknown = False
+                secure = (
+                    index < 10
+                    if arm.value == "atomic_target"
+                    else index < 1 if arm.value == "atomic_noop" else index % 3 == 0
+                )
+                unknown = arm.value == "atomic_target" and index == 11
                 outcomes.append(
                     Outcome(
                         assignment.assignment_id,
                         1,
                         0 if unknown else 1,
-                        int(secure and not unknown),
+                        int(secure and (not unknown)),
                         int(secure or unknown),
                         1,
                         None if unknown else int(secure),
@@ -424,50 +407,28 @@ def _target_v3_fixture():
                     )
                 )
     evidence = freeze_assigned_arm_evidence(dispatch, assignments, outcomes)
-    plan = TargetITTPlan(
-        20260831,
-        300,
-        0.05,
-        4,
-        0.8,
-        0.05,
-        0.05,
-        0.5,
-    )
-    return evidence, plan
+    plan = TargetITTPlan(20260831, 300, 0.05, 4, 0.8, 0.05, 0.5)
+    return (evidence, plan)
 
 
 def test_target_v3_shared_itt_confirms_each_unique_effect_once_and_fans_out() -> None:
     evidence, plan = _target_v3_fixture()
-
     result = estimate_target_itt(evidence, plan, evidence_level=EvidenceLevel.TESTED)
     yields = build_target_selector_yields(result)
     verification = verify_target_shared_evidence(result, yields)
-
-    assert tuple(item.status for item in result.families) == (
-        TargetFamilyStatus.EVALUABLE,
-        TargetFamilyStatus.EVALUABLE,
-    )
-    estimates = tuple(item for family in result.families for item in family.estimates)
-    assert len(estimates) == 2
-    assert all(item.status is ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL for item in estimates)
-    assert all(item.assignments == 48 and item.task_units == 12 for item in estimates)
-    atomic = next(item for item in estimates if item.track is PolicyTrack.ATOMIC)
-    pair = next(item for item in estimates if item.track is PolicyTrack.PAIR)
+    assert tuple((item.status for item in result.families)) == (TargetFamilyStatus.EVALUABLE,)
+    estimates = tuple((item for family in result.families for item in family.estimates))
+    assert len(estimates) == 1
+    assert all((item.status is ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL for item in estimates))
+    assert all((item.assignments == 48 and item.task_units == 12 for item in estimates))
+    atomic = next((item for item in estimates if item.track is PolicyTrack.ATOMIC))
     assert atomic.point == pytest.approx(0.75)
     assert atomic.latent_upper > atomic.point
     target_summary = atomic.arm_summaries[0]
     assert target_summary.oracle_unknown_valid_assignments == 1
-    assert atomic.response_pattern.status is ResponsePatternStatus.NOT_APPLICABLE
-    assert pair.response_pattern.status is (
-        ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE
-    )
-    assert pair.response_pattern.label is None
-    assert pair.response_pattern.surface is not None
-    assert pair.response_pattern.surface.interaction == pytest.approx(pair.point)
-    assert len(yields.slots) == 4
-    assert all(item.meaningful_yield == 1 for item in yields.slots)
-    assert all(item.top_k == 1 and item.meaningful_yield_at_k == 1 for item in yields.selectors)
+    assert len(yields.slots) == 2
+    assert all((item.meaningful_yield == 1 for item in yields.slots))
+    assert all((item.top_k == 1 and item.meaningful_yield_at_k == 1 for item in yields.selectors))
     assert verification["status"] == "TARGET_SHARED_EVIDENCE_VERIFIED"
 
 
@@ -475,39 +436,28 @@ def test_target_v3_rq_tables_are_fixed_denominator_and_claim_gated() -> None:
     evidence, plan = _target_v3_fixture()
     result = estimate_target_itt(evidence, plan, evidence_level=EvidenceLevel.TESTED)
     yields = build_target_selector_yields(result)
-
     report = build_target_rq_tables(result, yields)
     verification = verify_target_rq_tables(result, yields, report)
-
     assert report["report_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert report["scientific_claim_allowed"] is False
     assert report["context_analysis_status"] == "BLOCKED_NO_FROZEN_CONTEXT_RULE"
     assert report["context_modifier_rows"] == []
-    assert report["pair_response_pattern_plan_status"] == (
-        "BLOCKED_NO_FROZEN_PREDICATE"
-    )
-    pair_row = next(
-        row for row in report["unique_effect_rows"] if row["track"] == "pair"
-    )
-    assert pair_row["response_pattern_classification_status"] == (
-        "BLOCKED_NO_FROZEN_PREDICATE"
-    )
-    assert pair_row["response_pattern"] is None
-    assert pair_row["pair_response_surface"] is not None
-    assert len(report["rq1_selector_rows"]) == 4
-    assert len(report["rq2_full_minus_ablation_rows"]) == 2
+    assert len(report["rq1_selector_rows"]) == 2
+    assert len(report["rq2_full_minus_ablation_rows"]) == 1
     assert all(
-        row["top_k"] == 1 and row["meaningful_yield_at_k"] == 1.0
-        for row in report["rq1_selector_rows"]
+        (
+            row["top_k"] == 1 and row["meaningful_yield_at_k"] == 1.0
+            for row in report["rq1_selector_rows"]
+        )
     )
     assert all(
-        row["full_minus_ablation_yield_at_k"] == 0.0
-        and row["comparison_semantics"]
-        == "descriptive_fixed_discovery_split_no_rank_pairing"
-        for row in report["rq2_full_minus_ablation_rows"]
+        (
+            row["full_minus_ablation_yield_at_k"] == 0.0
+            and row["comparison_semantics"] == "descriptive_fixed_discovery_split_no_rank_pairing"
+            for row in report["rq2_full_minus_ablation_rows"]
+        )
     )
     assert verification["status"] == "TARGET_RQ_TABLES_VERIFIED"
-
     tampered = {
         **report,
         "rq2_full_minus_ablation_rows": [
@@ -531,7 +481,7 @@ def test_target_v3_independent_verifier_rejects_effect_drift() -> None:
     )
     tampered = replace(
         result,
-        families=(tampered_family, result.families[1]),
+        families=(tampered_family,),
     )
     yields = build_target_selector_yields(tampered)
 
@@ -539,50 +489,19 @@ def test_target_v3_independent_verifier_rejects_effect_drift() -> None:
         verify_target_shared_evidence(tampered, yields)
 
 
-def test_context_and_pair_pattern_activation_fail_closed_without_implementations() -> None:
+def test_context_activation_fail_closed_without_implementations() -> None:
     evidence, plan = _target_v3_fixture()
     with pytest.raises(ValueError, match="context analysis is blocked"):
         ContextAnalysisPlan("FROZEN", (), content_hash("rule"), content_hash("family"))
-    with pytest.raises(ValueError, match="classification is blocked"):
-        PairResponsePatternPlan("FROZEN", content_hash("predicate"), ("label",), ("label",))
-    # In-memory tampering must still fail at the analysis boundary.
     context = copy.deepcopy(plan.context_analysis)
     object.__setattr__(context, "status", "FROZEN")
     with pytest.raises(ValueError, match="context analysis is blocked"):
         estimate_target_itt(evidence, replace(plan, context_analysis=context))
 
 
-def test_independent_verifier_rejects_an_unfrozen_pair_pattern_label() -> None:
-    evidence, plan = _target_v3_fixture()
-    result = estimate_target_itt(evidence, plan, evidence_level=EvidenceLevel.TESTED)
-    pair_family = result.families[1]
-    pair = pair_family.estimates[0]
-    with pytest.raises(ValueError, match="classification is blocked"):
-        replace(pair.response_pattern, label="invented-pattern")
-    tampered_pattern = copy.deepcopy(pair.response_pattern)
-    object.__setattr__(tampered_pattern, "status", "CLASSIFIED")
-    object.__setattr__(tampered_pattern, "label", "invented-pattern")
-    tampered_pair = replace(pair, response_pattern=tampered_pattern)
-    tampered = replace(
-        result,
-        families=(
-            result.families[0],
-            replace(pair_family, estimates=(tampered_pair,)),
-        ),
-    )
-    yields = build_target_selector_yields(tampered)
-
-    with pytest.raises(ValueError, match="blocked Pair response-pattern status"):
-        verify_target_shared_evidence(tampered, yields)
-
-
 def test_target_v3_missing_assigned_outcome_invalidates_only_its_frozen_family() -> None:
     evidence, plan = _target_v3_fixture()
-    missing = next(
-        item
-        for item in evidence.assignments
-        if item.track is PolicyTrack.ATOMIC
-    )
+    missing = next(item for item in evidence.assignments if item.track is PolicyTrack.ATOMIC)
     outcomes = tuple(
         item for item in evidence.outcomes if item.assignment_id != missing.assignment_id
     )
@@ -597,7 +516,6 @@ def test_target_v3_missing_assigned_outcome_invalidates_only_its_frozen_family()
 
     assert result.families[0].status is TargetFamilyStatus.INVALID_PROVENANCE
     assert result.families[0].estimates[0].status is ConfirmatoryEffectStatus.NON_EVALUABLE
-    assert result.families[1].status is TargetFamilyStatus.EVALUABLE
     assert len(incomplete.outcomes) + len(incomplete.infrastructure_failures) == len(
         incomplete.assignments
     )
@@ -605,42 +523,23 @@ def test_target_v3_missing_assigned_outcome_invalidates_only_its_frozen_family()
 
 def test_target_v3_protocolization_failure_keeps_slots_but_creates_no_test() -> None:
     evidence, plan = _target_v3_fixture()
-    entry_by_track = {
-        item.track: item for item in evidence.dispatch.union.entries
-    }
-    atomic = entry_by_track[PolicyTrack.ATOMIC]
-    pair = entry_by_track[PolicyTrack.PAIR]
+    entry = evidence.dispatch.union.entries[0]
     dispatch = freeze_confirmation_dispatch(
         evidence.dispatch.union,
-        {atomic.candidate_record_id: "atomic-protocol-record-v3"},
+        {},
         failures={
-            pair.candidate_record_id: (
-                BridgeStatus.PROTOCOLIZATION_FAILED,
-                "synthetic protocolization failure",
-            )
+            entry.candidate_record_id: (BridgeStatus.PROTOCOLIZATION_FAILED, "synthetic failure")
         },
     )
-    assignments = tuple(
-        item
-        for item in evidence.assignments
-        if item.candidate_record_id == atomic.candidate_record_id
-    )
-    assignment_ids = {item.assignment_id for item in assignments}
-    outcomes = tuple(
-        item for item in evidence.outcomes if item.assignment_id in assignment_ids
-    )
-    atomic_only = freeze_assigned_arm_evidence(dispatch, assignments, outcomes)
-
-    result = estimate_target_itt(atomic_only, plan, evidence_level=EvidenceLevel.TESTED)
+    empty = freeze_assigned_arm_evidence(dispatch, (), ())
+    result = estimate_target_itt(empty, plan, evidence_level=EvidenceLevel.TESTED)
     yields = build_target_selector_yields(result)
     verification = verify_target_shared_evidence(result, yields)
-
-    assert result.families[1].status is TargetFamilyStatus.NO_ELIGIBLE_COORDINATES
-    assert not result.families[1].estimates
-    pair_slots = [item for item in yields.slots if item.track is PolicyTrack.PAIR]
-    assert len(pair_slots) == 2
-    assert all(item.meaningful_yield == 0 and item.effect_status is None for item in pair_slots)
-    assert verification["unique_effects"] == 1
+    assert result.families[0].status is TargetFamilyStatus.NO_ELIGIBLE_COORDINATES
+    assert not result.families[0].estimates
+    assert len(yields.slots) == 2
+    assert all(item.meaningful_yield == 0 and item.effect_status is None for item in yields.slots)
+    assert verification["unique_effects"] == 0
 
 
 def test_target_v3_five_status_boundaries_are_direction_free() -> None:

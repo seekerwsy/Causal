@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     FeatureScope,
@@ -25,7 +23,6 @@ from prompt_mechanism_study.prompt_tsg import (
     validate_prompt_tsg,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text
-from prompt_mechanism_study.representation import PairPolicyKey
 
 
 class MechanismRegistryError(ValueError):
@@ -52,6 +49,17 @@ class TaskHypothesisBinding:
     factor_subject_node_ids: tuple[str | None, ...] = ()
     factor_scopes: tuple[FeatureScope, ...] = ()
 
+    def __post_init__(self) -> None:
+        if (
+            len(self.factor_feature_ids) != 1
+            or len(self.factor_operations) != 1
+            or len(self.feature_states) != 1
+            or self.factor_operations[0] not in {"add", "remove"}
+            or len(self.factor_scopes) > 1
+            or len(self.factor_subject_node_ids) > 1
+        ):
+            raise MechanismRegistryError("main requires one Atomic factor per binding")
+
     @property
     def binding_id(self) -> str:
         from dataclasses import asdict
@@ -64,27 +72,47 @@ class TaskHypothesisBinding:
 
 
 def bind_task_hypothesis(
-    graph: PromptTSG, *, query: Mapping[str, Any], policy_id: str,
-    target_operation_node_id: str | None = None, factor_feature_ids: tuple[str, ...],
+    graph: PromptTSG,
+    *,
+    query: Mapping[str, Any],
+    policy_id: str,
+    target_operation_node_id: str | None = None,
+    factor_feature_ids: tuple[str, ...],
     factor_operations: tuple[str, ...],
     factor_subject_node_ids: tuple[str | None, ...] = (),
     factor_scopes: tuple[FeatureScope, ...] = (),
 ) -> TaskHypothesisBinding:
-    """Bind Atomic or Pair directly to an operation, with no Atomic-parent requirement."""
+    """Bind one Atomic factor directly to its source operation."""
     if graph.schema_version != "3.0":
         raise MechanismRegistryError("instance hypotheses require the active open graph schema")
-    if (len(factor_feature_ids) not in {1, 2} or len(set(factor_feature_ids)) != len(factor_feature_ids)
-        or len(factor_operations) != len(factor_feature_ids) or any(op not in {"add", "remove"} for op in factor_operations)):
-        raise MechanismRegistryError("a local hypothesis needs one or two explicit factors and edit operations")
+    if (
+        len(factor_feature_ids) != 1
+        or len(set(factor_feature_ids)) != len(factor_feature_ids)
+        or len(factor_operations) != len(factor_feature_ids)
+        or any(op not in {"add", "remove"} for op in factor_operations)
+    ):
+        raise MechanismRegistryError(
+            "a local hypothesis needs one explicit factor and edit operations"
+        )
     context_semantics = set(query["required_semantics"]) | set(query["forbidden_semantics"])
-    context_semantics |= {semantic for source, _, target in query["required_relations"] for semantic in (source, target)}
+    context_semantics |= {
+        semantic
+        for source, _, target in query["required_relations"]
+        for semantic in (source, target)
+    }
     if context_semantics & set(factor_feature_ids):
         raise MechanismRegistryError("hypothesis context must be invariant to its target features")
     if factor_scopes:
         if len(factor_scopes) != len(factor_feature_ids) or factor_subject_node_ids:
-            raise MechanismRegistryError("each factor needs one exact scope, without legacy subject coordinates")
-        if target_operation_node_id is not None and any(scope.operation_node_id != target_operation_node_id for scope in factor_scopes):
-            raise MechanismRegistryError("factor scopes conflict with the shared operation coordinate")
+            raise MechanismRegistryError(
+                "each factor needs one exact scope, without legacy subject coordinates"
+            )
+        if target_operation_node_id is not None and any(
+            scope.operation_node_id != target_operation_node_id for scope in factor_scopes
+        ):
+            raise MechanismRegistryError(
+                "factor scopes conflict with the shared operation coordinate"
+            )
         try:
             for scope in factor_scopes:
                 validate_feature_scope(graph, scope)
@@ -93,15 +121,24 @@ def bind_task_hypothesis(
         operations = {scope.operation_node_id for scope in factor_scopes}
         target_operation_node_id = next(iter(operations)) if len(operations) == 1 else None
     else:
-        target = next((node for node in graph.nodes if node.node_id == target_operation_node_id), None)
+        target = next(
+            (node for node in graph.nodes if node.node_id == target_operation_node_id), None
+        )
         if target is None or target.node_type != "task_operation":
             raise MechanismRegistryError("hypothesis target must identify one operation instance")
         operations = {target_operation_node_id}
     context = query_context(graph, query=query, cwe="", task_family="")
-    matches = [(nodes, edges) for nodes, edges in query_bindings(graph, query=query)
-               if operations & set(nodes)]
-    if context.state is not QueryState.PRESENT or not operations <= {node for nodes, _ in matches for node in nodes}:
-        raise MechanismRegistryError("hypothesis has no source-supported coherent context at this operation")
+    matches = [
+        (nodes, edges)
+        for nodes, edges in query_bindings(graph, query=query)
+        if operations & set(nodes)
+    ]
+    if context.state is not QueryState.PRESENT or not operations <= {
+        node for nodes, _ in matches for node in nodes
+    }:
+        raise MechanismRegistryError(
+            "hypothesis has no source-supported coherent context at this operation"
+        )
     nodes = {node for binding, _ in matches for node in binding}
     edges = {edge for _, binding in matches for edge in binding}
     by_id = {node.node_id: node for node in graph.nodes}
@@ -110,38 +147,87 @@ def bind_task_hypothesis(
     for subject, edit in zip(factor_subject_node_ids, factor_operations):
         if subject is None:
             continue
-        subject_edges = [edge for edge in graph.edges if edge.source_id == subject
-                         and edge.target_id == target_operation_node_id and edge.edge_type == "used_by"]
+        subject_edges = [
+            edge
+            for edge in graph.edges
+            if edge.source_id == subject
+            and edge.target_id == target_operation_node_id
+            and edge.edge_type == "used_by"
+        ]
         if subject not in by_id or by_id[subject].node_type != "data_object" or not subject_edges:
-            raise MechanismRegistryError("factor subject must be a source-bound input of this operation")
+            raise MechanismRegistryError(
+                "factor subject must be a source-bound input of this operation"
+            )
         if edit != "add":
-            raise MechanismRegistryError("subject-specific REMOVE needs a separately qualified source-scope rule")
+            raise MechanismRegistryError(
+                "subject-specific REMOVE needs a separately qualified source-scope rule"
+            )
         nodes.add(subject)
         edges.update(edge.edge_id for edge in subject_edges)
-    requirements = {edge.source_id for edge in graph.edges if edge.target_id in operations
-                    and edge.edge_type == "constrains"}
+    requirements = {
+        edge.source_id
+        for edge in graph.edges
+        if edge.target_id in operations and edge.edge_type == "constrains"
+    }
     if factor_scopes:
-        assessments = [scoped_feature_assessment(graph, feature, scope)
-                       for feature, scope in zip(factor_feature_ids, factor_scopes, strict=True)]
-        target_requirements = {key for item in assessments if item for key in item.requirement_node_ids}
+        assessments = [
+            scoped_feature_assessment(graph, feature, scope)
+            for feature, scope in zip(factor_feature_ids, factor_scopes, strict=True)
+        ]
+        target_requirements = {
+            key for item in assessments if item for key in item.requirement_node_ids
+        }
         for scope in factor_scopes:
-            nodes.update((scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids))
+            nodes.update(
+                (scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids)
+            )
         states = tuple(item.state if item else "unresolved" for item in assessments)
     else:
-        target_requirements = {node for node in requirements if by_id[node].semantic_id in factor_feature_ids}
-        states = tuple(feature_state(graph, feature, target_operation_node_id).value for feature in factor_feature_ids)
+        target_requirements = {
+            node for node in requirements if by_id[node].semantic_id in factor_feature_ids
+        }
+        states = tuple(
+            feature_state(graph, feature, target_operation_node_id).value
+            for feature in factor_feature_ids
+        )
     nodes |= target_requirements
     if factor_scopes:
-        edges |= {edge.edge_id for edge in graph.edges if edge.source_id in nodes and edge.target_id in nodes}
+        edges |= {
+            edge.edge_id
+            for edge in graph.edges
+            if edge.source_id in nodes and edge.target_id in nodes
+        }
     else:
-        edges |= {edge.edge_id for edge in graph.edges if edge.source_id in target_requirements
-                  and edge.target_id == target_operation_node_id and edge.edge_type == "constrains"}
-    return TaskHypothesisBinding(graph.task_id, graph.tsg_id, policy_id, query["query_id"],
-        target_operation_node_id, factor_feature_ids, factor_operations,
+        edges |= {
+            edge.edge_id
+            for edge in graph.edges
+            if edge.source_id in target_requirements
+            and edge.target_id == target_operation_node_id
+            and edge.edge_type == "constrains"
+        }
+    return TaskHypothesisBinding(
+        graph.task_id,
+        graph.tsg_id,
+        policy_id,
+        query["query_id"],
+        target_operation_node_id,
+        factor_feature_ids,
+        factor_operations,
         states,
-        tuple(sorted(nodes)), tuple(sorted(edges)), tuple(sorted(node.node_id for node in graph.nodes
-            if node.node_type in {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
-            and node.node_id not in target_requirements)), factor_subject_node_ids, factor_scopes)
+        tuple(sorted(nodes)),
+        tuple(sorted(edges)),
+        tuple(
+            sorted(
+                node.node_id
+                for node in graph.nodes
+                if node.node_type
+                in {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
+                and node.node_id not in target_requirements
+            )
+        ),
+        factor_subject_node_ids,
+        factor_scopes,
+    )
 
 
 def render_task_hypothesis(
@@ -249,13 +335,19 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
 
     Projection and four-state checks constrain the review; they do not establish
     semantic accuracy. A frozen review record and later independent qualification
-    are still needed. Full joint realizations avoid order-dependent Pair edits.
+    are still needed. A reviewed realization preserves all non-target requirements.
     """
     from dataclasses import asdict
-    if (not binding.factor_scopes or variant.get("binding_id") != binding.binding_id
+
+    if (
+        not binding.factor_scopes
+        or variant.get("binding_id") != binding.binding_id
         or variant.get("source_prompt_sha256") != content_hash(prompt)
-        or variant.get("enabled") != list(enabled)):
-        raise MechanismRegistryError("reviewed variant must bind the exact source, scopes and full arm")
+        or variant.get("enabled") != list(enabled)
+    ):
+        raise MechanismRegistryError(
+            "reviewed variant must bind the exact source, scopes and full arm"
+        )
     review = variant.get("source_review", {})
     if review.get("outcomes_used") is not False:
         raise MechanismRegistryError("neutral rewrite requires an outcome-blind source review")
@@ -263,7 +355,9 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
         require_text(review.get(field), "neutral rewrite source review " + field)
     for edit, state in zip(binding.factor_operations, binding.feature_states, strict=True):
         if state != ("absent" if edit == "add" else "present"):
-            raise MechanismRegistryError("reviewed edits cannot bypass the explicit source-state gate")
+            raise MechanismRegistryError(
+                "reviewed edits cannot bypass the explicit source-state gate"
+            )
     target_prompt = variant["prompt"]
     require_text(target_prompt, "reviewed variant prompt")
     target = prompt_tsg_from_record(variant["graph"])
@@ -275,88 +369,119 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     new = {node.node_id: node for node in target.nodes if node.node_type != "task"}
     neutral_nodes = variant.get("neutral_control_nodes", {})
     if set(neutral_nodes) != set(inactive_texts):
-        raise MechanismRegistryError("reviewed joint realization must identify every frozen neutral control")
+        raise MechanismRegistryError(
+            "reviewed joint realization must identify every frozen neutral control"
+        )
     for feature, key in neutral_nodes.items():
-        if (key not in new or new[key].node_type != "presentation_control"
-            or target_prompt[new[key].evidence_start:new[key].evidence_end] != inactive_texts[feature]):
-            raise MechanismRegistryError("reviewed neutral control differs from its frozen source-bound text")
-    targeted_requirements = {key for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)
-        for key in scoped_feature_assessment(graph, feature, scope).requirement_node_ids}
+        if (
+            key not in new
+            or new[key].node_type != "presentation_control"
+            or target_prompt[new[key].evidence_start : new[key].evidence_end]
+            != inactive_texts[feature]
+        ):
+            raise MechanismRegistryError(
+                "reviewed neutral control differs from its frozen source-bound text"
+            )
+    targeted_requirements = {
+        key
+        for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)
+        for key in scoped_feature_assessment(graph, feature, scope).requirement_node_ids
+    }
     preserved = set(old) - targeted_requirements
-    if (not preserved <= set(node_map) or set(node_map) - set(old)
-        or len(set(node_map.values())) != len(node_map) or set(node_map.values()) - set(new)):
-        raise MechanismRegistryError("neutral rewrite needs a one-to-one map of all non-target source nodes")
+    if (
+        not preserved <= set(node_map)
+        or set(node_map) - set(old)
+        or len(set(node_map.values())) != len(node_map)
+        or set(node_map.values()) - set(new)
+    ):
+        raise MechanismRegistryError(
+            "neutral rewrite needs a one-to-one map of all non-target source nodes"
+        )
     for key in preserved:
         before, after = old[key], new[node_map[key]]
-        if (before.node_type != after.node_type or before.semantic_id != after.semantic_id
-            or prompt[before.evidence_start:before.evidence_end] != target_prompt[after.evidence_start:after.evidence_end]):
+        if (
+            before.node_type != after.node_type
+            or before.semantic_id != after.semantic_id
+            or prompt[before.evidence_start : before.evidence_end]
+            != target_prompt[after.evidence_start : after.evidence_end]
+        ):
             raise MechanismRegistryError("neutral rewrite changed non-target source evidence")
-    source_edges = {(node_map[edge.source_id], edge.edge_type, node_map[edge.target_id])
-                    for edge in graph.edges if edge.source_id in preserved and edge.target_id in preserved}
+    source_edges = {
+        (node_map[edge.source_id], edge.edge_type, node_map[edge.target_id])
+        for edge in graph.edges
+        if edge.source_id in preserved and edge.target_id in preserved
+    }
     retained = {node_map[key] for key in preserved}
-    target_edges = {(edge.source_id, edge.edge_type, edge.target_id)
-                    for edge in target.edges if edge.source_id in retained and edge.target_id in retained}
+    target_edges = {
+        (edge.source_id, edge.edge_type, edge.target_id)
+        for edge in target.edges
+        if edge.source_id in retained and edge.target_id in retained
+    }
     if source_edges != target_edges:
         raise MechanismRegistryError("neutral rewrite changed non-target relation structure")
+
     def mapped_scope(scope):
-        return FeatureScope(node_map[scope.operation_node_id],
+        return FeatureScope(
+            node_map[scope.operation_node_id],
             tuple(sorted(node_map[key] for key in scope.subject_node_ids)),
-            tuple(sorted(node_map[key] for key in scope.condition_node_ids)))
-    changes = {(scope, feature): ("present" if edit == "add" else "absent") if flag else state
-               for scope, feature, edit, state, flag in zip(binding.factor_scopes, binding.factor_feature_ids,
-                   binding.factor_operations, binding.feature_states, enabled, strict=True)}
-    expected = {(mapped_scope(item.scope), item.feature_id): changes.get((item.scope, item.feature_id), item.state)
-                for item in graph.scoped_feature_assessments}
-    actual = {(item.scope, item.feature_id): item.state for item in target.scoped_feature_assessments}
+            tuple(sorted(node_map[key] for key in scope.condition_node_ids)),
+        )
+
+    changes = {
+        (scope, feature): ("present" if edit == "add" else "absent") if flag else state
+        for scope, feature, edit, state, flag in zip(
+            binding.factor_scopes,
+            binding.factor_feature_ids,
+            binding.factor_operations,
+            binding.feature_states,
+            enabled,
+            strict=True,
+        )
+    }
+    expected = {
+        (mapped_scope(item.scope), item.feature_id): changes.get(
+            (item.scope, item.feature_id), item.state
+        )
+        for item in graph.scoped_feature_assessments
+    }
+    actual = {
+        (item.scope, item.feature_id): item.state for item in target.scoped_feature_assessments
+    }
     if actual != expected:
-        raise MechanismRegistryError("neutral rewrite changed another scope or did not realize its assigned factors")
+        raise MechanismRegistryError(
+            "neutral rewrite changed another scope or did not realize its assigned factors"
+        )
     # New source objects or requirements outside the declared factor-state table
     # cannot hide behind a correct target-state label.
-    covered = retained | set(neutral_nodes.values()) | {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids}
+    covered = (
+        retained
+        | set(neutral_nodes.values())
+        | {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids}
+    )
     if set(new) - covered:
         raise MechanismRegistryError("neutral rewrite introduces an unaccounted source node")
-    expected_rows = [dict(scope=asdict(scope), feature_id=feature, state=changes[scope, feature])
-                     for scope, feature in zip(binding.factor_scopes, binding.factor_feature_ids, strict=True)]
-    return {"binding_id": binding.binding_id, "task_id": binding.task_id, "policy_id": binding.policy_id,
-            "source_tsg_id": binding.source_tsg_id, "target_operation_node_id": binding.target_operation_node_id,
-            "enabled": list(enabled), "prompt": target_prompt, "prompt_sha256": content_hash(target_prompt),
-            "expected_feature_states": {row["feature_id"]: row["state"] for row in expected_rows},
-            "factor_scopes": [asdict(scope) for scope in binding.factor_scopes],
-            "expected_scoped_feature_states": expected_rows,
-            "rendering": "SOURCE_REVIEWED_JOINT_REALIZATION", "reviewed_variant_sha256": content_hash(variant),
-            "non_target_source_bytes_preserved": False, "non_target_graph_projection_preserved": True,
-            "semantic_fidelity_status": "SOURCE_REVIEWED_PENDING_INDEPENDENT_QUALIFICATION"}
-
-
-class PairRelation(StrEnum):
-    SAME_FLOW = "same_flow"
-    SHARED_SINK = "shared_sink"
-    DISTINCT_CONTROL_POINTS = "distinct_control_points"
-    ALTERNATIVE_CONTROLS = "alternative_controls"
-    SEQUENTIAL_CONTROLS = "sequential_controls"
-    COMPLEMENTARY_COVERAGE = "complementary_coverage"
-    PRECONDITION_FOR = "precondition_for"
-    SUBSUMES = "subsumes"
-    POTENTIALLY_CONFLICTS_WITH = "potentially_conflicts_with"
-
-
-PAIR_STRUCTURAL_RELATIONS = frozenset(
-    {
-        PairRelation.SAME_FLOW,
-        PairRelation.SHARED_SINK,
-        PairRelation.DISTINCT_CONTROL_POINTS,
-        PairRelation.ALTERNATIVE_CONTROLS,
+    expected_rows = [
+        dict(scope=asdict(scope), feature_id=feature, state=changes[scope, feature])
+        for scope, feature in zip(binding.factor_scopes, binding.factor_feature_ids, strict=True)
+    ]
+    return {
+        "binding_id": binding.binding_id,
+        "task_id": binding.task_id,
+        "policy_id": binding.policy_id,
+        "source_tsg_id": binding.source_tsg_id,
+        "target_operation_node_id": binding.target_operation_node_id,
+        "enabled": list(enabled),
+        "prompt": target_prompt,
+        "prompt_sha256": content_hash(target_prompt),
+        "expected_feature_states": {row["feature_id"]: row["state"] for row in expected_rows},
+        "factor_scopes": [asdict(scope) for scope in binding.factor_scopes],
+        "expected_scoped_feature_states": expected_rows,
+        "rendering": "SOURCE_REVIEWED_JOINT_REALIZATION",
+        "reviewed_variant_sha256": content_hash(variant),
+        "non_target_source_bytes_preserved": False,
+        "non_target_graph_projection_preserved": True,
+        "semantic_fidelity_status": "SOURCE_REVIEWED_PENDING_INDEPENDENT_QUALIFICATION",
     }
-)
-
-
-def _validate_pair_structural_relation(relation: PairRelation) -> None:
-    """Admit only the four prospectively frozen Prompt-TSG relation predicates."""
-
-    if type(relation) is not PairRelation or relation not in PAIR_STRUCTURAL_RELATIONS:
-        raise MechanismRegistryError(
-            "pair relation is outside the active Pair structural-relation vocabulary"
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,63 +564,6 @@ class PromptControlBinding:
         return content_id("prompt_control_binding_", self)
 
 
-@dataclass(frozen=True, slots=True)
-class PairStructuralRelationEvidence:
-    """Recomputable v3 evidence for one of the four neutral Pair relations."""
-
-    pair_id: str
-    relation_spec_id: str
-    relation_id: str
-    task_id: str
-    task_unit_id: str
-    prompt_tsg_id: str
-    predicate_version: str
-    control_binding_ids: tuple[str, str]
-    state: QueryState
-    reasons: tuple[str, ...]
-    evidence_node_ids: tuple[str, ...]
-    evidence_edge_ids: tuple[str, ...]
-    outcomes_or_arms_used: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "pair_id",
-            "relation_spec_id",
-            "relation_id",
-            "task_id",
-            "task_unit_id",
-            "prompt_tsg_id",
-            "predicate_version",
-        ):
-            require_text(getattr(self, name), name)
-        if len(self.control_binding_ids) != 2:
-            raise ValueError("Pair relation evidence must bind exactly two controls")
-        for value in self.control_binding_ids:
-            require_text(value, "control_binding_id")
-        if type(self.state) is not QueryState:
-            raise TypeError("Pair structural relation state must be typed")
-        if self.reasons != tuple(sorted(set(self.reasons))):
-            raise ValueError("Pair structural relation reasons must be canonical")
-        if self.state in {QueryState.PRESENT, QueryState.ABSENT} and self.reasons:
-            raise ValueError("a resolved Pair structural relation cannot have unresolved reasons")
-        if self.state is QueryState.UNRESOLVED and not self.reasons:
-            raise ValueError("an unresolved Pair structural relation requires reasons")
-        for values, name in (
-            (self.evidence_node_ids, "relation evidence nodes"),
-            (self.evidence_edge_ids, "relation evidence edges"),
-        ):
-            if values != tuple(sorted(set(values))):
-                raise ValueError(f"{name} must be unique and canonical")
-        if self.state is QueryState.PRESENT and not self.evidence_node_ids:
-            raise ValueError("a present Pair structural relation needs graph evidence")
-        if self.outcomes_or_arms_used is not False:
-            raise ValueError("Pair structural relation evidence cannot use outcomes or arms")
-
-    @property
-    def evidence_id(self) -> str:
-        return content_id("pair_structural_relation_evidence_", self)
-
-
 def validate_prompt_control_binding(
     graph: PromptTSG,
     binding: PromptControlBinding,
@@ -531,246 +599,6 @@ def validate_prompt_control_binding(
             edge = edges[edge_id]
             if edge.source_id != source_id or edge.target_id != target_id:
                 raise MechanismRegistryError("control path edge order does not replay")
-
-
-def evaluate_pair_structural_relation(
-    *,
-    pair_id: str,
-    relation_spec_id: str,
-    relation: PairRelation,
-    task_unit_id: str,
-    graph: PromptTSG,
-    factor_1_id: str,
-    factor_2_id: str,
-    factor_1_bindings: Sequence[PromptControlBinding],
-    factor_2_bindings: Sequence[PromptControlBinding],
-) -> PairStructuralRelationEvidence:
-    """Evaluate one neutral relation after compatibility, without outcomes or arms."""
-
-    _validate_pair_structural_relation(relation)
-    for value, name in (
-        (pair_id, "pair_id"),
-        (relation_spec_id, "relation_spec_id"),
-        (task_unit_id, "task_unit_id"),
-        (factor_1_id, "factor_1_id"),
-        (factor_2_id, "factor_2_id"),
-    ):
-        require_text(value, name)
-    if factor_1_id == factor_2_id:
-        raise ValueError("Pair structural relation requires two distinct factors")
-    first = tuple(factor_1_bindings)
-    second = tuple(factor_2_bindings)
-    if any(item.feature_id != factor_1_id for item in first) or any(
-        item.feature_id != factor_2_id for item in second
-    ):
-        raise MechanismRegistryError("control bindings drift from the declared Pair factors")
-    for binding in (*first, *second):
-        if binding.task_unit_id != task_unit_id:
-            raise MechanismRegistryError("control binding task-unit identity drift")
-        validate_prompt_control_binding(graph, binding)
-
-    reasons = set()
-    if len(first) != 1 or len(second) != 1:
-        reasons.add(
-            "multiple_control_bindings"
-            if len(first) > 1 or len(second) > 1
-            else "missing_control_binding"
-        )
-    if factor_1_id in graph.unresolved_semantics or factor_2_id in graph.unresolved_semantics:
-        reasons.add("unresolved_control_semantics")
-    bindings = tuple(sorted((*first, *second), key=lambda item: item.feature_id))
-    node_by_id = {item.node_id: item for item in graph.nodes}
-    relevant_semantics = {
-        node_by_id[node_id].semantic_id
-        for binding in bindings
-        for node_id in (
-            binding.control_node_id,
-            *binding.source_node_ids,
-            *binding.sink_node_ids,
-            *binding.surface_node_ids,
-            *binding.alternative_group_node_ids,
-        )
-    }
-    if any(
-        source_semantic in relevant_semantics
-        or target_semantic in relevant_semantics
-        for source_semantic, _edge_type, target_semantic in graph.unresolved_relations
-    ):
-        reasons.add("unresolved_pair_relation")
-    binding_ids = (
-        (
-            first[0].control_binding_id
-            if len(first) == 1
-            else content_id(
-                "factor_control_binding_set_",
-                tuple(sorted(item.control_binding_id for item in first)),
-            )
-        ),
-        (
-            second[0].control_binding_id
-            if len(second) == 1
-            else content_id(
-                "factor_control_binding_set_",
-                tuple(sorted(item.control_binding_id for item in second)),
-            )
-        ),
-    )
-    evidence_nodes = tuple(
-        sorted(
-            {
-                node_id
-                for binding in bindings
-                for node_id in (
-                    binding.control_node_id,
-                    *binding.source_node_ids,
-                    *binding.sink_node_ids,
-                    *binding.surface_node_ids,
-                    *binding.alternative_group_node_ids,
-                    *(node for path in binding.paths for node in path.node_ids),
-                )
-            }
-        )
-    )
-    evidence_edges = tuple(
-        sorted(
-            {
-                edge_id
-                for binding in bindings
-                for path in binding.paths
-                for edge_id in path.edge_ids
-            }
-        )
-    )
-    if reasons:
-        state = QueryState.UNRESOLVED
-    else:
-        left, right = first[0], second[0]
-        predicate = {
-            PairRelation.SAME_FLOW: bool(
-                {item.path_id for item in left.paths}
-                & {item.path_id for item in right.paths}
-            ),
-            PairRelation.SHARED_SINK: bool(
-                set(left.sink_node_ids) & set(right.sink_node_ids)
-            ),
-            PairRelation.DISTINCT_CONTROL_POINTS: (
-                left.control_node_id != right.control_node_id
-                and not set(left.surface_node_ids) & set(right.surface_node_ids)
-            ),
-            PairRelation.ALTERNATIVE_CONTROLS: (
-                left.control_node_id != right.control_node_id
-                and not set(left.surface_node_ids) & set(right.surface_node_ids)
-                and bool(
-                    set(left.alternative_group_node_ids)
-                    & set(right.alternative_group_node_ids)
-                )
-            ),
-        }[relation]
-        state = QueryState.PRESENT if predicate else QueryState.ABSENT
-    return PairStructuralRelationEvidence(
-        pair_id,
-        relation_spec_id,
-        relation.value,
-        graph.task_id,
-        task_unit_id,
-        graph.tsg_id,
-        "prompt_tsg_pair_relation_v1",
-        binding_ids,
-        state,
-        tuple(sorted(reasons)),
-        evidence_nodes,
-        evidence_edges,
-    )
-
-
-class FactorialCompatibility(StrEnum):
-    COMPATIBLE = "compatible"
-    NESTED = "nested"
-    MUTUALLY_EXCLUSIVE = "mutually_exclusive"
-    ENTAILMENT_COLLAPSE = "entailment_collapse"
-    CONFLICTING = "conflicting"
-    UNRESOLVED = "unresolved"
-
-
-@dataclass(frozen=True, slots=True)
-class PairCompatibilityDecision:
-    """Outcome-blind edit-surface decision independent of relation support."""
-
-    policy: PairPolicyKey
-    decision: FactorialCompatibility
-    rule_id: str
-    target_surface_ids: tuple[str, str]
-    evidence_sha256: str
-    outcomes_or_arms_used: bool = False
-
-    def __post_init__(self) -> None:
-        if type(self.policy) is not PairPolicyKey:
-            raise TypeError("compatibility policy must be a PairPolicyKey")
-        if type(self.decision) is not FactorialCompatibility:
-            raise TypeError("compatibility decision must be typed")
-        require_text(self.rule_id, "compatibility rule_id")
-        if (
-            len(self.target_surface_ids) != 2
-            or tuple(sorted(self.target_surface_ids)) != self.target_surface_ids
-            or len(set(self.target_surface_ids)) != 2
-        ):
-            raise ValueError("compatibility target surfaces must be two distinct sorted IDs")
-        for value in self.target_surface_ids:
-            require_text(value, "compatibility target surface")
-        _require_digest(self.evidence_sha256, "compatibility evidence")
-        if self.outcomes_or_arms_used is not False:
-            raise ValueError("factorial compatibility cannot use outcomes or arms")
-
-    @property
-    def policy_key(self) -> str:
-        return self.policy.policy_key
-
-    @property
-    def decision_id(self) -> str:
-        return content_id("pair_compatibility_decision_", self)
-
-
-@dataclass(frozen=True, slots=True)
-class PairRelationEvidence:
-    """Recomputable task-side evidence for one pair relation contract."""
-
-    pair_id: str
-    relation_spec_id: str
-    relation_id: str
-    task_id: str
-    task_unit_id: str
-    prompt_tsg_id: str
-    evidence_contract_id: str
-    state: QueryState
-    evidence_node_ids: tuple[str, ...]
-    evidence_edge_ids: tuple[str, ...]
-    outcomes_or_arms_used: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "pair_id",
-            "relation_spec_id",
-            "relation_id",
-            "task_id",
-            "task_unit_id",
-            "prompt_tsg_id",
-            "evidence_contract_id",
-        ):
-            require_text(getattr(self, name), name)
-        if type(self.state) is not QueryState:
-            raise TypeError("relation evidence state must be QueryState")
-        if self.evidence_node_ids != tuple(sorted(set(self.evidence_node_ids))) or (
-            self.evidence_edge_ids != tuple(sorted(set(self.evidence_edge_ids)))
-        ):
-            raise ValueError("relation evidence IDs must be unique and sorted")
-        if self.state is QueryState.PRESENT and not self.evidence_node_ids:
-            raise ValueError("present relation evidence must identify Prompt-TSG nodes")
-        if self.outcomes_or_arms_used is not False:
-            raise ValueError("pair relation evidence cannot use outcomes or arms")
-
-    @property
-    def evidence_id(self) -> str:
-        return content_id("pair_relation_evidence_", self)
 
 
 def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:
@@ -923,15 +751,8 @@ def tsg_mechanism_binding(
 
 __all__ = [
     "ControlPath",
-    "FactorialCompatibility",
     "MechanismRegistryError",
-    "PAIR_STRUCTURAL_RELATIONS",
-    "PairCompatibilityDecision",
-    "PairRelation",
-    "PairRelationEvidence",
-    "PairStructuralRelationEvidence",
     "PromptControlBinding",
-    "evaluate_pair_structural_relation",
     "load_mechanism_registry",
     "mechanism_binding_id",
     "tsg_mechanism_binding",

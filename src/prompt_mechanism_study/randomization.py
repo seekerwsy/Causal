@@ -24,10 +24,6 @@ class ConfirmatoryArm(StrEnum):
     ATOMIC_NOOP = "atomic_noop"
     ATOMIC_PLACEBO = "atomic_placebo"
     ATOMIC_GENERIC = "atomic_generic"
-    PAIR_00 = "pair_00"
-    PAIR_10 = "pair_10"
-    PAIR_01 = "pair_01"
-    PAIR_11 = "pair_11"
 
 
 ATOMIC_CONFIRMATORY_ARMS = (
@@ -35,12 +31,6 @@ ATOMIC_CONFIRMATORY_ARMS = (
     ConfirmatoryArm.ATOMIC_NOOP,
     ConfirmatoryArm.ATOMIC_PLACEBO,
     ConfirmatoryArm.ATOMIC_GENERIC,
-)
-PAIR_CONFIRMATORY_ARMS = (
-    ConfirmatoryArm.PAIR_00,
-    ConfirmatoryArm.PAIR_10,
-    ConfirmatoryArm.PAIR_01,
-    ConfirmatoryArm.PAIR_11,
 )
 
 
@@ -53,7 +43,6 @@ class TargetRandomizationPlan:
     assignment_seed: int
     provider_seed_root: int | None
     atomic_total_block_slots: int
-    pair_total_block_slots: int
     realization_weights: tuple[tuple[str, str, float], ...]
     allocation_tasks: tuple[tuple[str, str, str], ...]
     algorithm_id: str = "sha256_ranked_complete_block_v1"
@@ -67,10 +56,7 @@ class TargetRandomizationPlan:
             type(self.provider_seed_root) is not int or self.provider_seed_root < 0
         ):
             raise ValueError("target provider seed root must be null or nonnegative")
-        for value, name in (
-            (self.atomic_total_block_slots, "Atomic total block slots"),
-            (self.pair_total_block_slots, "Pair total block slots"),
-        ):
+        for value, name in ((self.atomic_total_block_slots, "Atomic total block slots"),):
             if type(value) is not int or value <= 0 or value % 4:
                 raise ValueError(f"{name} must be a positive multiple of four")
         if self.algorithm_id != "sha256_ranked_complete_block_v1":
@@ -81,14 +67,19 @@ class TargetRandomizationPlan:
         for policy, realization, q in self.realization_weights:
             require_text(policy, "realization policy")
             require_text(realization, "realization ID")
-            if realization in weights[policy] or type(q) is not float or not 0 < q <= 1:
+            if realization in weights[policy] or type(q) is not float or (not 0 < q <= 1):
                 raise ValueError("realization weights must be unique positive probabilities")
             weights[policy][realization] = q
-        if any(not math.isclose(sum(q.values()), 1, rel_tol=0, abs_tol=1e-12) for q in weights.values()):
+        if any(
+            (
+                not math.isclose(sum(q.values()), 1, rel_tol=0, abs_tol=1e-12)
+                for q in weights.values()
+            )
+        ):
             raise ValueError("every frozen realization distribution must sum to one")
         if self.allocation_tasks != tuple(sorted(set(self.allocation_tasks))):
             raise ValueError("allocation tasks require canonical unique order")
-        coordinates, strata = set(), {}
+        coordinates, strata = (set(), {})
         for policy, unit, stratum in self.allocation_tasks:
             for value in (policy, unit, stratum):
                 require_text(value, "allocation task coordinate")
@@ -98,7 +89,9 @@ class TargetRandomizationPlan:
             if strata.setdefault(unit, stratum) != stratum:
                 raise ValueError("shared task units cannot cross allocation strata")
         if {policy for policy, _, _ in self.allocation_tasks} != set(weights):
-            raise ValueError("allocation tasks and realization distributions must cover the same policies")
+            raise ValueError(
+                "allocation tasks and realization distributions must cover the same policies"
+            )
 
     @property
     def target_randomization_plan_id(self) -> str:
@@ -185,18 +178,14 @@ class TargetTaskBundle:
         ):
             if type(value) is not float or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a finite positive float")
-        expected = (
-            ATOMIC_CONFIRMATORY_ARMS
-            if self.track is PolicyTrack.ATOMIC
-            else PAIR_CONFIRMATORY_ARMS
-        )
+        expected = ATOMIC_CONFIRMATORY_ARMS
         if self.exclusion_reason is not None:
             require_text(self.exclusion_reason, "task bundle exclusion reason")
             if self.variants:
                 raise ValueError("an excluded task bundle cannot carry executable variants")
-        elif tuple(item.arm for item in self.variants) != expected:
+        elif tuple((item.arm for item in self.variants)) != expected:
             raise ValueError("target task bundle must contain its four arms in canonical order")
-        if any(type(item) is not TargetTaskArmVariant for item in self.variants):
+        if any((type(item) is not TargetTaskArmVariant for item in self.variants)):
             raise TypeError("target task-bundle variants must be typed")
 
     @property
@@ -245,11 +234,7 @@ class AssignedArmITTRecord:
             require_text(getattr(self, name), name)
         if type(self.track) is not PolicyTrack or type(self.arm) is not ConfirmatoryArm:
             raise TypeError("assigned track and arm must be typed")
-        allowed = (
-            ATOMIC_CONFIRMATORY_ARMS
-            if self.track is PolicyTrack.ATOMIC
-            else PAIR_CONFIRMATORY_ARMS
-        )
+        allowed = ATOMIC_CONFIRMATORY_ARMS
         if self.arm not in allowed:
             raise ValueError("assigned arm does not belong to its policy track")
         if type(self.request_randomness_slot) is not int or self.request_randomness_slot < 0:
@@ -301,7 +286,6 @@ def randomize_target_confirmation(
     task_bundles: Sequence[TargetTaskBundle],
 ) -> tuple[AssignedArmITTRecord, ...]:
     """Deterministically assign balanced target arms without a model cross-product."""
-
     if type(dispatch) is not ConfirmationDispatchManifest:
         raise TypeError("target randomization requires a confirmation dispatch manifest")
     if type(plan) is not TargetRandomizationPlan:
@@ -317,12 +301,12 @@ def randomize_target_confirmation(
             key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
         )
     )
-    if any(type(item) is not TargetTaskBundle for item in frozen_bundles):
+    if any((type(item) is not TargetTaskBundle for item in frozen_bundles)):
         raise TypeError("target randomization requires typed task bundles")
-    bundle_ids = tuple(item.target_task_bundle_id for item in frozen_bundles)
+    bundle_ids = tuple((item.target_task_bundle_id for item in frozen_bundles))
     if len(set(bundle_ids)) != len(bundle_ids):
         raise ValueError("target task bundles must be unique")
-    coordinates = tuple((item.policy_key, item.task_unit_id) for item in frozen_bundles)
+    coordinates = tuple(((item.policy_key, item.task_unit_id) for item in frozen_bundles))
     if len(set(coordinates)) != len(coordinates):
         raise ValueError("one policy/task coordinate may have only one realization bundle")
     allocations = allocate_target_realizations(plan)
@@ -334,14 +318,11 @@ def randomize_target_confirmation(
         coordinate = (bundle.policy_key, bundle.task_unit_id)
         if (
             bundle.realization_id != allocations[coordinate]
-            or bundle.realization_weight != weights[(bundle.policy_key, bundle.realization_id)]
+            or bundle.realization_weight != weights[bundle.policy_key, bundle.realization_id]
             or bundle.stratum_id != strata[coordinate]
         ):
             raise ValueError("task bundle failed frozen realization allocation replay")
-
-    successful = tuple(
-        item for item in dispatch.records if item.status is BridgeStatus.SUCCESS
-    )
+    successful = tuple((item for item in dispatch.records if item.status is BridgeStatus.SUCCESS))
     successful_policy_keys = {item.policy_key for item in successful}
     if {item.policy_key for item in frozen_bundles} != successful_policy_keys:
         raise ValueError("task bundles must exactly cover successfully protocolized policies")
@@ -349,7 +330,7 @@ def randomize_target_confirmation(
     for entry in dispatch.union.entries:
         previous = track_by_policy.setdefault(entry.candidate.policy_key, entry.track)
         if previous is not entry.track:
-            raise ValueError("one semantic policy cannot cross Atomic and Pair tracks")
+            raise ValueError("one semantic policy cannot cross Atomic tracks")
     protocol_by_policy: dict[str, str] = {}
     for record in successful:
         previous = protocol_by_policy.setdefault(record.policy_key, record.protocol_record_id)
@@ -361,7 +342,6 @@ def randomize_target_confirmation(
             or bundle.protocol_record_id != protocol_by_policy[bundle.policy_key]
         ):
             raise ValueError("target task bundle drifted from shared policy protocolization")
-
     bundles_by_policy: dict[str, list[TargetTaskBundle]] = defaultdict(list)
     for bundle in frozen_bundles:
         if bundle.exclusion_reason is None:
@@ -369,31 +349,27 @@ def randomize_target_confirmation(
     assignments = []
     for record in successful:
         track = track_by_policy[record.policy_key]
-        arms = ATOMIC_CONFIRMATORY_ARMS if track is PolicyTrack.ATOMIC else PAIR_CONFIRMATORY_ARMS
-        slot_count = (
-            plan.atomic_total_block_slots
-            if track is PolicyTrack.ATOMIC
-            else plan.pair_total_block_slots
-        )
+        arms = ATOMIC_CONFIRMATORY_ARMS
+        slot_count = plan.atomic_total_block_slots
         arm_copies = tuple(
-            (arm, repeat)
-            for repeat in range(slot_count // len(arms))
-            for arm in arms
+            ((arm, repeat) for repeat in range(slot_count // len(arms)) for arm in arms)
         )
         for bundle in bundles_by_policy[record.policy_key]:
             block_id = _target_assigned_block_id(record, track, bundle)
             ordered_arms = tuple(
-                arm
-                for arm, repeat in sorted(
-                    arm_copies,
-                    key=lambda item: content_hash(
-                        {
-                            "assignment_seed": plan.assignment_seed,
-                            "block_id": block_id,
-                            "arm": item[0],
-                            "repeat": item[1],
-                        }
-                    ),
+                (
+                    arm
+                    for arm, repeat in sorted(
+                        arm_copies,
+                        key=lambda item: content_hash(
+                            {
+                                "assignment_seed": plan.assignment_seed,
+                                "block_id": block_id,
+                                "arm": item[0],
+                                "repeat": item[1],
+                            }
+                        ),
+                    )
                 )
             )
             for request_slot, arm in enumerate(ordered_arms):
@@ -411,7 +387,7 @@ def randomize_target_confirmation(
                         )[:8],
                         16,
                     )
-                    & 0x7FFFFFFF
+                    & 2147483647
                 )
                 assignments.append(
                     AssignedArmITTRecord(

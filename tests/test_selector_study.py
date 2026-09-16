@@ -16,7 +16,6 @@ from prompt_mechanism_study.prioritization import (
     DiscoveryObservation,
     FixedSlotSource,
     PolicyTrack,
-    SelectorSlot,
     SlotStatus,
     atomic_preoutcome_observations,
     atomic_preoutcome_data_sha256,
@@ -412,20 +411,8 @@ def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
         plan,
         evidence,
         fold_freeze=freeze_atomic_candidate_folds(
-            universe,
-            atomic_preoutcome_observations(observations),
-            plan,
+            universe, atomic_preoutcome_observations(observations), plan
         ),
-    )
-    pair_record = ModelBoundCandidateRecord(
-        "pair-policy-synthetic",
-        "model-b",
-        "phase-context-policy-v3",
-        "3.0",
-    )
-    pair_slots = (
-        SelectorSlot(1, SlotStatus.FILLED, pair_record.policy_key, None),
-        SelectorSlot(2, SlotStatus.NON_EVALUABLE, None, "pair_rd_non_evaluable"),
     )
     sources = (
         FixedSlotSource(
@@ -444,60 +431,22 @@ def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
             atomic.rd_only.slots,
             universe.model_bound_records,
         ),
-        FixedSlotSource(
-            PolicyTrack.PAIR,
-            "pair_full",
-            "model-b",
-            "pair-universe-synthetic",
-            pair_slots,
-            (pair_record,),
-        ),
-        FixedSlotSource(
-            PolicyTrack.PAIR,
-            "pair_no_relation",
-            "model-b",
-            "pair-universe-synthetic",
-            pair_slots,
-            (pair_record,),
-        ),
     )
-
-    ledger = freeze_fixed_slot_ledger(
-        "phase-context-policy-v3",
-        "3.0",
-        sources,
-    )
+    ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
     union = freeze_shared_confirmation_union(ledger)
     dispatch = freeze_confirmation_dispatch(
         union,
-        {
-            item.candidate_record_id: f"protocol-{index}"
-            for index, item in enumerate(union.entries)
-        },
+        {item.candidate_record_id: f"protocol-{index}" for index, item in enumerate(union.entries)},
     )
-
-    assert len(ledger.slots) == 8
-    assert sum(item.status is SlotStatus.NON_EVALUABLE for item in ledger.slots) == 2
-    assert {item.candidate.policy_key for item in union.entries} == {
-        first,
-        second,
-        pair_record.policy_key,
-    }
-    fanout = {
-        item.candidate_record_id: item.slot_ids for item in union.candidate_to_slots
-    }
-    first_record = next(
-        item for item in universe.model_bound_records if item.policy_key == first
-    )
+    assert len(ledger.slots) == 4
+    assert sum((item.status is SlotStatus.NON_EVALUABLE for item in ledger.slots)) == 0
+    assert {item.candidate.policy_key for item in union.entries} == {first, second}
+    fanout = {item.candidate_record_id: item.slot_ids for item in union.candidate_to_slots}
+    first_record = next((item for item in universe.model_bound_records if item.policy_key == first))
     assert len(fanout[first_record.candidate_record_id]) == 2
-    assert len(fanout[pair_record.candidate_record_id]) == 2
     assert len(dispatch.records) == len(union.entries)
-    assert {item.model_id for item in dispatch.records} == {"model-a", "model-b"}
-    assert all(item.dispatch_count == 1 for item in dispatch.records)
-
+    assert {item.model_id for item in dispatch.records} == {"model-a"}
+    assert all((item.dispatch_count == 1 for item in dispatch.records))
     tampered = replace(dispatch.records[0], model_id="wrong-model")
     with pytest.raises(ValueError, match="model-bound effect coordinate"):
-        ConfirmationDispatchManifest(
-            union,
-            (tampered, *dispatch.records[1:]),
-        )
+        ConfirmationDispatchManifest(union, (tampered, *dispatch.records[1:]))

@@ -175,13 +175,10 @@ def _build_target_rq_tables(
     """Assemble tables from evidence independently checked by this invocation."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[Any]] = {}
     for slot in yields.slots:
-        slots_by_selector.setdefault(
-            (slot.track, slot.model_id, slot.selector_id), []
-        ).append(slot)
+        slots_by_selector.setdefault((slot.track, slot.model_id, slot.selector_id), []).append(slot)
     selector_rows = []
     for selector in sorted(
-        yields.selectors,
-        key=lambda item: (item.track.value, item.model_id, item.selector_id),
+        yields.selectors, key=lambda item: (item.track.value, item.model_id, item.selector_id)
     ):
         key = (selector.track, selector.model_id, selector.selector_id)
         slots = sorted(slots_by_selector.get(key, []), key=lambda item: item.rank)
@@ -189,15 +186,17 @@ def _build_target_rq_tables(
             raise ValueError("target selector table lost a fixed K slot")
         status_counts = Counter(
             (
-                slot.effect_status.value
-                if slot.effect_status is not None
-                else (
-                    "SELECTOR_EMPTY_OR_FAILURE"
-                    if slot.slot_status is not SlotStatus.FILLED
-                    else "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
+                (
+                    slot.effect_status.value
+                    if slot.effect_status is not None
+                    else (
+                        "SELECTOR_EMPTY_OR_FAILURE"
+                        if slot.slot_status is not SlotStatus.FILLED
+                        else "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
+                    )
                 )
+                for slot in slots
             )
-            for slot in slots
         )
         selector_rows.append(
             {
@@ -216,29 +215,19 @@ def _build_target_rq_tables(
                 "practically_null_slots": status_counts[
                     ConfirmatoryEffectStatus.PRACTICALLY_NULL.value
                 ],
-                "inconclusive_slots": status_counts[
-                    ConfirmatoryEffectStatus.INCONCLUSIVE.value
-                ],
-                "non_evaluable_slots": status_counts[
-                    ConfirmatoryEffectStatus.NON_EVALUABLE.value
-                ],
-                "selector_empty_or_failure_slots": status_counts[
-                    "SELECTOR_EMPTY_OR_FAILURE"
-                ],
+                "inconclusive_slots": status_counts[ConfirmatoryEffectStatus.INCONCLUSIVE.value],
+                "non_evaluable_slots": status_counts[ConfirmatoryEffectStatus.NON_EVALUABLE.value],
+                "selector_empty_or_failure_slots": status_counts["SELECTOR_EMPTY_OR_FAILURE"],
                 "bridge_or_protocolization_failure_slots": status_counts[
                     "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
                 ],
             }
         )
     selector_by_key = {
-        (row["track"], row["model_id"], row["selector_id"]): row
-        for row in selector_rows
+        (row["track"], row["model_id"], row["selector_id"]): row for row in selector_rows
     }
     rq2_rows = []
-    for track, full_id, ablation_id in (
-        (PolicyTrack.ATOMIC, "atomic_full", "atomic_rd_only"),
-        (PolicyTrack.PAIR, "pair_full", "pair_no_relation"),
-    ):
+    for track, full_id, ablation_id in ((PolicyTrack.ATOMIC, "atomic_full", "atomic_rd_only"),):
         models = sorted(
             {
                 model_id
@@ -250,9 +239,7 @@ def _build_target_rq_tables(
             full = selector_by_key.get((track.value, model_id, full_id))
             ablation = selector_by_key.get((track.value, model_id, ablation_id))
             if full is None or ablation is None or full["top_k"] != ablation["top_k"]:
-                raise ValueError(
-                    "RQ2 requires both sole-difference variants with the same K"
-                )
+                raise ValueError("RQ2 requires both sole-difference variants with the same K")
             rq2_rows.append(
                 {
                     "track": track.value,
@@ -261,16 +248,10 @@ def _build_target_rq_tables(
                     "ablation_selector_id": ablation_id,
                     "top_k": full["top_k"],
                     "full_meaningful_yield_at_k": full["meaningful_yield_at_k"],
-                    "ablation_meaningful_yield_at_k": ablation[
-                        "meaningful_yield_at_k"
-                    ],
-                    "full_minus_ablation_yield_at_k": (
-                        full["meaningful_yield_at_k"]
-                        - ablation["meaningful_yield_at_k"]
-                    ),
-                    "comparison_semantics": (
-                        "descriptive_fixed_discovery_split_no_rank_pairing"
-                    ),
+                    "ablation_meaningful_yield_at_k": ablation["meaningful_yield_at_k"],
+                    "full_minus_ablation_yield_at_k": full["meaningful_yield_at_k"]
+                    - ablation["meaningful_yield_at_k"],
+                    "comparison_semantics": "descriptive_fixed_discovery_split_no_rank_pairing",
                 }
             )
     family_rows = []
@@ -294,11 +275,7 @@ def _build_target_rq_tables(
                     "effect_coordinate_id": estimate.effect_coordinate_id,
                     "policy_key": estimate.policy_key,
                     "model_id": estimate.model_id,
-                    "estimand": (
-                        "assigned_arm_task_unit_target_minus_noop_itt"
-                        if estimate.track is PolicyTrack.ATOMIC
-                        else "assigned_cell_task_unit_risk_difference_interaction_itt"
-                    ),
+                    "estimand": "assigned_arm_task_unit_target_minus_noop_itt",
                     "primary_endpoint": "oracle_evaluable_secure_code_yield",
                     "point": estimate.point,
                     "standard_error": estimate.standard_error,
@@ -311,32 +288,6 @@ def _build_target_rq_tables(
                     "reasons": list(estimate.reasons),
                     "task_units": estimate.task_units,
                     "assignments": estimate.assignments,
-                    "response_pattern_classification_status": (
-                        estimate.response_pattern.status.value
-                    ),
-                    "response_pattern": estimate.response_pattern.label,
-                    "response_pattern_predicate_sha256": (
-                        estimate.response_pattern.predicate_sha256
-                    ),
-                    "response_pattern_reasons": list(
-                        estimate.response_pattern.reasons
-                    ),
-                    "pair_response_surface": (
-                        None
-                        if estimate.response_pattern.surface is None
-                        else {
-                            "mean_00": estimate.response_pattern.surface.mean_00,
-                            "mean_10": estimate.response_pattern.surface.mean_10,
-                            "mean_01": estimate.response_pattern.surface.mean_01,
-                            "mean_11": estimate.response_pattern.surface.mean_11,
-                            "factor_1_at_0": estimate.response_pattern.surface.factor_1_at_0,
-                            "factor_2_at_0": estimate.response_pattern.surface.factor_2_at_0,
-                            "joint": estimate.response_pattern.surface.joint,
-                            "factor_1_at_1": estimate.response_pattern.surface.factor_1_at_1,
-                            "factor_2_at_1": estimate.response_pattern.surface.factor_2_at_1,
-                            "interaction": estimate.response_pattern.surface.interaction,
-                        }
-                    ),
                     "arms": [
                         {
                             "arm": arm.arm.value,
@@ -346,9 +297,7 @@ def _build_target_rq_tables(
                             "oracle_evaluability": arm.oracle_evaluability,
                             "functionality_yield": arm.functionality_yield,
                             "joint_success_yield": arm.joint_success_yield,
-                            "oracle_unknown_valid_assignments": (
-                                arm.oracle_unknown_valid_assignments
-                            ),
+                            "oracle_unknown_valid_assignments": arm.oracle_unknown_valid_assignments,
                             "terminal_assignments": arm.terminal_assignments,
                         }
                         for arm in estimate.arm_summaries
@@ -360,30 +309,26 @@ def _build_target_rq_tables(
         if type(authorization) is not FormalReportAuthorization:
             raise TypeError("target RQ authorization must be a formal receipt")
         if (
-            authorization.protocol_id
-            != evidence.ledger.dispatch.union.ledger.protocol_id
+            authorization.protocol_id != evidence.ledger.dispatch.union.ledger.protocol_id
             or authorization.shared_evidence_record.artifact_id
             != evidence.shared_evidence_record_id
             or authorization.shared_evidence_record.sha256 != content_hash(evidence)
-            or authorization.target_selector_yield_result.artifact_id
-            != yields.target_selector_yield_result_id
-            or authorization.target_selector_yield_result.sha256
-            != content_hash(yields)
-            or authorization.evidence_ledger.artifact_id
-            != evidence.ledger.evidence_ledger_id
-            or authorization.evidence_ledger.sha256 != content_hash(evidence.ledger)
-            or authorization.evidence_level != evidence.evidence_level.value
-            or authorization.scientific_claim_allowed is not True
-        ):
-            raise ValueError(
-                "formal report authorization drifted from target evidence"
+            or (
+                authorization.target_selector_yield_result.artifact_id
+                != yields.target_selector_yield_result_id
             )
+            or (authorization.target_selector_yield_result.sha256 != content_hash(yields))
+            or (authorization.evidence_ledger.artifact_id != evidence.ledger.evidence_ledger_id)
+            or (authorization.evidence_ledger.sha256 != content_hash(evidence.ledger))
+            or (authorization.evidence_level != evidence.evidence_level.value)
+            or (authorization.scientific_claim_allowed is not True)
+        ):
+            raise ValueError("formal report authorization drifted from target evidence")
         report_status = "FORMAL_REPORT_AUTHORIZED"
     else:
         report_status = (
             "EXECUTED_EVIDENCE_AWAITING_FORMAL_REPORT_AUTHORIZATION"
-            if evidence.evidence_level
-            in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
+            if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
             else "NON_CLAIM_TEST_ARTIFACT"
         )
     report: dict[str, Any] = {
@@ -395,22 +340,16 @@ def _build_target_rq_tables(
         "report_status": report_status,
         "scientific_claim_allowed": claim_allowed,
         "formal_report_authorization_id": (
-            None
-            if authorization is None
-            else authorization.formal_report_authorization_id
+            None if authorization is None else authorization.formal_report_authorization_id
         ),
         "endpoint_order": [item.value for item in evidence.plan.metrics],
         "context_analysis_status": evidence.plan.context_analysis.status.value,
         "context_modifier_rows": [],
-        "pair_response_pattern_plan_status": (
-            evidence.plan.pair_response_patterns.status.value
-        ),
         "rq1_selector_rows": selector_rows,
         "rq2_full_minus_ablation_rows": rq2_rows,
         "primary_family_rows": family_rows,
         "unique_effect_rows": sorted(
-            effect_rows,
-            key=lambda row: (row["track"], row["candidate_record_id"]),
+            effect_rows, key=lambda row: (row["track"], row["candidate_record_id"])
         ),
         "independent_verification": verification,
     }

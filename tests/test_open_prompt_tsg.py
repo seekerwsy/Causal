@@ -10,8 +10,11 @@ from annotation_fixture import (
     scope_answer,
 )
 from prompt_mechanism_study.prompt_contract import (
-    compile_task_context_contract, open_concept_catalog, open_contract_from_response,
-    task_context_contract_from_record, task_context_contract_record,
+    compile_task_context_contract,
+    open_concept_catalog,
+    open_contract_from_response,
+    task_context_contract_from_record,
+    task_context_contract_record,
 )
 from prompt_mechanism_study.prompt_contract_extract import (
     PromptContractExtractionError,
@@ -38,15 +41,16 @@ from prompt_mechanism_study.prompt_tsg import (
     FeatureScope,
     build_prompt_tsg,
 )
-from prompt_mechanism_study.mechanisms import bind_task_hypothesis
 from prompt_mechanism_study.prompt_contract_qualification import (
-    evaluate_open_graph_expectations, evaluate_open_semantic_case, open_graph_assertions,
-    qualify_prompt_contract_extractor, representation_implementation_identity,
+    evaluate_open_graph_expectations,
+    evaluate_open_semantic_case,
+    open_graph_assertions,
+    qualify_prompt_contract_extractor,
+    representation_implementation_identity,
     PromptContractQualificationError,
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.task_input import generation_template_facts
-
 
 PROMPT = "Read external x in query A. Read external y in query B. Parameterize query B."
 
@@ -420,31 +424,52 @@ def _scoped_graph(*, bound_inputs=("x",), source_prefix="", source_query=False,
     return source, catalog, graph, ids
 
 
-def test_atomic_and_pair_source_gates_use_exact_scopes_without_requiring_control_text():
+def test_atomic_source_gates_use_exact_scopes_without_requiring_control_text():
     from prompt_mechanism_study.representation import (
-        AnalysisScope, AtomicPolicyKey, Operation, PolicyFactor, pair_policy_key, freeze_source_eligibility,
+        AnalysisScope,
+        AtomicPolicyKey,
+        Operation,
+        PolicyFactor,
+        freeze_source_eligibility,
     )
+
     prompt, catalog, graph, ids = _scoped_graph(source_query=True)
     scope = AnalysisScope("sql-inputs", "sql", ("python",), ("database",), ("query",))
-    common = dict(task_id=graph.task_id, task_unit_id="unit", prompt=prompt, graph=graph, catalog=catalog,
-                  eligibility_policy_sha256=content_hash("prospective scoped-source rule"))
+    common = dict(
+        task_id=graph.task_id,
+        task_unit_id="unit",
+        prompt=prompt,
+        graph=graph,
+        catalog=catalog,
+        eligibility_policy_sha256=content_hash("prospective scoped-source rule"),
+    )
     x = FeatureScope(ids["a"], (ids["x"],), (ids["c"],))
     y = FeatureScope(ids["a"], (ids["y"],), (ids["c"],))
-    z = FeatureScope(ids["b"], (ids["z"],))
     add = AtomicPolicyKey(scope, PolicyFactor("parameter_binding", Operation.ADD), "secure_yield")
     remove = replace(add, factor=PolicyFactor("parameter_binding", Operation.REMOVE))
     assert freeze_source_eligibility(add, factor_scope=y, **common).eligible
-    assert freeze_source_eligibility(add, factor_scope=x, **common).exclusion_reason == "add_source_present"
+    assert (
+        freeze_source_eligibility(add, factor_scope=x, **common).exclusion_reason
+        == "add_source_present"
+    )
     removed = freeze_source_eligibility(remove, factor_scope=x, **common)
     assert removed.eligible and removed.target_evidence_node_ids == (ids["p"],)
-    assert freeze_source_eligibility(add, factor_scope=FeatureScope(ids["a"]), **common).exclusion_reason == "add_source_unresolved"
-    assert freeze_source_eligibility(add, factor_scope=None, **common).exclusion_reason == "factor_scope_unresolved"
-    assert freeze_source_eligibility(add, factor_scope=None, **{**common, "graph": None}).exclusion_reason == "source_graph_unavailable"
-    pair = pair_policy_key(scope, (add.factor, PolicyFactor("shell_syntax_rejection", Operation.REMOVE)), outcome_id="secure_yield")
-    left = freeze_source_eligibility(pair, factor_feature_id="parameter_binding", factor_scope=y, **common)
-    right = freeze_source_eligibility(pair, factor_feature_id="shell_syntax_rejection", factor_scope=z, **common)
-    assert left.eligible and right.eligible and left.policy_key == right.policy_key == pair.policy_key
-    assert left.factor_scope.operation_node_id != right.factor_scope.operation_node_id
+    assert (
+        freeze_source_eligibility(
+            add, factor_scope=FeatureScope(ids["a"]), **common
+        ).exclusion_reason
+        == "add_source_unresolved"
+    )
+    assert (
+        freeze_source_eligibility(add, factor_scope=None, **common).exclusion_reason
+        == "factor_scope_unresolved"
+    )
+    assert (
+        freeze_source_eligibility(
+            add, factor_scope=None, **{**common, "graph": None}
+        ).exclusion_reason
+        == "source_graph_unavailable"
+    )
     with pytest.raises(ValueError, match="different task"):
         freeze_source_eligibility(add, factor_scope=y, **{**common, "task_id": "another-task"})
 
@@ -453,50 +478,112 @@ def _scoped_support_fixture(tmp_path, *, missing_graph=False):
     """Eight artificial cells verify accounting only, never natural discovery support."""
     from prompt_mechanism_study.artifact_io import write_bundle, bundle_digest
     from prompt_mechanism_study.records import canonical_value
-    from prompt_mechanism_study.representation import AnalysisScope, AtomicPolicyKey, Operation, PolicyFactor, pair_policy_key
+    from prompt_mechanism_study.representation import (
+        AnalysisScope,
+        AtomicPolicyKey,
+        Operation,
+        PolicyFactor,
+    )
+
     scope = AnalysisScope("sql-inputs", "sql", ("python",), ("database",), ("query",))
     add = AtomicPolicyKey(scope, PolicyFactor("parameter_binding", Operation.ADD), "secure_yield")
     remove = replace(add, factor=replace(add.factor, operation=Operation.REMOVE))
-    pair = pair_policy_key(scope, (add.factor, PolicyFactor("shell_syntax_rejection", Operation.REMOVE)), outcome_id="secure_yield")
-    tasks, graphs, bindings = [], [], []
+    tasks, graphs, bindings = ([], [], [])
     for first in (False, True):
         for second in (False, True):
             for replicate in range(2):
                 task_id = f"synthetic-{int(first)}{int(second)}-{replicate}"
-                prompt, catalog, graph, ids = _scoped_graph(bound_inputs=("x",) if first else ("y",),
-                    shell_required=second, task_id=task_id, source_query=True)
-                tasks.append(dict(task_id=task_id, task_unit_id=task_id, near_duplicate_group_id=task_id,
-                    prompt=prompt, language="python", api_family="database", task_archetype="query",
-                    source_lineage_id=f"synthetic-lineage-{replicate}", source_kind="synthetic_development",
-                    covariates=[["size", 1.0]]))
+                prompt, catalog, graph, ids = _scoped_graph(
+                    bound_inputs=("x",) if first else ("y",),
+                    shell_required=second,
+                    task_id=task_id,
+                    source_query=True,
+                )
+                tasks.append(
+                    dict(
+                        task_id=task_id,
+                        task_unit_id=task_id,
+                        near_duplicate_group_id=task_id,
+                        prompt=prompt,
+                        language="python",
+                        api_family="database",
+                        task_archetype="query",
+                        source_lineage_id=f"synthetic-lineage-{replicate}",
+                        source_kind="synthetic_development",
+                        covariates=[["size", 1.0]],
+                    )
+                )
                 graphs.append(prompt_tsg_record(graph))
-                bindings.append(dict(task_id=task_id, prompt_tsg_id=graph.tsg_id, factor_scopes=canonical_value({
-                    "parameter_binding": FeatureScope(ids["a"], (ids["x"],), (ids["c"],)),
-                    "shell_syntax_rejection": FeatureScope(ids["b"], (ids["z"],))})))
+                bindings.append(
+                    dict(
+                        task_id=task_id,
+                        prompt_tsg_id=graph.tsg_id,
+                        factor_scopes=canonical_value(
+                            {"parameter_binding": FeatureScope(ids["a"], (ids["x"],), (ids["c"],))}
+                        ),
+                    )
+                )
     if missing_graph:
-        tasks.append({**tasks[0], "task_id": "synthetic-failed", "task_unit_id": "synthetic-failed",
-                      "near_duplicate_group_id": "synthetic-failed"})
-        bindings.append(dict(task_id="synthetic-failed", prompt_tsg_id=None,
-            factor_scopes={"parameter_binding": None, "shell_syntax_rejection": None}))
+        tasks.append(
+            {
+                **tasks[0],
+                "task_id": "synthetic-failed",
+                "task_unit_id": "synthetic-failed",
+                "near_duplicate_group_id": "synthetic-failed",
+            }
+        )
+        bindings.append(
+            dict(
+                task_id="synthetic-failed",
+                prompt_tsg_id=None,
+                factor_scopes={"parameter_binding": None},
+            )
+        )
+
     def write(name, value):
         path = tmp_path / name
         path.write_text(json.dumps(canonical_value(value)), encoding="utf-8")
         return path
-    task_path, catalog_path = write("tasks.json", tasks), write("catalog.json", catalog)
+
+    task_path, catalog_path = (write("tasks.json", tasks), write("catalog.json", catalog))
     graph_bundle = write_bundle(tmp_path / "graphs", {"graphs.json": graphs})
-    config = dict(source_tasks_sha256=file_sha256(task_path), catalog_sha256=catalog_sha256(catalog),
-        graph_bundle_sha256=[bundle_digest(graph_bundle)], model_id="offline-model", covariate_names=["size"],
-        policies=canonical_value([add, remove, pair]), task_bindings=bindings,
-        arms_or_outcomes_used=False, scope_choice_used_feature_states=False,
-        factor_definitions={feature: dict(definition=f"Synthetic single requirement: {feature}",
-            scope_rule="Fixed named operation/input/condition; never select by feature state.",
-            atomicity_review="SOURCE_REVIEWED_SINGLE_REQUIREMENT") for feature in ("parameter_binding", "shell_syntax_rejection")},
-        support_rule=dict(minimum_state_task_units=2, minimum_shared_lineages=1,
-            maximum_unresolved_fraction=0.0, minimum_feature_reliability=0.8),
-        representation_qualification=_synthetic_support_qualification(tmp_path, tasks[:8], graphs, catalog),
-        pair_compatibility={pair.policy_key: dict(decision="compatible", outcomes_or_arms_used=False,
-            evidence_sha256=content_hash("SYNTHETIC four-cell fixture, independent of Atomic selection"))})
-    return task_path, graph_bundle, catalog_path, write("scopes.json", config), (add, remove, pair), config, write
+    config = dict(
+        source_tasks_sha256=file_sha256(task_path),
+        catalog_sha256=catalog_sha256(catalog),
+        graph_bundle_sha256=[bundle_digest(graph_bundle)],
+        model_id="offline-model",
+        covariate_names=["size"],
+        policies=canonical_value([add, remove]),
+        task_bindings=bindings,
+        arms_or_outcomes_used=False,
+        scope_choice_used_feature_states=False,
+        factor_definitions={
+            feature: dict(
+                definition=f"Synthetic single requirement: {feature}",
+                scope_rule="Fixed named operation/input/condition; never select by feature state.",
+                atomicity_review="SOURCE_REVIEWED_SINGLE_REQUIREMENT",
+            )
+            for feature in ("parameter_binding",)
+        },
+        support_rule=dict(
+            minimum_state_task_units=2,
+            minimum_shared_lineages=1,
+            maximum_unresolved_fraction=0.0,
+            minimum_feature_reliability=0.8,
+        ),
+        representation_qualification=_synthetic_support_qualification(
+            tmp_path, tasks[:8], graphs, catalog
+        ),
+    )
+    return (
+        task_path,
+        graph_bundle,
+        catalog_path,
+        write("scopes.json", config),
+        (add, remove),
+        config,
+        write,
+    )
 
 
 def _synthetic_support_qualification(tmp_path, source_tasks, graphs, catalog):
@@ -546,97 +633,125 @@ def _synthetic_support_qualification(tmp_path, source_tasks, graphs, catalog):
     return dict(bundle=bundle.name, bundle_sha256=bundle_digest(bundle))
 
 
-def _source_support_folds(output, policies, atomic, pairs):
+def _source_support_folds(output, policies, atomic):
     """Feed the actual producer rows into the existing shared candidate/fold Gates."""
     from prompt_mechanism_study.prioritization import (
-        CandidateCoverageSummary, AtomicShadowPlan, atomic_preoutcome_data_sha256,
-        freeze_atomic_candidate_universe, freeze_atomic_candidate_folds,
+        CandidateCoverageSummary,
+        AtomicShadowPlan,
+        atomic_preoutcome_data_sha256,
+        freeze_atomic_candidate_universe,
+        freeze_atomic_candidate_folds,
     )
-    from prompt_mechanism_study.interaction_selector import (
-        PairShadowPlan, pair_preoutcome_data_sha256, freeze_pair_candidate_universe, freeze_pair_preoutcome_design,
-    )
-    from prompt_mechanism_study.mechanisms import PairCompatibilityDecision, FactorialCompatibility
     from prompt_mechanism_study.representation import ModelBoundCandidateRecord
     from prompt_mechanism_study.artifact_io import bundle_digest
     from prompt_mechanism_study.verification.integrity import _decode_target_value
-    cover = {_decode_target_value(row, CandidateCoverageSummary, "coverage").candidate_id:
-             _decode_target_value(row, CandidateCoverageSummary, "coverage")
-             for row in read_json(output / "coverage-summaries.json")}
+
+    cover = {
+        _decode_target_value(
+            row, CandidateCoverageSummary, "coverage"
+        ).candidate_id: _decode_target_value(row, CandidateCoverageSummary, "coverage")
+        for row in read_json(output / "coverage-summaries.json")
+    }
+
     def record(policy):
-        return ModelBoundCandidateRecord(policy.policy_key, "offline-model", "phase-context-policy-v3", "3.0")
-    atomic_policies, pair = policies[:2], policies[2]
-    universe = freeze_atomic_candidate_universe(atomic_policies, tuple(map(record, atomic_policies)),
-        supported_policy_keys=tuple(p.policy_key for p in atomic_policies),
+        return ModelBoundCandidateRecord(
+            policy.policy_key, "offline-model", "phase-context-policy-v3", "3.0"
+        )
+
+    atomic_policies = policies
+    universe = freeze_atomic_candidate_universe(
+        atomic_policies,
+        tuple(map(record, atomic_policies)),
+        supported_policy_keys=tuple((p.policy_key for p in atomic_policies)),
         coverage_summaries={p.policy_key: cover[p.policy_key] for p in atomic_policies},
         realization_policy_ids={p.policy_key: "synthetic-rewrite" for p in atomic_policies},
-        candidate_family_ids={p.policy_key: p.analysis_scope.analysis_scope_id for p in atomic_policies},
+        candidate_family_ids={
+            p.policy_key: p.analysis_scope.analysis_scope_id for p in atomic_policies
+        },
         preoutcome_data_sha256=atomic_preoutcome_data_sha256(atomic),
-        discovery_population_sha256=content_hash("synthetic population"), positivity_audit_sha256=bundle_digest(output),
-        information_budget_sha256=content_hash("synthetic fixed information budget"), top_k=1,
-        representation_adapter_id="scoped-source-fixture")
-    atomic_folds = freeze_atomic_candidate_folds(universe, atomic,
-        AtomicShadowPlan("offline-model", ("size",), 2, 1.0, 13, 0.8, 0.5))
-    compatibility = PairCompatibilityDecision(pair, FactorialCompatibility.COMPATIBLE, "synthetic joint review",
-        ("source-surface-a", "source-surface-b"), content_hash("synthetic compatibility"))
-    pair_universe = freeze_pair_candidate_universe((pair,), (compatibility,), (record(pair),),
-        coverage_summaries={pair.policy_key: cover[pair.policy_key]},
-        candidate_family_ids={pair.policy_key: pair.analysis_scope.analysis_scope_id},
-        preoutcome_data_sha256=pair_preoutcome_data_sha256(pairs),
         discovery_population_sha256=content_hash("synthetic population"),
-        information_budget_sha256=content_hash("synthetic fixed information budget"), top_k=1)
-    pair_folds = freeze_pair_preoutcome_design(pair_universe, pairs, PairShadowPlan(
-        model_id="offline-model", covariate_names=("size",), minimum_cell_task_units=2,
-        minimum_shared_lineages=1, minimum_feature_reliability=0.8, cross_fit_folds=2,
-        fold_seed=13, ridge_lambda=1.0, bootstrap_draws=10, bootstrap_seed=17,
-        minimum_resolved_relation_task_units=1, minimum_relation_present_task_units=1,
-        minimum_relation_present_fraction=0.0, maximum_relation_unresolved_fraction=1.0))
-    return atomic_folds, pair_folds, cover
+        positivity_audit_sha256=bundle_digest(output),
+        information_budget_sha256=content_hash("synthetic fixed information budget"),
+        top_k=1,
+        representation_adapter_id="scoped-source-fixture",
+    )
+    atomic_folds = freeze_atomic_candidate_folds(
+        universe, atomic, AtomicShadowPlan("offline-model", ("size",), 2, 1.0, 13, 0.8, 0.5)
+    )
+    return (atomic_folds, cover)
 
 
 @pytest.mark.parametrize("missing_graph", [False, True])
-def test_scoped_source_support_keeps_units_unknowns_operation_recoding_and_provenance(tmp_path, missing_graph):
+def test_scoped_source_support_keeps_units_unknowns_operation_recoding_and_provenance(
+    tmp_path, missing_graph
+):
     from prompt_mechanism_study.discovery_population import audit_discovery_positivity
-    from prompt_mechanism_study.interaction_selector import PairPreOutcomeObservation
     from prompt_mechanism_study.prioritization import AtomicPreOutcomeObservation
     from prompt_mechanism_study.verification.integrity import _decode_target_value
-    tasks, graphs, catalog, scopes, policies, config, write = _scoped_support_fixture(tmp_path, missing_graph=missing_graph)
-    result = audit_discovery_positivity(tasks, (graphs,), catalog, tmp_path / "support", scope_bindings_path=scopes)
+
+    tasks, graphs, catalog, scopes, policies, config, write = _scoped_support_fixture(
+        tmp_path, missing_graph=missing_graph
+    )
+    result = audit_discovery_positivity(
+        tasks, (graphs,), catalog, tmp_path / "support", scope_bindings_path=scopes
+    )
     source = read_json(tmp_path / "support" / "positivity-rows.json")
     summaries = {row["policy_key"]: row for row in read_json(tmp_path / "support" / "support.json")}
     assert result["task_units"] == 8 + int(missing_graph)
-    assert len(source) == 3 * result["task_units"]
-    assert result["atomic_preoutcome_rows"] == result["pair_preoutcome_rows"] == 8
+    assert len(source) == 2 * result["task_units"]
+    assert result["atomic_preoutcome_rows"] == 8
     for policy in policies:
         summary = summaries[policy.policy_key]
         assert summary["unknown_task_units"] == int(missing_graph)
         assert summary["support_gate_passed"] is (not missing_graph)
-    assert summaries[policies[2].policy_key]["state_or_cell_task_units"] == [["00", 2], ["01", 2], ["10", 2], ["11", 2]]
     records = {row["policy_key"]: row for row in source if row["task_id"] == "synthetic-00-0"}
     assert records[policies[0].policy_key]["target_state_cell"] == "0"
     assert records[policies[1].policy_key]["target_state_cell"] == "1"
-    assert records[policies[2].policy_key]["target_state_cell"] == "01"
-    assert records[policies[0].policy_key]["source_assessments"][0]["factor_scope"] == records[policies[1].policy_key]["source_assessments"][0]["factor_scope"]
-    atomic = tuple(_decode_target_value(row, AtomicPreOutcomeObservation, "atomic") for row in read_json(tmp_path / "support" / "atomic-preoutcome-observations.json"))
-    pairs = tuple(_decode_target_value(row, PairPreOutcomeObservation, "pair") for row in read_json(tmp_path / "support" / "pair-preoutcome-observations.json"))
-    assert all(row.source_binding_sha256 for row in (*atomic, *pairs))
-    assert all(bool(row.source_gate_failures) == missing_graph for row in pairs)
-    assert all(all(bool(reasons) == missing_graph for _, reasons in row.source_gate_failures) for row in atomic)
-    assert all("outcome" not in row for row in read_json(tmp_path / "support" / "pair-preoutcome-observations.json"))
-    atomic_folds, pair_folds, cover = _source_support_folds(tmp_path / "support", policies, atomic, pairs)
+    assert (
+        records[policies[0].policy_key]["source_assessments"][0]["factor_scope"]
+        == records[policies[1].policy_key]["source_assessments"][0]["factor_scope"]
+    )
+    atomic = tuple(
+        (
+            _decode_target_value(row, AtomicPreOutcomeObservation, "atomic")
+            for row in read_json(tmp_path / "support" / "atomic-preoutcome-observations.json")
+        )
+    )
+    assert all((row.source_binding_sha256 for row in atomic))
+    assert all(
+        (
+            all((bool(reasons) == missing_graph for _, reasons in row.source_gate_failures))
+            for row in atomic
+        )
+    )
+    assert all(
+        "outcome" not in row
+        for row in read_json(tmp_path / "support" / "atomic-preoutcome-observations.json")
+    )
+    atomic_folds, cover = _source_support_folds(tmp_path / "support", policies, atomic)
     assert len(atomic_folds.manifests) == (0 if missing_graph else 2)
-    assert len(pair_folds.fold_manifests) == (0 if missing_graph else 1)
-    assert pair_folds.atomic_evidence_read is False
-    assert all(row.total_task_units == 8 + int(missing_graph) for row in cover.values())
-    assert all(row.representation_resolved_rate == 8 / (8 + int(missing_graph)) for row in cover.values())
+    assert all((row.total_task_units == 8 + int(missing_graph) for row in cover.values()))
+    assert all(
+        (row.representation_resolved_rate == 8 / (8 + int(missing_graph)) for row in cover.values())
+    )
     if missing_graph:
         from prompt_mechanism_study.prioritization import DiscoverabilityReason
-        assert all(DiscoverabilityReason.SOURCE_SCOPE_SUPPORT_FAILED in decision.reasons
-                   for decision in (*atomic_folds.discoverability, *pair_folds.discoverability))
-    from prompt_mechanism_study.prioritization import atomic_preoutcome_observations, atomic_preoutcome_data_sha256
-    from prompt_mechanism_study.interaction_selector import pair_preoutcome_observations
+
+        assert all(
+            (
+                DiscoverabilityReason.SOURCE_SCOPE_SUPPORT_FAILED in decision.reasons
+                for decision in atomic_folds.discoverability
+            )
+        )
+    from prompt_mechanism_study.prioritization import (
+        atomic_preoutcome_observations,
+        atomic_preoutcome_data_sha256,
+    )
+
     for value in (0, 1):
-        assert atomic_preoutcome_data_sha256(atomic_preoutcome_observations([row.with_outcome(value) for row in atomic])) == atomic_preoutcome_data_sha256(atomic)
-        assert pair_preoutcome_observations([row.with_outcome(value) for row in pairs]) == pairs
+        assert atomic_preoutcome_data_sha256(
+            atomic_preoutcome_observations([row.with_outcome(value) for row in atomic])
+        ) == atomic_preoutcome_data_sha256(atomic)
 
 
 def test_fixed_scope_assessment_cannot_create_coordinates_or_default_missing_states():
@@ -748,63 +863,6 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
     unresolved["nodes"][3]["evidence_text"] = "Unstated predicate"
     with pytest.raises(PromptTSGError, match="condition binding"):
         compile_raw(unresolved)
-
-
-def test_cross_operation_pair_runs_four_assigned_cells_through_the_existing_entry(tmp_path):
-    from pathlib import Path
-    from prompt_mechanism_study.artifact_io import read_json
-    from prompt_mechanism_study.target_workflow import prepare_development_assignments, run_target_development, DEVELOPMENT_CODE_RESPONSE_FORMAT
-    from prompt_mechanism_study.target_security_profiles import target_security_profile_producer_sha256
-    from prompt_mechanism_study.task_input import prepare_task_input
-    from prompt_mechanism_study.verification.reporting import verify_development_result
-    from prompt_mechanism_study.records import canonical_value
-    plan = read_json(Path("data/method/open-tsg-effect-canary-v1/plan.json"))
-    source, _, _, _ = _scoped_graph()
-    task = prepare_task_input(dict(task_id="synthetic-scoped-boundaries", task_unit_id="synthetic-unit",
-        language="python", prompt=source, policy_id="synthetic-pair"), generation_system_prompt=plan["generation_system_prompt"])
-    prompt, catalog, graph, ids = _scoped_graph(source_prefix=task["prompt"][:-len(source)])
-    assert prompt == task["prompt"]
-    scopes = (FeatureScope(ids["a"], (ids["y"],), (ids["c"],)), FeatureScope(ids["b"], (ids["z"],)))
-    factors = [dict(feature_id=feature, operation=operation, addition="Bind this value separately from SQL text.",
-                    factor_definition=dict(semantic_decisions=[feature], atomicity_review="SOURCE_REVIEWED_SINGLE_REQUIREMENT",
-                        definition="Synthetic fixture for " + feature, scope_rule="Exactly the fixture's declared source scope."))
-               for feature, operation in (("parameter_binding", "add"), ("shell_syntax_rejection", "remove"))]
-    policy = dict(policy_id="synthetic-pair", factors=factors, security_profile_id="python.cwe89.sql_values.v1",
-                  query=dict(query_id="sql", required_semantics=["sql_query"], forbidden_semantics=[], required_relations=[]))
-    binding = bind_task_hypothesis(graph, query=policy["query"], policy_id=policy["policy_id"],
-        factor_feature_ids=tuple(factor["feature_id"] for factor in factors), factor_operations=("add", "remove"), factor_scopes=scopes)
-    task.update(graph=prompt_tsg_record(graph), factor_scopes=canonical_value(scopes), binding_id=binding.binding_id,
-                factor_control_texts=[dict(NOOP="Preserve this input's other requested handling."), dict(NOOP="Preserve the remaining requested validation.")],
-                pair_compatibility=dict(binding_id=binding.binding_id, decision="compatible", outcomes_used=False,
-                    rationale="Synthetic independent edits at two source operations; no Atomic selection or natural support asserted."),
-                functional_contract=dict(language="python", source_prompt_sha256=content_hash(prompt), requirements=[],
-                                         environment_dependencies=[], measurement_scope="partial"))
-    plan.update(run_id="synthetic-cross-operation-pair", tasks=[task], policies=[policy], catalog=catalog,
-                generation_seeds=[17], arms=["A00", "A10", "A01", "A11"], maximum_provider_calls=8,
-                development_exposed_task_ids=[task["task_id"]], security_producer_sha256=target_security_profile_producer_sha256())
-    plan["generator"]["response_format"] = DEVELOPMENT_CODE_RESPONSE_FORMAT
-    plan["analysis"].update(generation_seeds=[17], contrasts=[dict(policy_id=policy["policy_id"], kind="pair_interaction")])
-    assignments = prepare_development_assignments(plan)
-    assert len(assignments) == 4
-    assert all(row["target_operation_node_id"] is None for row in assignments)
-    plan_path = tmp_path / "pair.json"
-    plan_path.write_text(json.dumps(plan), encoding="utf-8")
-    def complete(request, *_):
-        if request.get("request_kind") == "blind_functional_evaluation":
-            return b'{"verdict":"unknown","evidence_lines":[1],"reason":"Offline fixture."}'
-        return b'{"code":"pass"}'
-    report = run_target_development(plan_path, tmp_path / "run", complete=complete)
-    assert report["pair_status"] == "DEVELOPMENT_FOUR_CELL_OFFLINE_REPLAY"
-    assert report["pair_natural_support_status"] == "NOT_ESTABLISHED_BY_INTERVENTION_CELLS"
-    assert report["external_provider_calls"] == 0
-    assert verify_development_result(tmp_path / "run")["assigned_rows"] == 4
-    effect = read_json(tmp_path / "run/summary/effects.json")[0]
-    assert effect["effect"] == 0 and effect["p_value"] is None
-    assert not effect["development_signal"]
-    broken = deepcopy(plan)
-    broken["tasks"][0]["pair_compatibility"]["decision"] = "entailment_collapse"
-    with pytest.raises(ValueError, match="compatibility"):
-        prepare_development_assignments(broken)
 
 
 def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_repeated_spans():

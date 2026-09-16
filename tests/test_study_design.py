@@ -4,7 +4,6 @@ from functools import cache
 import pytest
 from prompt_mechanism_study.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
-    PAIR_CONFIRMATORY_ARMS,
     TargetRandomizationPlan,
     TargetTaskArmVariant,
     TargetTaskBundle,
@@ -44,7 +43,6 @@ from prompt_mechanism_study.study_design import (
 )
 from prompt_mechanism_study.study_planning import (
     ATOMIC_POWER_ARMS,
-    PAIR_POWER_ARMS,
     FreezeArtifactReference,
     PowerAndMarginMemo,
     ProviderBudgetCeilings,
@@ -83,7 +81,6 @@ from prompt_mechanism_study.representation import (
     Operation,
     PolicyFactor,
     TaskUnitDataRoleRecord,
-    pair_policy_key,
 )
 
 
@@ -310,17 +307,16 @@ def _baseline_qualification(
     independent_verifier_status: str = "PASS",
 ) -> RQ1BaselineQualification:
     selector_ids: tuple[str, ...] = ()
-    if scenario in {
-        RQ1BudgetScenario.CORE_EXPERT,
-        RQ1BudgetScenario.CORE_EXPERT_RANDOM,
-    }:
-        selector_ids += ("atomic_blind_expert", "pair_blind_expert")
+    if scenario in {RQ1BudgetScenario.CORE_EXPERT, RQ1BudgetScenario.CORE_EXPERT_RANDOM}:
+        selector_ids += ("atomic_blind_expert",)
     if scenario is RQ1BudgetScenario.CORE_EXPERT_RANDOM:
-        selector_ids += ("atomic_seeded_random", "pair_seeded_random")
+        selector_ids += ("atomic_seeded_random",)
     references = tuple(
-        (selector_id, model_id, _artifact_ref(f"{selector_id}-{model_id}-contract"))
-        for selector_id in sorted(selector_ids)
-        for model_id in model_ids
+        (
+            (selector_id, model_id, _artifact_ref(f"{selector_id}-{model_id}-contract"))
+            for selector_id in sorted(selector_ids)
+            for model_id in model_ids
+        )
     )
     return qualify_rq1_baselines(
         protocol_id=manifest.protocol_id,
@@ -333,21 +329,10 @@ def _baseline_qualification(
     )
 
 
-def _power_plan(
-    track: PolicyTrack,
-    *,
-    family_size: int = 2,
-    task_units: int = 10,
-):
+def _power_plan(track: PolicyTrack, *, family_size: int = 2, task_units: int = 10):
     from prompt_mechanism_study.inference import TargetITTPlan
-    if track is PolicyTrack.ATOMIC:
-        probabilities = tuple(
-            zip(ATOMIC_POWER_ARMS, (0.79, 0.01, 0.10, 0.10), strict=True)
-        )
-    else:
-        probabilities = tuple(
-            zip(PAIR_POWER_ARMS, (0.01, 0.01, 0.01, 0.79), strict=True)
-        )
+
+    probabilities = tuple(zip(ATOMIC_POWER_ARMS, (0.79, 0.01, 0.1, 0.1), strict=True))
     assumption = TargetPowerAssumption(
         f"{track.value}-planning-high-effect",
         track,
@@ -355,7 +340,7 @@ def _power_plan(
         0.0,
         0.0,
         ((0.0, 0.0, 0.0, 0.0),),
-        0.95,  # Shared synthetic tasks keep large baseline fixture families evaluable.
+        0.95,
         0.0,
         0.0,
     )
@@ -369,14 +354,14 @@ def _power_plan(
         2,
         4,
         0.05,
-        0.01,  # Small engineering fixture; no scientific power assertion.
+        0.01,
         1000,
-        20260831 + (0 if track is PolicyTrack.ATOMIC else 1),
+        20260831 + 0,
         (assumption,),
         (1.0,),
         (("stratum-synthetic", task_units),),
         "shared",
-        TargetITTPlan(2026083103, 100, 0.05, 2, 0.9, 0.05, 0.05, 0.2),
+        TargetITTPlan(2026083103, 100, 0.05, 2, 0.9, 0.05, 0.2),
     )
     return plan
 
@@ -430,23 +415,11 @@ def test_explicit_power_replays_partial_overlap_realizations_and_task_identity(m
     assert verify_target_power_simulation(blocked)["power_gate_passed"] is False
 
 
-def _power_memo(
-    manifest: DataRoleManifest,
-    *,
-    atomic_family_size: int = 2,
-    pair_family_size: int = 2,
-) -> PowerAndMarginMemo:
+def _power_memo(manifest: DataRoleManifest, *, atomic_family_size: int = 2) -> PowerAndMarginMemo:
     return freeze_power_and_margin_memo(
         manifest,
         code_commit="a" * 40,
-        atomic_power=_power_result(
-            PolicyTrack.ATOMIC,
-            family_size=atomic_family_size,
-        ),
-        pair_power=_power_result(
-            PolicyTrack.PAIR,
-            family_size=pair_family_size,
-        ),
+        atomic_power=_power_result(PolicyTrack.ATOMIC, family_size=atomic_family_size),
         bootstrap_draws=100,
         bootstrap_seed=2026083103,
         minimum_valid_bootstrap_fraction=0.9,
@@ -494,13 +467,9 @@ def _accepted_budget(
     dimensions = RQ1BudgetDimensions(
         model_ids,
         atomic_top_k=1,
-        pair_top_k=1,
         atomic_task_units_per_effect=10,
-        pair_task_units_per_effect=10,
         atomic_global_realizations=1,
-        pair_global_realizations=1,
         atomic_total_block_slots=4,
-        pair_total_block_slots=4,
     )
     selector_count = {
         RQ1BudgetScenario.CORE: 2,
@@ -508,24 +477,16 @@ def _accepted_budget(
         RQ1BudgetScenario.CORE_EXPERT_RANDOM: 4,
     }[scenario]
     family_size = selector_count * len(model_ids)
-    power_memo = _power_memo(
-        manifest,
-        atomic_family_size=family_size,
-        pair_family_size=family_size,
-    )
+    power_memo = _power_memo(manifest, atomic_family_size=family_size)
     baseline_qualification = _baseline_qualification(
-        manifest,
-        scenario=scenario,
-        model_ids=model_ids,
+        manifest, scenario=scenario, model_ids=model_ids
     )
     return qualify_rq1_budget(
         scenario=scenario,
         dimensions=dimensions,
         power_and_margin_memo=power_memo,
         qualification_bundle=_accepted_qualification_bundle(
-            manifest,
-            power_memo,
-            baseline_qualification,
+            manifest, power_memo, baseline_qualification
         ),
         baseline_qualification=baseline_qualification,
         provider_ceilings=_provider_ceilings(),
@@ -535,44 +496,18 @@ def _accepted_budget(
 
 def _dispatch_and_assignments(*, partial_atomic=False):
     scope = AnalysisScope(
-        "security.synthetic",
-        "context.synthetic",
-        ("python",),
-        ("local-api",),
-        ("synthetic",),
+        "security.synthetic", "context.synthetic", ("python",), ("local-api",), ("synthetic",)
     )
     atomic_policy = AtomicPolicyKey(
-        scope,
-        PolicyFactor("feature.atomic", Operation.ADD),
-        "oracle_evaluable_secure_code_yield",
-    )
-    pair_policy = pair_policy_key(
-        scope,
-        (
-            PolicyFactor("feature.pair.first", Operation.ADD),
-            PolicyFactor("feature.pair.second", Operation.ADD),
-        ),
-        outcome_id="oracle_evaluable_secure_code_yield",
+        scope, PolicyFactor("feature.atomic", Operation.ADD), "oracle_evaluable_secure_code_yield"
     )
     records = {
         PolicyTrack.ATOMIC: ModelBoundCandidateRecord(
-            atomic_policy.policy_key,
-            "model-a",
-            "phase-context-policy-v3",
-            "3.0",
-        ),
-        PolicyTrack.PAIR: ModelBoundCandidateRecord(
-            pair_policy.policy_key,
-            "model-a",
-            "phase-context-policy-v3",
-            "3.0",
-        ),
+            atomic_policy.policy_key, "model-a", "phase-context-policy-v3", "3.0"
+        )
     }
     sources = []
-    for track, selector_ids in (
-        (PolicyTrack.ATOMIC, ("atomic_full", "atomic_rd_only")),
-        (PolicyTrack.PAIR, ("pair_full", "pair_no_relation")),
-    ):
+    for track, selector_ids in ((PolicyTrack.ATOMIC, ("atomic_full", "atomic_rd_only")),):
         record = records[track]
         for selector_id in selector_ids:
             sources.append(
@@ -587,21 +522,32 @@ def _dispatch_and_assignments(*, partial_atomic=False):
             )
     second = None
     if partial_atomic:
-        second = replace(records[PolicyTrack.ATOMIC], policy_key=content_id("atomic_policy_", "second-policy"))
-        universe = tuple(sorted((records[PolicyTrack.ATOMIC], second), key=lambda row: row.policy_key))
-        sources = [replace(source, model_bound_records=universe,
-                           slots=(SelectorSlot(1, SlotStatus.FILLED, second.policy_key, None),)
-                           if source.selector_id == "atomic_rd_only" else source.slots)
-                   if source.track is PolicyTrack.ATOMIC else source for source in sources]
-    ledger = freeze_fixed_slot_ledger(
-        "phase-context-policy-v3",
-        "3.0",
-        sources,
-    )
+        second = replace(
+            records[PolicyTrack.ATOMIC], policy_key=content_id("atomic_policy_", "second-policy")
+        )
+        universe = tuple(
+            sorted((records[PolicyTrack.ATOMIC], second), key=lambda row: row.policy_key)
+        )
+        sources = [
+            replace(
+                source,
+                model_bound_records=universe,
+                slots=(
+                    (SelectorSlot(1, SlotStatus.FILLED, second.policy_key, None),)
+                    if source.selector_id == "atomic_rd_only"
+                    else source.slots
+                ),
+            )
+            for source in sources
+        ]
+    ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
     union = freeze_shared_confirmation_union(ledger)
     protocol_ids = {
-        item.candidate_record_id: ("protocol-record-atomic-second" if item.candidate == second
-                                   else f"protocol-record-{item.track.value}")
+        item.candidate_record_id: (
+            "protocol-record-atomic-second"
+            if item.candidate == second
+            else f"protocol-record-{item.track.value}"
+        )
         for item in union.entries
     }
     dispatch = freeze_confirmation_dispatch(union, protocol_ids)
@@ -611,25 +557,34 @@ def _dispatch_and_assignments(*, partial_atomic=False):
         7331,
         1771,
         4,
-        4,
-        tuple(sorted((entry.candidate.policy_key, "realization-1", 1.0) for entry in union.entries)),
-        tuple(sorted((entry.candidate.policy_key, f"{entry.track.value}-task-{i:02d}", "stratum-synthetic")
-                     for entry in union.entries
-                     for i in (range(5, 15) if entry.candidate == second else range(10)))),
+        tuple(
+            sorted(((entry.candidate.policy_key, "realization-1", 1.0) for entry in union.entries))
+        ),
+        tuple(
+            sorted(
+                (
+                    (
+                        entry.candidate.policy_key,
+                        f"{entry.track.value}-task-{i:02d}",
+                        "stratum-synthetic",
+                    )
+                    for entry in union.entries
+                    for i in (range(5, 15) if entry.candidate == second else range(10))
+                )
+            )
+        ),
     )
     task_bundles = []
     for entry in union.entries:
         record = next(
-            item
-            for item in dispatch.records
-            if item.candidate_record_id == entry.candidate_record_id
+            (
+                item
+                for item in dispatch.records
+                if item.candidate_record_id == entry.candidate_record_id
+            )
         )
-        arms = (
-            ATOMIC_CONFIRMATORY_ARMS
-            if entry.track is PolicyTrack.ATOMIC
-            else PAIR_CONFIRMATORY_ARMS
-        )
-        for task_index in (range(5, 15) if entry.candidate == second else range(10)):
+        arms = ATOMIC_CONFIRMATORY_ARMS
+        for task_index in range(5, 15) if entry.candidate == second else range(10):
             task_unit_id = f"{entry.track.value}-task-{task_index:02d}"
             task_bundle_id = f"bundle-{entry.track.value}-{task_index:02d}"
             if entry.candidate == second:
@@ -647,11 +602,12 @@ def _dispatch_and_assignments(*, partial_atomic=False):
                     1.0,
                     1.0,
                     tuple(
-                        TargetTaskArmVariant(
-                            arm,
-                            content_hash((entry.track.value, task_index, arm.value)),
+                        (
+                            TargetTaskArmVariant(
+                                arm, content_hash((entry.track.value, task_index, arm.value))
+                            )
+                            for arm in arms
                         )
-                        for arm in arms
                     ),
                 )
             )
@@ -661,39 +617,30 @@ def _dispatch_and_assignments(*, partial_atomic=False):
             key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
         )
     )
-    assignments = randomize_target_confirmation(
-        dispatch,
-        randomization_plan,
-        frozen_bundles,
-    )
-    return dispatch, randomization_plan, frozen_bundles, assignments
+    assignments = randomize_target_confirmation(dispatch, randomization_plan, frozen_bundles)
+    return (dispatch, randomization_plan, frozen_bundles, assignments)
 
 
 def test_formal_budget_preflight_replays_dispatch_blocks_and_rejects_drift() -> None:
     budget = _accepted_budget(_qualification_manifest())
     dispatch, randomization_plan, task_bundles, assignments = _dispatch_and_assignments()
-
     preflight = validate_formal_budget_preflight(budget, dispatch, assignments)
-
     assert preflight.status == "PASS"
     assert preflight.provider_calls_authorized is True
     assert preflight.atomic_effect_records == 1
-    assert preflight.pair_effect_records == 1
-    assert preflight.generation_calls == 80
-    assert preflight.materialization_calls == 40
-    assert preflight.external_call_reservation == 200
-    assert verify_formal_budget_preflight(
-        budget,
-        dispatch,
-        assignments,
-        preflight,
-    )["status"] == "FORMAL_BUDGET_PREFLIGHT_VERIFIED"
-    assert verify_target_randomization(
-        dispatch,
-        randomization_plan,
-        task_bundles,
-        assignments,
-    )["status"] == "TARGET_RANDOMIZATION_VERIFIED"
+    assert preflight.generation_calls == 40
+    assert preflight.materialization_calls == 20
+    assert preflight.external_call_reservation == 100
+    assert (
+        verify_formal_budget_preflight(budget, dispatch, assignments, preflight)["status"]
+        == "FORMAL_BUDGET_PREFLIGHT_VERIFIED"
+    )
+    assert (
+        verify_target_randomization(dispatch, randomization_plan, task_bundles, assignments)[
+            "status"
+        ]
+        == "TARGET_RANDOMIZATION_VERIFIED"
+    )
     tampered_assignments = tuple(
         sorted(
             (
@@ -705,86 +652,60 @@ def test_formal_budget_preflight_replays_dispatch_blocks_and_rejects_drift() -> 
     )
     with pytest.raises(ValueError, match="independent randomization replay"):
         verify_target_randomization(
-            dispatch,
-            randomization_plan,
-            task_bundles,
-            tampered_assignments,
+            dispatch, randomization_plan, task_bundles, tampered_assignments
         )
-
     atomic_entry = next(
-        item for item in dispatch.union.entries if item.track is PolicyTrack.ATOMIC
+        (item for item in dispatch.union.entries if item.track is PolicyTrack.ATOMIC)
     )
     second_model_record = ModelBoundCandidateRecord(
-        atomic_entry.candidate.policy_key,
-        "model-b",
-        "phase-context-policy-v3",
-        "3.0",
+        atomic_entry.candidate.policy_key, "model-b", "phase-context-policy-v3", "3.0"
     )
     shared_sources = tuple(
-        FixedSlotSource(
-            PolicyTrack.ATOMIC,
-            "atomic_full",
-            model_id,
-            f"shared-policy-universe-{model_id}",
-            (SelectorSlot(1, SlotStatus.FILLED, record.policy_key, None),),
-            (record,),
-        )
-        for model_id, record in (
-            ("model-a", atomic_entry.candidate),
-            ("model-b", second_model_record),
+        (
+            FixedSlotSource(
+                PolicyTrack.ATOMIC,
+                "atomic_full",
+                model_id,
+                f"shared-policy-universe-{model_id}",
+                (SelectorSlot(1, SlotStatus.FILLED, record.policy_key, None),),
+                (record,),
+            )
+            for model_id, record in (
+                ("model-a", atomic_entry.candidate),
+                ("model-b", second_model_record),
+            )
         )
     )
     shared_union = freeze_shared_confirmation_union(
-        freeze_fixed_slot_ledger(
-            "phase-context-policy-v3",
-            "3.0",
-            shared_sources,
-        )
+        freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", shared_sources)
     )
     shared_protocol = {
-        item.candidate_record_id: "shared-protocol-record"
-        for item in shared_union.entries
+        item.candidate_record_id: "shared-protocol-record" for item in shared_union.entries
     }
     assert len(freeze_confirmation_dispatch(shared_union, shared_protocol).records) == 2
     split_protocol = dict(shared_protocol)
     split_protocol[shared_union.entries[-1].candidate_record_id] = "second-protocol-record"
     with pytest.raises(ValueError, match="share one bridge/protocolization"):
         freeze_confirmation_dispatch(shared_union, split_protocol)
-
     with pytest.raises(StudyDesignError, match="model-bound dispatch"):
         validate_formal_budget_preflight(
-            budget,
-            dispatch,
-            (replace(assignments[0], model_id="model-b"), *assignments[1:]),
+            budget, dispatch, (replace(assignments[0], model_id="model-b"), *assignments[1:])
         )
     with pytest.raises(StudyDesignError, match="identities are not unique"):
-        validate_formal_budget_preflight(
-            budget,
-            dispatch,
-            (*assignments, assignments[0]),
-        )
+        validate_formal_budget_preflight(budget, dispatch, (*assignments, assignments[0]))
     same_block = next(
-        item
-        for item in assignments[1:]
-        if item.block_id == assignments[0].block_id
+        (item for item in assignments[1:] if item.block_id == assignments[0].block_id)
     )
     with pytest.raises(StudyDesignError, match="request-randomness slots"):
         validate_formal_budget_preflight(
             budget,
             dispatch,
             (
-                replace(
-                    assignments[0],
-                    request_randomness_slot=same_block.request_randomness_slot,
-                ),
+                replace(assignments[0], request_randomness_slot=same_block.request_randomness_slot),
                 *assignments[1:],
             ),
         )
-    blocked = replace(
-        budget,
-        status=QualificationStatus.BLOCKED,
-        blockers=("manual_block",),
-    )
+    blocked = replace(budget, status=QualificationStatus.BLOCKED, blockers=("manual_block",))
     with pytest.raises(StudyDesignError, match="ACCEPTED RQ1 budget"):
         validate_formal_budget_preflight(blocked, dispatch, assignments)
 
@@ -904,7 +825,6 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
         population,
         population.accepted_population_manifest_sha256,
         population.accepted_population_manifest_sha256,
-        population.accepted_population_manifest_sha256,
         references[3],
         references[4],
         references[5],
@@ -914,7 +834,6 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
         references[9],
         references[10],
         atomic_top_k=3,
-        pair_top_k=2,
         model_ids=("model-a", "model-b"),
     )
     confirmation = ConfirmationFreeze(
@@ -928,14 +847,10 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
         _artifact_ref(discovery.discovery_design_freeze_id),
         _artifact_ref(confirmation.confirmation_freeze_id),
     )
-
     assert not hasattr(discovery, "fixed_slot_ledger")
     assert confirmation.fixed_slot_ledger == references[11]
-    assert index.discovery_design_freeze.artifact_id == (
-        discovery.discovery_design_freeze_id
-    )
+    assert index.discovery_design_freeze.artifact_id == discovery.discovery_design_freeze_id
     assert index.confirmation_freeze.artifact_id == confirmation.confirmation_freeze_id
-
     with pytest.raises(ValueError, match="before outcomes"):
         replace(discovery, created_before_discovery_outcomes=False)
     with pytest.raises(ValueError, match="forbids rank pairing"):
@@ -946,17 +861,21 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
 
 def test_actual_power_failure_blocks_preflight_and_retains_failed_results(monkeypatch):
     from prompt_mechanism_study import study_planning
+
     budget = _accepted_budget(_qualification_manifest())
     dispatch, _, _, assignments = _dispatch_and_assignments(partial_atomic=True)
-    # A separate support identity avoids affecting any cached normal simulation.
-    assignments = tuple(replace(row, task_unit_id=f"degenerate-{row.task_unit_id}") for row in assignments)
+    assignments = tuple(
+        (replace(row, task_unit_id=f"degenerate-{row.task_unit_id}") for row in assignments)
+    )
     before = content_hash(budget)
-    # Force constant contributions to exercise the downstream failure boundary.
-    monkeypatch.setattr(study_planning, "_power_task_draws",
-                        lambda rng, assumption, plan, groups: [[0.999] * len(group) for group in groups])
+    monkeypatch.setattr(
+        study_planning,
+        "_power_task_draws",
+        lambda rng, assumption, plan, groups: [[0.999] * len(group) for group in groups],
+    )
     with pytest.raises(StudyDesignError, match="actual task-support power failed") as blocked:
         validate_formal_budget_preflight(budget, dispatch, assignments)
     results = blocked.value.power_results
-    assert tuple(row.plan.track for row in results) == (PolicyTrack.ATOMIC, PolicyTrack.PAIR)
-    assert all(row.minimum_achieved_power == 0 and not row.power_gate_passed for row in results)
+    assert tuple((row.plan.track for row in results)) == (PolicyTrack.ATOMIC,)
+    assert all((row.minimum_achieved_power == 0 and (not row.power_gate_passed) for row in results))
     assert content_hash(budget) == before

@@ -19,7 +19,6 @@ from prompt_mechanism_study.artifact_io import (
     write_bundle,
 )
 from prompt_mechanism_study.prompt_tsg import (
-    FeatureScope,
     QueryState,
     catalog_sha256,
     feature_state,
@@ -1302,22 +1301,30 @@ def _audit_legacy_discovery_positivity(
 
 
 def _source_policy(record):
-    """Decode the existing semantic policy coordinates without adding task-local IDs."""
-    from prompt_mechanism_study.representation import AnalysisScope, AtomicPolicyKey, PairPolicyKey, PolicyFactor, Operation
+    """Decode one Atomic policy; research-branch Pair records are not accepted."""
+    from prompt_mechanism_study.representation import (
+        AnalysisScope,
+        AtomicPolicyKey,
+        PolicyFactor,
+        Operation,
+    )
+
+    if set(record) != {"analysis_scope", "factor", "outcome_id"}:
+        raise ValueError("main source support requires an Atomic policy record")
     scope = dict(record["analysis_scope"])
     for key in ("language_scope", "api_scope", "task_archetype_scope"):
         scope[key] = tuple(scope[key])
-    scope = AnalysisScope(**scope)
-    def factor(row):
-        return PolicyFactor(row["actionable_feature_id"], Operation(row["operation"]))
-    if set(record) == {"analysis_scope", "factor", "outcome_id"}:
-        return AtomicPolicyKey(scope, factor(record["factor"]), record["outcome_id"])
-    if set(record) == {"analysis_scope", "factors", "outcome_id"}:
-        return PairPolicyKey(scope, tuple(factor(row) for row in record["factors"]), record["outcome_id"])
-    raise ValueError("source support requires the existing Atomic or Pair policy record")
+    factor = record["factor"]
+    return AtomicPolicyKey(
+        AnalysisScope(**scope),
+        PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"])),
+        record["outcome_id"],
+    )
 
 
-def _audit_scoped_discovery_positivity(tasks_path, graph_bundles, catalog_path, scope_path, output, graph_artifact):
+def _audit_scoped_discovery_positivity(
+    tasks_path, graph_bundles, catalog_path, scope_path, output, graph_artifact
+):
     """Produce scope-bound, outcome-free source rows and selector inputs in one path.
 
     Every task/policy has a disposition. One globally bound scope per feature/task
@@ -1326,19 +1333,38 @@ def _audit_scoped_discovery_positivity(tasks_path, graph_bundles, catalog_path, 
     and intervention readiness remain separate from these mechanical counts.
     """
     from prompt_mechanism_study.artifact_io import file_sha256, read_json_exact
-    from prompt_mechanism_study.representation import AtomicPolicyKey, Operation, freeze_source_eligibility
-    from prompt_mechanism_study.prioritization import AtomicPreOutcomeObservation, CandidateCoverageSummary, CandidateKind
-    from prompt_mechanism_study.interaction_selector import PairPreOutcomeObservation
+    from prompt_mechanism_study.representation import (
+        AtomicPolicyKey,
+        Operation,
+        freeze_source_eligibility,
+    )
+    from prompt_mechanism_study.prioritization import (
+        AtomicPreOutcomeObservation,
+        CandidateCoverageSummary,
+        CandidateKind,
+    )
 
-    if graph_artifact not in {"graphs.json", "discovery-graphs.json", "pilot-graphs.json", "confirm-graphs.json"}:
+    if graph_artifact not in {
+        "graphs.json",
+        "discovery-graphs.json",
+        "pilot-graphs.json",
+        "confirm-graphs.json",
+    }:
         raise ValueError("invalid source graph artifact")
-    tasks, catalog, config = _task_records(tasks_path), load_catalog(catalog_path), read_json_exact(scope_path)
+    tasks, catalog, config = (
+        _task_records(tasks_path),
+        load_catalog(catalog_path),
+        read_json_exact(scope_path),
+    )
     task_ids = [task["task_id"] for task in tasks]
-    if (not tasks or len(set(task_ids)) != len(tasks)
+    if (
+        not tasks
+        or len(set(task_ids)) != len(tasks)
         or len({task["task_unit_id"] for task in tasks}) != len(tasks)
-        or len({task["near_duplicate_group_id"] for task in tasks}) != len(tasks)):
+        or (len({task["near_duplicate_group_id"] for task in tasks}) != len(tasks))
+    ):
         raise ValueError("source support requires deduplicated independent task units")
-    graphs, graph_digests = {}, []
+    graphs, graph_digests = ({}, [])
     for bundle in graph_bundles:
         verify_bundle(bundle)
         graph_digests.append(bundle_digest(bundle))
@@ -1347,49 +1373,91 @@ def _audit_scoped_discovery_positivity(tasks_path, graph_bundles, catalog_path, 
             if graph.task_id in graphs or graph.task_id not in task_ids:
                 raise ValueError("source support graph task is duplicate or outside the selection")
             graphs[graph.task_id] = graph
-    if (config.get("source_tasks_sha256") != file_sha256(tasks_path)
+    if (
+        config.get("source_tasks_sha256") != file_sha256(tasks_path)
         or config.get("catalog_sha256") != catalog_sha256(catalog)
         or config.get("graph_bundle_sha256") != sorted(graph_digests)
-        or config.get("arms_or_outcomes_used") is not False
-        or config.get("scope_choice_used_feature_states") is not False
-        or catalog.get("concept_policy") != "FROZEN"):
-        raise ValueError("scoped source input does not close or lacks outcome/state-blind scope selection")
+        or (config.get("arms_or_outcomes_used") is not False)
+        or (config.get("scope_choice_used_feature_states") is not False)
+        or (catalog.get("concept_policy") != "FROZEN")
+    ):
+        raise ValueError(
+            "scoped source input does not close or lacks outcome/state-blind scope selection"
+        )
     require_text(config["model_id"], "source support model")
     policies = [_source_policy(row) for row in config["policies"]]
     if len({p.policy_key for p in policies}) != len(policies):
         raise ValueError("scoped source policies must be unique")
+
     def factors(policy):
-        return (policy.factor,) if type(policy) is AtomicPolicyKey else policy.factors
+        return (policy.factor,)
+
     features = {f.actionable_feature_id for policy in policies for f in factors(policy)}
     definitions = config["factor_definitions"]
     if set(definitions) != features:
         raise ValueError("every source factor needs one global scope definition")
     for feature, definition in definitions.items():
-        if (not definition.get("definition") or not definition.get("scope_rule")
+        if (
+            not definition.get("definition")
+            or not definition.get("scope_rule")
             or definition.get("atomicity_review") != "SOURCE_REVIEWED_SINGLE_REQUIREMENT"
-            or feature not in catalog["semantics"]):
-            raise ValueError("source factors require catalog semantics and reviewed atomic scope rules")
+            or (feature not in catalog["semantics"])
+        ):
+            raise ValueError(
+                "source factors require catalog semantics and reviewed atomic scope rules"
+            )
     bindings = {row["task_id"]: row for row in config["task_bindings"]}
     if len(bindings) != len(config["task_bindings"]) or set(bindings) != set(task_ids):
         raise ValueError("scoped source input must retain every selected task")
     for key, row in bindings.items():
-        if (row["prompt_tsg_id"] != (graphs[key].tsg_id if key in graphs else None)
-            or set(row["factor_scopes"]) != features):
-            raise ValueError("source scope bindings do not bind the exact graph and complete factor set")
+        if (
+            row["prompt_tsg_id"] != (graphs[key].tsg_id if key in graphs else None)
+            or set(row["factor_scopes"]) != features
+        ):
+            raise ValueError(
+                "source scope bindings do not bind the exact graph and complete factor set"
+            )
     if "candidate_construction" in config:
         from prompt_mechanism_study.candidate_construction import validate_generated_scope_config
-        validate_generated_scope_config(config, tasks, graphs, catalog, relative_to=scope_path.parent)
+
+        validate_generated_scope_config(
+            config, tasks, graphs, catalog, relative_to=scope_path.parent
+        )
     rule = config["support_rule"]
-    if (set(rule) != {"minimum_state_task_units", "minimum_shared_lineages", "maximum_unresolved_fraction", "minimum_feature_reliability"}
-        or any(type(rule[name]) is not int or rule[name] < 1 for name in ("minimum_state_task_units", "minimum_shared_lineages"))
-        or any(type(rule[name]) not in {int, float} or not math.isfinite(rule[name]) or not 0 <= rule[name] <= 1
-               for name in ("maximum_unresolved_fraction", "minimum_feature_reliability"))):
-        raise ValueError("Atomic and Pair require one explicit frozen support rule family")
+    if (
+        set(rule)
+        != {
+            "minimum_state_task_units",
+            "minimum_shared_lineages",
+            "maximum_unresolved_fraction",
+            "minimum_feature_reliability",
+        }
+        or any(
+            (
+                type(rule[name]) is not int or rule[name] < 1
+                for name in ("minimum_state_task_units", "minimum_shared_lineages")
+            )
+        )
+        or any(
+            (
+                type(rule[name]) not in {int, float}
+                or not math.isfinite(rule[name])
+                or (not 0 <= rule[name] <= 1)
+                for name in ("maximum_unresolved_fraction", "minimum_feature_reliability")
+            )
+        )
+    ):
+        raise ValueError("Atomic requires one explicit frozen support rule family")
     if "feature_qualification" in config:
-        raise ValueError("caller-authored reliability is invalid; bind a source qualification bundle")
-    qualification, qualification_digest = None, None
+        raise ValueError(
+            "caller-authored reliability is invalid; bind a source qualification bundle"
+        )
+    qualification, qualification_digest = (None, None)
     if config.get("representation_qualification") is not None:
-        from prompt_mechanism_study.prompt_contract_qualification import load_open_qualification_profiles
+        from prompt_mechanism_study.prompt_contract_qualification import (
+            load_open_qualification_profiles,
+        )
+
         bound = config["representation_qualification"]
         qualification_path = scope_path.parent / bound["bundle"]
         qualification_digest = bundle_digest(qualification_path)
@@ -1400,160 +1468,314 @@ def _audit_scoped_discovery_positivity(tasks_path, graph_bundles, catalog_path, 
         if qualified["bindings"]["catalog_sha256"] != catalog_sha256(catalog):
             raise ValueError("source qualification catalog differs")
         synthetic = qualified["reference_kind"] == "SYNTHETIC_TEST"
-        if synthetic and any(task.get("source_kind") != "synthetic_development" for task in tasks):
+        if synthetic and any(
+            (task.get("source_kind") != "synthetic_development" for task in tasks)
+        ):
             raise ValueError("synthetic qualification cannot admit natural source tasks")
         if not synthetic:
             if set(qualification["task_unit_ids"]) & {task["task_unit_id"] for task in tasks}:
                 raise ValueError("qualification tasks cannot become Discovery support")
             for bundle in graph_bundles:
                 extraction = read_json(bundle / "report.json")
-                keys = ("catalog_sha256", "candidate_id", "evaluator_sha256", "annotator_prompt_sha256",
-                        "representation_implementation_sha256")
-                if (any(extraction.get(k) != qualified["bindings"][k] for k in keys)
+                keys = (
+                    "catalog_sha256",
+                    "candidate_id",
+                    "evaluator_sha256",
+                    "annotator_prompt_sha256",
+                    "representation_implementation_sha256",
+                )
+                if (
+                    any((extraction.get(k) != qualified["bindings"][k] for k in keys))
                     or extraction.get("arms_or_outcomes_used") is not False
-                    or extraction.get("model_visible_routing_labels") is not False):
+                    or extraction.get("model_visible_routing_labels") is not False
+                ):
                     raise ValueError("source graphs were not produced by the qualified extractor")
     covariate_names = tuple(config["covariate_names"])
     _canonical_unique(covariate_names, "source covariate names")
-    source_rows, summaries, coverage, pairs, atomic_groups = [], [], [], [], {}
+    source_rows, summaries, coverage, atomic_groups = ([], [], [], {})
     for policy in policies:
-        policy_rows, resolved = [], []
+        policy_rows, resolved = ([], [])
         policy_factors = factors(policy)
-        atomic = type(policy) is AtomicPolicyKey
-        expected_cells = ("0", "1") if atomic else ("00", "01", "10", "11")
+        expected_cells = ("0", "1")
         population = policy.analysis_scope
         for task in tasks:
             key = task["task_id"]
-            in_population = (task["language"] in population.language_scope and task["api_family"] in population.api_scope
-                             and task["task_archetype"] in population.task_archetype_scope)
+            in_population = (
+                task["language"] in population.language_scope
+                and task["api_family"] in population.api_scope
+                and (task["task_archetype"] in population.task_archetype_scope)
+            )
             checks = []
             if in_population:
                 for factor in policy_factors:
                     feature = factor.actionable_feature_id
                     raw_scope = bindings[key]["factor_scopes"][feature]
-                    checks.append(freeze_source_eligibility(policy, task_id=key, task_unit_id=task["task_unit_id"],
-                        prompt=task["prompt"], graph=graphs.get(key), catalog=catalog,
-                        factor_scope=feature_scope_from_record(raw_scope) if raw_scope is not None else None,
-                        factor_feature_id=feature, eligibility_policy_sha256=content_hash(definitions[feature])))
-            known = bool(checks) and all(check.context_state is QueryState.PRESENT and check.factor_scope is not None
-                and check.feature_state in {QueryState.PRESENT, QueryState.ABSENT} for check in checks)
-            unknown = bool(checks) and any(check.prompt_tsg_id is None or check.factor_scope is None
-                or check.context_state is QueryState.UNRESOLVED
-                or check.context_state is QueryState.PRESENT and check.feature_state is QueryState.UNRESOLVED for check in checks)
-            cell = ("".join(str(int(check.feature_state is (QueryState.PRESENT if check.operation is Operation.ADD else QueryState.ABSENT)))
-                             for check in checks) if known else None)
-            row = dict(policy_key=policy.policy_key, task_id=key, task_unit_id=task["task_unit_id"],
-                source_lineage_id=task["source_lineage_id"], language=task["language"], api_family=task["api_family"],
-                task_archetype=task["task_archetype"], population_eligible=in_population,
-                source_assessments=tuple(checks), source_binding_sha256=content_hash(dict(
-                    assessments=checks, representation_qualification_sha256=qualification_digest)),
-                natural_state_resolved=known, source_state_unknown=unknown, target_state_cell=cell,
-                confirmation_baseline_source_eligible=bool(checks) and all(check.eligible for check in checks),
-                intervention_readiness="NOT_ESTABLISHED_BY_SOURCE_STATE", covariates=tuple(map(tuple, task["covariates"])))
+                    checks.append(
+                        freeze_source_eligibility(
+                            policy,
+                            task_id=key,
+                            task_unit_id=task["task_unit_id"],
+                            prompt=task["prompt"],
+                            graph=graphs.get(key),
+                            catalog=catalog,
+                            factor_scope=(
+                                feature_scope_from_record(raw_scope)
+                                if raw_scope is not None
+                                else None
+                            ),
+                            factor_feature_id=feature,
+                            eligibility_policy_sha256=content_hash(definitions[feature]),
+                        )
+                    )
+            known = bool(checks) and all(
+                (
+                    check.context_state is QueryState.PRESENT
+                    and check.factor_scope is not None
+                    and (check.feature_state in {QueryState.PRESENT, QueryState.ABSENT})
+                    for check in checks
+                )
+            )
+            unknown = bool(checks) and any(
+                (
+                    check.prompt_tsg_id is None
+                    or check.factor_scope is None
+                    or check.context_state is QueryState.UNRESOLVED
+                    or (
+                        check.context_state is QueryState.PRESENT
+                        and check.feature_state is QueryState.UNRESOLVED
+                    )
+                    for check in checks
+                )
+            )
+            cell = (
+                "".join(
+                    (
+                        str(
+                            int(
+                                check.feature_state
+                                is (
+                                    QueryState.PRESENT
+                                    if check.operation is Operation.ADD
+                                    else QueryState.ABSENT
+                                )
+                            )
+                        )
+                        for check in checks
+                    )
+                )
+                if known
+                else None
+            )
+            row = dict(
+                policy_key=policy.policy_key,
+                task_id=key,
+                task_unit_id=task["task_unit_id"],
+                source_lineage_id=task["source_lineage_id"],
+                language=task["language"],
+                api_family=task["api_family"],
+                task_archetype=task["task_archetype"],
+                population_eligible=in_population,
+                source_assessments=tuple(checks),
+                source_binding_sha256=content_hash(
+                    dict(
+                        assessments=checks, representation_qualification_sha256=qualification_digest
+                    )
+                ),
+                natural_state_resolved=known,
+                source_state_unknown=unknown,
+                target_state_cell=cell,
+                confirmation_baseline_source_eligible=bool(checks)
+                and all((check.eligible for check in checks)),
+                intervention_readiness="NOT_ESTABLISHED_BY_SOURCE_STATE",
+                covariates=tuple(map(tuple, task["covariates"])),
+            )
             row["feature_reliability"] = {}
             for check in checks:
                 if check.factor_scope is None or qualification is None:
                     continue
-                operation = next(node for node in graphs[key].nodes if node.node_id == check.factor_scope.operation_node_id)
-                profiles = [p for p in qualification["profiles"] if p["language"] == task["language"]
-                            and p["operation_semantic_id"] == operation.semantic_id
-                            and p["feature_id"] == check.actionable_feature_id]
-                # Use the least favourable gold-state bound, never the predicted
-                # state's profile. Both binary source states need direct coverage.
-                if ({p["expected_state"] for p in profiles} >= {"present", "absent"}
-                    and all(p["passed"] and p["reliability_lower_bound"] is not None for p in profiles)):
-                    row["feature_reliability"][check.actionable_feature_id] = min(p["reliability_lower_bound"] for p in profiles)
-            if tuple(name for name, _ in row["covariates"]) != covariate_names:
+                operation = next(
+                    (
+                        node
+                        for node in graphs[key].nodes
+                        if node.node_id == check.factor_scope.operation_node_id
+                    )
+                )
+                profiles = [
+                    p
+                    for p in qualification["profiles"]
+                    if p["language"] == task["language"]
+                    and p["operation_semantic_id"] == operation.semantic_id
+                    and (p["feature_id"] == check.actionable_feature_id)
+                ]
+                if {p["expected_state"] for p in profiles} >= {"present", "absent"} and all(
+                    (p["passed"] and p["reliability_lower_bound"] is not None for p in profiles)
+                ):
+                    row["feature_reliability"][check.actionable_feature_id] = min(
+                        (p["reliability_lower_bound"] for p in profiles)
+                    )
+            if tuple((name for name, _ in row["covariates"])) != covariate_names:
                 raise ValueError("source covariates differ from their frozen schema")
             policy_rows.append(row)
             if known:
                 resolved.append(row)
         source_rows.extend(policy_rows)
         population_rows = [row for row in policy_rows if row["population_eligible"]]
-        cells = {cell: [row for row in resolved if row["target_state_cell"] == cell] for cell in expected_cells}
-        shared = {field: set.intersection(*({row[field] for row in values} for values in cells.values()))
-                  for field in ("source_lineage_id", "language", "api_family", "task_archetype")}
+        cells = {
+            cell: [row for row in resolved if row["target_state_cell"] == cell]
+            for cell in expected_cells
+        }
+        shared = {
+            field: set.intersection(*({row[field] for row in values} for values in cells.values()))
+            for field in ("source_lineage_id", "language", "api_family", "task_archetype")
+        }
         missing_qualification = qualification is None or any(
-            factor.actionable_feature_id not in row["feature_reliability"] for factor in policy_factors for row in resolved)
-        low_reliability = any(value < rule["minimum_feature_reliability"]
-                              for row in resolved for value in row["feature_reliability"].values())
-        unknown_count = sum(row["source_state_unknown"] for row in population_rows)
+            (
+                factor.actionable_feature_id not in row["feature_reliability"]
+                for factor in policy_factors
+                for row in resolved
+            )
+        )
+        low_reliability = any(
+            (
+                value < rule["minimum_feature_reliability"]
+                for row in resolved
+                for value in row["feature_reliability"].values()
+            )
+        )
+        unknown_count = sum((row["source_state_unknown"] for row in population_rows))
         reasons = []
         if not population_rows:
             reasons.append("no_tasks_in_declared_population")
-        if population_rows and unknown_count / len(population_rows) > rule["maximum_unresolved_fraction"]:
+        if (
+            population_rows
+            and unknown_count / len(population_rows) > rule["maximum_unresolved_fraction"]
+        ):
             reasons.append("unresolved_fraction_exceeds_frozen_rule")
-        if any(len(values) < rule["minimum_state_task_units"] for values in cells.values()):
+        if any((len(values) < rule["minimum_state_task_units"] for values in cells.values())):
             reasons.append("insufficient_natural_state_support")
         if len(shared["source_lineage_id"]) < rule["minimum_shared_lineages"]:
             reasons.append("insufficient_source_lineage_overlap")
-        reasons.extend(field + "_nonoverlap" for field in ("language", "api_family", "task_archetype") if not shared[field])
+        reasons.extend(
+            (
+                field + "_nonoverlap"
+                for field in ("language", "api_family", "task_archetype")
+                if not shared[field]
+            )
+        )
         if missing_qualification:
             reasons.append("representation_qualification_missing")
         if low_reliability:
             reasons.append("extractor_reliability_below_threshold")
-        compatibility = config.get("pair_compatibility", {}).get(policy.policy_key)
-        compatible = atomic or compatibility is not None and compatibility.get("decision") == "compatible"
-        if not atomic:
-            if compatibility is None:
-                reasons.append("factorial_compatibility_unresolved")
-            else:
-                if compatibility.get("outcomes_or_arms_used") is not False:
-                    raise ValueError("Pair compatibility must be outcome blind")
-                _require_digest(compatibility["evidence_sha256"], "Pair compatibility")
-                if not compatible:
-                    reasons.append("factorial_incompatible")
-        summaries.append(dict(policy_key=policy.policy_key, candidate_kind="ATOMIC" if atomic else "PAIR",
-            total_selected_task_units=len(tasks), population_task_units=len(population_rows),
-            resolved_task_units=len(resolved), unknown_task_units=unknown_count,
-            context_excluded_task_units=sum(bool(row["source_assessments"]) and any(c.context_state in {QueryState.ABSENT, QueryState.NOT_APPLICABLE} for c in row["source_assessments"]) for row in population_rows),
-            state_or_cell_task_units=tuple((cell, len(cells[cell])) for cell in expected_cells),
-            shared_source_lineages=sorted(shared["source_lineage_id"]),
-            baseline_source_task_units=sum(row["confirmation_baseline_source_eligible"] for row in population_rows),
-            support_gate_passed=not reasons, failure_reasons=sorted(reasons)))
-        coverage.append(CandidateCoverageSummary(policy.policy_key, CandidateKind.ATOMIC if atomic else CandidateKind.PAIR,
-            tuple((cell, len(cells[cell])) for cell in expected_cells),
-            len({row["source_lineage_id"] for row in population_rows}), len(population_rows), len(resolved),
-            len(population_rows), 0, sum(row["confirmation_baseline_source_eligible"] for row in population_rows)))
-        # Missing reliability is not filled with zero or a model-generated confidence.
-        # Unknown source rows remain above, but never become binary observations.
-        if missing_qualification or low_reliability or not compatible:
+        summaries.append(
+            dict(
+                policy_key=policy.policy_key,
+                candidate_kind="ATOMIC",
+                total_selected_task_units=len(tasks),
+                population_task_units=len(population_rows),
+                resolved_task_units=len(resolved),
+                unknown_task_units=unknown_count,
+                context_excluded_task_units=sum(
+                    (
+                        bool(row["source_assessments"])
+                        and any(
+                            (
+                                c.context_state in {QueryState.ABSENT, QueryState.NOT_APPLICABLE}
+                                for c in row["source_assessments"]
+                            )
+                        )
+                        for row in population_rows
+                    )
+                ),
+                state_or_cell_task_units=tuple(
+                    ((cell, len(cells[cell])) for cell in expected_cells)
+                ),
+                shared_source_lineages=sorted(shared["source_lineage_id"]),
+                baseline_source_task_units=sum(
+                    (row["confirmation_baseline_source_eligible"] for row in population_rows)
+                ),
+                support_gate_passed=not reasons,
+                failure_reasons=sorted(reasons),
+            )
+        )
+        coverage.append(
+            CandidateCoverageSummary(
+                policy.policy_key,
+                CandidateKind.ATOMIC,
+                tuple(((cell, len(cells[cell])) for cell in expected_cells)),
+                len({row["source_lineage_id"] for row in population_rows}),
+                len(population_rows),
+                len(resolved),
+                len(population_rows),
+                0,
+                sum((row["confirmation_baseline_source_eligible"] for row in population_rows)),
+            )
+        )
+        if missing_qualification or low_reliability:
             continue
         for row in resolved:
-            if atomic:
-                group = atomic_groups.setdefault((population.analysis_scope_id, row["task_unit_id"]),
-                    dict(covariates=row["covariates"], states=[], bindings=[], failures=[]))
-                group["states"].append((policy.policy_key, int(row["source_assessments"][0].feature_state is QueryState.PRESENT)))
-                group["bindings"].append((policy.policy_key, row["source_binding_sha256"]))
-                group["failures"].append((policy.policy_key, tuple(sorted(reasons))))
-            else:
-                pairs.append(PairPreOutcomeObservation(policy.policy_key, row["task_unit_id"], config["model_id"],
-                    row["source_lineage_id"], row["language"], row["task_archetype"], row["api_family"],
-                    population.context_query_id, QueryState.PRESENT,
-                    tuple((c.actionable_feature_id, c.feature_state) for c in row["source_assessments"]),
-                    tuple((c.actionable_feature_id, row["feature_reliability"][c.actionable_feature_id]) for c in row["source_assessments"]),
-                    row["covariates"], row["source_binding_sha256"], tuple(sorted(reasons))))
-    atomic_rows = tuple(AtomicPreOutcomeObservation(unit, config["model_id"], family, 0,
-        tuple(sorted(value["states"])), value["covariates"], content_hash(sorted(value["bindings"])),
-        tuple(sorted(value["failures"])))
-        for (family, unit), value in sorted(atomic_groups.items()))
-    pairs = tuple(sorted(pairs, key=lambda row: row.preoutcome_observation_id))
-    report = dict(schema_version="2.0", status="SCOPED_SOURCE_SUPPORT_CHECK_COMPLETE",
-        task_units=len(tasks), policies=len(policies), resolved_support_policies=sum(row["support_gate_passed"] for row in summaries),
-        atomic_preoutcome_rows=len(atomic_rows), pair_preoutcome_rows=len(pairs), support_rule=rule,
-        task_file_sha256=file_sha256(tasks_path), catalog_sha256=catalog_sha256(catalog),
-        graph_bundle_sha256=sorted(graph_digests), scope_bindings_sha256=file_sha256(scope_path),
+            group = atomic_groups.setdefault(
+                (population.analysis_scope_id, row["task_unit_id"]),
+                dict(covariates=row["covariates"], states=[], bindings=[], failures=[]),
+            )
+            group["states"].append(
+                (
+                    policy.policy_key,
+                    int(row["source_assessments"][0].feature_state is QueryState.PRESENT),
+                )
+            )
+            group["bindings"].append((policy.policy_key, row["source_binding_sha256"]))
+            group["failures"].append((policy.policy_key, tuple(sorted(reasons))))
+    atomic_rows = tuple(
+        (
+            AtomicPreOutcomeObservation(
+                unit,
+                config["model_id"],
+                family,
+                0,
+                tuple(sorted(value["states"])),
+                value["covariates"],
+                content_hash(sorted(value["bindings"])),
+                tuple(sorted(value["failures"])),
+            )
+            for (family, unit), value in sorted(atomic_groups.items())
+        )
+    )
+    report = dict(
+        schema_version="2.0",
+        status="SCOPED_SOURCE_SUPPORT_CHECK_COMPLETE",
+        task_units=len(tasks),
+        policies=len(policies),
+        resolved_support_policies=sum((row["support_gate_passed"] for row in summaries)),
+        atomic_preoutcome_rows=len(atomic_rows),
+        support_rule=rule,
+        task_file_sha256=file_sha256(tasks_path),
+        catalog_sha256=catalog_sha256(catalog),
+        graph_bundle_sha256=sorted(graph_digests),
+        scope_bindings_sha256=file_sha256(scope_path),
         representation_qualification_sha256=qualification_digest,
-        implementation_sha256=file_sha256(Path(__file__)), arms_or_outcomes_used=False, fci_executed=False,
-        source_material_counts=dict(Counter(task.get("source_kind", "unspecified") for task in tasks)),
-        supported_policy_keys=sorted(row["policy_key"] for row in summaries if row["support_gate_passed"]),
-        scientific_claim_allowed=False, formal_execution_authorized=False,
-        claim_boundary="Mechanical source-scope support and outcome-free inputs only. Qualification bounds are "
-                       "recomputed from the bound source-reference result; independent review and state-blind scope selection require external verification; "
-                       "no intervention readiness, data-role assignment, formal admission or causal effect is established.")
-    write_bundle(output, {"report.json": report, "positivity-rows.json": source_rows, "support.json": summaries,
-        "coverage-summaries.json": tuple(sorted(coverage, key=lambda row: row.candidate_id)),
-        "atomic-preoutcome-observations.json": atomic_rows, "pair-preoutcome-observations.json": pairs})
+        implementation_sha256=file_sha256(Path(__file__)),
+        arms_or_outcomes_used=False,
+        fci_executed=False,
+        source_material_counts=dict(
+            Counter((task.get("source_kind", "unspecified") for task in tasks))
+        ),
+        supported_policy_keys=sorted(
+            (row["policy_key"] for row in summaries if row["support_gate_passed"])
+        ),
+        scientific_claim_allowed=False,
+        formal_execution_authorized=False,
+        claim_boundary="Mechanical source-scope support and outcome-free inputs only. Qualification bounds are recomputed from the bound source-reference result; independent review and state-blind scope selection require external verification; no intervention readiness, data-role assignment, formal admission or causal effect is established.",
+    )
+    write_bundle(
+        output,
+        {
+            "report.json": report,
+            "positivity-rows.json": source_rows,
+            "support.json": summaries,
+            "coverage-summaries.json": tuple(sorted(coverage, key=lambda row: row.candidate_id)),
+            "atomic-preoutcome-observations.json": atomic_rows,
+        },
+    )
     return report
 
 

@@ -11,14 +11,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Sequence
 
 from prompt_mechanism_study.artifact_io import require_sha256
-from prompt_mechanism_study.interaction_selector import (
-    PairCandidateUniverseManifest,
-    PairPreOutcomeFreeze,
-    PairShadowPlan,
-)
 from prompt_mechanism_study.prioritization import (
     AtomicCandidateUniverseManifest,
     AtomicFoldFreeze,
@@ -50,8 +44,6 @@ class RQ1BaselineKind(StrEnum):
 _SELECTOR_IDS = {
     (PolicyTrack.ATOMIC, RQ1BaselineKind.BLIND_EXPERT): "atomic_blind_expert",
     (PolicyTrack.ATOMIC, RQ1BaselineKind.SEEDED_RANDOM): "atomic_seeded_random",
-    (PolicyTrack.PAIR, RQ1BaselineKind.BLIND_EXPERT): "pair_blind_expert",
-    (PolicyTrack.PAIR, RQ1BaselineKind.SEEDED_RANDOM): "pair_seeded_random",
 }
 
 _EXPERT_VISIBLE_FIELDS = {
@@ -61,14 +53,7 @@ _EXPERT_VISIBLE_FIELDS = {
         "factor_operations",
         "mechanism_realization",
         "support_summary",
-    ),
-    PolicyTrack.PAIR: (
-        "analysis_scope",
-        "candidate_family",
-        "factor_operations",
-        "factorial_compatibility",
-        "support_summary",
-    ),
+    )
 }
 
 _EXPERT_HIDDEN_FIELDS = (
@@ -92,7 +77,6 @@ class BlindExpertCandidateCard:
     candidate_family_id: str
     factor_operations: tuple[tuple[str, Operation], ...]
     mechanism_realization_id: str | None
-    factorial_compatibility: str | None
     support_summary: tuple[tuple[str, int], ...]
 
     def __post_init__(self) -> None:
@@ -103,42 +87,33 @@ class BlindExpertCandidateCard:
             raise TypeError("expert candidate analysis_scope must be typed")
         require_text(self.candidate_family_id, "expert candidate family")
         if not self.factor_operations or any(
-            not isinstance(feature_id, str)
-            or not feature_id.strip()
-            or type(operation) is not Operation
-            for feature_id, operation in self.factor_operations
+            (
+                not isinstance(feature_id, str)
+                or not feature_id.strip()
+                or type(operation) is not Operation
+                for feature_id, operation in self.factor_operations
+            )
         ):
             raise ValueError("expert candidate factor operations are invalid")
-        if tuple(feature_id for feature_id, _ in self.factor_operations) != tuple(
-            sorted(feature_id for feature_id, _ in self.factor_operations)
+        if tuple((feature_id for feature_id, _ in self.factor_operations)) != tuple(
+            sorted((feature_id for feature_id, _ in self.factor_operations))
         ):
             raise ValueError("expert candidate factors must use canonical order")
         if self.support_summary != tuple(sorted(set(self.support_summary))):
             raise ValueError("expert candidate support summary must be canonical")
         if any(
-            not isinstance(name, str)
-            or not name.strip()
-            or type(value) is not int
-            or value < 0
-            for name, value in self.support_summary
+            (
+                not isinstance(name, str)
+                or not name.strip()
+                or type(value) is not int
+                or (value < 0)
+                for name, value in self.support_summary
+            )
         ):
             raise ValueError("expert candidate support summary is invalid")
-        if self.track is PolicyTrack.ATOMIC:
-            require_text(
-                self.mechanism_realization_id,
-                "Atomic expert mechanism realization",
-            )
-            if len(self.factor_operations) != 1:
-                raise ValueError("Atomic expert cards require one factor operation")
-            if self.factorial_compatibility is not None:
-                raise ValueError("Atomic expert cards cannot carry Pair compatibility")
-        else:
-            if self.mechanism_realization_id is not None:
-                raise ValueError("Pair expert cards cannot carry an Atomic realization")
-            if self.factorial_compatibility != "compatible":
-                raise ValueError("Pair expert cards require compatible factors")
-            if len(self.factor_operations) != 2:
-                raise ValueError("Pair expert cards require two factor operations")
+        require_text(self.mechanism_realization_id, "Atomic expert mechanism realization")
+        if len(self.factor_operations) != 1:
+            raise ValueError("Atomic expert cards require one factor operation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,34 +203,39 @@ def freeze_atomic_baseline_universe(
     schema_version: str,
 ) -> RQ1BaselineUniverse:
     """Adapt the frozen Atomic common universe without reading RD or FCI evidence."""
-
     if type(universe) is not AtomicCandidateUniverseManifest:
         raise TypeError("Atomic baseline requires an AtomicCandidateUniverseManifest")
     if type(fold_freeze) is not AtomicFoldFreeze or type(plan) is not AtomicShadowPlan:
         raise TypeError("Atomic baseline requires the frozen common discoverability and plan")
     _check_common_discoverability(universe, fold_freeze, plan)
-    eligible = tuple(item.candidate_id for item in fold_freeze.discoverability
-                     if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE)
+    eligible = tuple(
+        (
+            item.candidate_id
+            for item in fold_freeze.discoverability
+            if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+        )
+    )
     policy_by_key = {item.policy_key: item for item in universe.policy_keys}
     family_by_key = dict(universe.candidate_family_ids)
     realization_by_key = dict(universe.realization_policy_ids)
     expert_cards = tuple(
-        BlindExpertCandidateCard(
-            PolicyTrack.ATOMIC,
-            policy_key,
-            policy_by_key[policy_key].analysis_scope,
-            family_by_key[policy_key],
-            (
+        (
+            BlindExpertCandidateCard(
+                PolicyTrack.ATOMIC,
+                policy_key,
+                policy_by_key[policy_key].analysis_scope,
+                family_by_key[policy_key],
                 (
-                    policy_by_key[policy_key].factor.actionable_feature_id,
-                    policy_by_key[policy_key].factor.operation,
+                    (
+                        policy_by_key[policy_key].factor.actionable_feature_id,
+                        policy_by_key[policy_key].factor.operation,
+                    ),
                 ),
-            ),
-            realization_by_key[policy_key],
-            None,
-            (("support_gate_passed", 1),),
+                realization_by_key[policy_key],
+                (("support_gate_passed", 1),),
+            )
+            for policy_key in eligible
         )
-        for policy_key in eligible
     )
     return RQ1BaselineUniverse(
         PolicyTrack.ATOMIC,
@@ -272,85 +252,6 @@ def freeze_atomic_baseline_universe(
                 "information_budget_sha256": universe.information_budget_sha256,
                 "discoverability": fold_freeze.discoverability,
                 "fold_freeze_id": fold_freeze.fold_freeze_id,
-            }
-        ),
-        protocol_id,
-        schema_version,
-    )
-
-
-def freeze_pair_baseline_universe(
-    universe: PairCandidateUniverseManifest,
-    preoutcome_freeze: PairPreOutcomeFreeze,
-    plan: PairShadowPlan,
-    *,
-    protocol_id: str,
-    schema_version: str,
-) -> RQ1BaselineUniverse:
-    """Adapt the Pair compatibility/support universe without RD or relation evidence."""
-
-    if type(universe) is not PairCandidateUniverseManifest:
-        raise TypeError("Pair baseline requires a PairCandidateUniverseManifest")
-    if type(preoutcome_freeze) is not PairPreOutcomeFreeze or type(plan) is not PairShadowPlan:
-        raise TypeError("Pair baseline requires the frozen common discoverability and plan")
-    _check_common_discoverability(universe, preoutcome_freeze, plan)
-    frozen_gates = preoutcome_freeze.support_gates
-    if tuple(item.pair_id for item in frozen_gates) != universe.compatible_policy_keys:
-        raise ValueError("Pair baseline support gates must cover the compatible universe")
-    eligible = tuple(item.candidate_id for item in preoutcome_freeze.discoverability
-                     if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE)
-    policy_by_key = {item.policy_key: item for item in universe.policy_keys}
-    family_by_key = dict(universe.candidate_family_ids)
-    compatibility_by_key = {
-        item.policy_key: item.decision.value
-        for item in universe.compatibility_decisions
-    }
-    expert_cards = tuple(
-        BlindExpertCandidateCard(
-            PolicyTrack.PAIR,
-            gate.pair_id,
-            policy_by_key[gate.pair_id].analysis_scope,
-            family_by_key[gate.pair_id],
-            tuple(
-                (factor.actionable_feature_id, factor.operation)
-                for factor in policy_by_key[gate.pair_id].factors
-            ),
-            None,
-            compatibility_by_key[gate.pair_id],
-            tuple(
-                sorted(
-                    (
-                        *(
-                            (f"cell_{cell}_task_units", count)
-                            for cell, count in gate.cell_task_units
-                        ),
-                        ("shared_api_families", gate.shared_api_families),
-                        ("shared_archetypes", gate.shared_archetypes),
-                        ("shared_languages", gate.shared_languages),
-                        ("shared_lineages", gate.shared_lineages),
-                    )
-                )
-            ),
-        )
-        for gate in frozen_gates
-        if gate.pair_id in eligible
-    )
-    return RQ1BaselineUniverse(
-        PolicyTrack.PAIR,
-        universe.universe_id,
-        plan.model_id,
-        universe.top_k,
-        universe.candidate_ids,
-        eligible,
-        universe.model_bound_records,
-        expert_cards,
-        content_hash(
-            {
-                "compatibility_evidence_sha256": universe.compatibility_evidence_sha256,
-                "information_budget_sha256": universe.information_budget_sha256,
-                "support_gates": frozen_gates,
-                "discoverability": preoutcome_freeze.discoverability,
-                "preoutcome_freeze_id": preoutcome_freeze.preoutcome_freeze_id,
             }
         ),
         protocol_id,
@@ -786,7 +687,6 @@ __all__ = [
     "RQ1BaselineVerificationReceipt",
     "SeededRandomRankingPlan",
     "freeze_atomic_baseline_universe",
-    "freeze_pair_baseline_universe",
     "run_blind_expert_baseline",
     "run_seeded_random_baseline",
     "verify_rq1_baseline_result",

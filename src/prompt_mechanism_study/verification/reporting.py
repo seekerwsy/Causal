@@ -12,9 +12,18 @@ import json
 import math
 import random
 
-from prompt_mechanism_study.artifact_io import json_object, read_json_exact, read_json, verify_bundle, bundle_digest
+from prompt_mechanism_study.artifact_io import (
+    json_object,
+    read_json_exact,
+    read_json,
+    verify_bundle,
+    bundle_digest,
+)
 from prompt_mechanism_study.functional_judge import (
-    build_review_request, code_syntax_valid, syntax_parser_identity, validate_review_response,
+    build_review_request,
+    code_syntax_valid,
+    syntax_parser_identity,
+    validate_review_response,
 )
 from prompt_mechanism_study.measurement import Measurement
 
@@ -54,18 +63,27 @@ def verify_development_result(root: Path) -> dict:
     rows = read_json(root / "summary/assignments.json")
     report = read_json(root / "summary/report.json")
     effects = read_json(root / "summary/effects.json")
+
     def check(condition, message):
         if not condition:
             raise ValueError("development verification: " + message)
-    check(plan["scientific_claim_allowed"] is False and report["scientific_claim_allowed"] is False,
-          "development cannot authorize a scientific claim")
+
+    check(
+        plan["scientific_claim_allowed"] is False and report["scientific_claim_allowed"] is False,
+        "development cannot authorize a scientific claim",
+    )
+    check(
+        not any(c.get("kind") == "pair_interaction" for c in plan["analysis"]["contrasts"]),
+        "Atomic contrasts only",
+    )
     check(report["plan_sha256"] == content_hash(plan), "plan identity")
-    check(report["preoutcome_bundle_sha256"] == bundle_digest(root / "preoutcome"), "preoutcome identity")
+    check(
+        report["preoutcome_bundle_sha256"] == bundle_digest(root / "preoutcome"),
+        "preoutcome identity",
+    )
     by_assignment = {row["assignment_id"]: row for row in rows}
     check(len(rows) == len(by_assignment) == len(assigned), "total assigned-arm accounting")
     tasks = {task["task_id"]: task for task in plan["tasks"]}
-    # Independently reconstruct the evidence view; do not share the producer's
-    # preparation or message-splitting helpers. Older frozen runs remain readable.
     prepared_prefixes = {}
     for task_id, task in tasks.items():
         if "generation_input" not in task:
@@ -74,96 +92,226 @@ def verify_development_result(root: Path) -> dict:
         language = task["language"]
         system = plan["generation_system_prompt"]
         request = {"language": language, "task": source.replace("<language>", language)}
-        prefix = "System message:\n" + system + "\n\nUser message:\nLanguage: " + language + "\n\nTask:\n"
+        prefix = (
+            "System message:\n"
+            + system
+            + "\n\nUser message:\nLanguage: "
+            + language
+            + "\n\nTask:\n"
+        )
         baseline = prefix + request["task"]
         check(task["source_prompt_sha256"] == content_hash(source), "original source identity")
-        check(task["generation_input"] == {"system_prompt": system, "request": request}, "prepared messages")
-        check(task["prompt"] == baseline and task["prompt_sha256"] == content_hash(baseline), "baseline input evidence")
-        check(task["graph"]["prompt_sha256"] == content_hash(baseline), "TSG and generation baseline differ")
-        check(task["functional_contract"]["source_prompt_sha256"] == content_hash(baseline), "functional baseline differs")
+        check(
+            task["generation_input"] == {"system_prompt": system, "request": request},
+            "prepared messages",
+        )
+        check(
+            task["prompt"] == baseline and task["prompt_sha256"] == content_hash(baseline),
+            "baseline input evidence",
+        )
+        check(
+            task["graph"]["prompt_sha256"] == content_hash(baseline),
+            "TSG and generation baseline differ",
+        )
+        check(
+            task["functional_contract"]["source_prompt_sha256"] == content_hash(baseline),
+            "functional baseline differs",
+        )
         prepared_prefixes[task_id] = prefix
     policies = {policy["policy_id"]: policy for policy in plan["policies"]}
     seeds = set(plan["generation_seeds"])
     coordinates = {(row["task_id"], row["arm"], row["seed"]) for row in assigned}
-    check(coordinates == set(itertools.product(tasks, plan["arms"], seeds)), "complete task/arm/seed blocks")
+    check(
+        coordinates == set(itertools.product(tasks, plan["arms"], seeds)),
+        "complete task/arm/seed blocks",
+    )
     provider_calls = 0
     for allocation in assigned:
         key = allocation["assignment_id"]
         check(key in by_assignment, "assigned outcome missing")
         row = by_assignment[key]
-        check(all(row[field] == value for field, value in allocation.items()), "assignment metadata changed")
+        check(
+            all((row[field] == value for field, value in allocation.items())),
+            "assignment metadata changed",
+        )
         core = {field: value for field, value in allocation.items() if field != "assignment_id"}
         check(key == content_id("development_assignment_", core), "assignment identity")
-        task, policy = tasks[row["task_id"]], policies[row["policy_id"]]
-        check(row["task_unit_id"] == task["task_unit_id"] and row["binding_id"] == task["binding_id"], "task unit or binding changed")
+        task, policy = (tasks[row["task_id"]], policies[row["policy_id"]])
+        check(
+            row["task_unit_id"] == task["task_unit_id"] and row["binding_id"] == task["binding_id"],
+            "task unit or binding changed",
+        )
         if task.get("factor_scopes"):
-            check(row.get("factor_scopes") == task["factor_scopes"], "assigned factor scope changed")
+            check(
+                row.get("factor_scopes") == task["factor_scopes"], "assigned factor scope changed"
+            )
             prompt = _replay_scoped_development_prompt(task, policy, row["arm"], check)
         else:
-            operation = next(node for node in task["graph"]["nodes"] if node["node_id"] == task["target_operation_node_id"])
+            operation = next(
+                (
+                    node
+                    for node in task["graph"]["nodes"]
+                    if node["node_id"] == task["target_operation_node_id"]
+                )
+            )
             subject_id = task.get("target_subject_node_id")
             input_scope = ""
             if subject_id is not None:
                 check(row.get("target_subject_node_id") == subject_id, "assigned subject changed")
-                subject = next((node for node in task["graph"]["nodes"] if node["node_id"] == subject_id), None)
-                check(subject is not None and subject["node_type"] == "data_object", "subject is not a source data object")
-                check(any(edge["source_id"] == subject_id and edge["target_id"] == operation["node_id"]
-                          and edge["edge_type"] == "used_by" for edge in task["graph"]["edges"]),
-                      "subject does not supply the assigned operation")
-                input_scope = "For the input described by " + json.dumps(
-                    task["prompt"][subject["evidence_start"]:subject["evidence_end"]], ensure_ascii=False) + ": "
+                subject = next(
+                    (node for node in task["graph"]["nodes"] if node["node_id"] == subject_id), None
+                )
+                check(
+                    subject is not None and subject["node_type"] == "data_object",
+                    "subject is not a source data object",
+                )
+                check(
+                    any(
+                        (
+                            edge["source_id"] == subject_id
+                            and edge["target_id"] == operation["node_id"]
+                            and (edge["edge_type"] == "used_by")
+                            for edge in task["graph"]["edges"]
+                        )
+                    ),
+                    "subject does not supply the assigned operation",
+                )
+                input_scope = (
+                    "For the input described by "
+                    + json.dumps(
+                        task["prompt"][subject["evidence_start"] : subject["evidence_end"]],
+                        ensure_ascii=False,
+                    )
+                    + ": "
+                )
                 definition = policy.get("factor_definition", {})
-                check(definition.get("semantic_decisions") == [policy["feature_id"]]
-                      and definition.get("atomicity_review") == "SOURCE_REVIEWED_SINGLE_REQUIREMENT",
-                      "single-requirement review missing")
+                check(
+                    definition.get("semantic_decisions") == [policy["feature_id"]]
+                    and definition.get("atomicity_review") == "SOURCE_REVIEWED_SINGLE_REQUIREMENT",
+                    "single-requirement review missing",
+                )
             prompt = task["prompt"]
             if row["arm"] != "BASELINE":
-                text = policy["addition"] if row["arm"] == "TARGET" else task["control_texts"][row["arm"]]
-                prompt += "\n\nFor the operation described by " + json.dumps(task["prompt"][operation["evidence_start"]:operation["evidence_end"]], ensure_ascii=False) + ":\n- " + input_scope + text
-        check(row["prompt"] == prompt and row["prompt_sha256"] == content_hash(prompt), "rendered treatment or control changed")
+                text = (
+                    policy["addition"]
+                    if row["arm"] == "TARGET"
+                    else task["control_texts"][row["arm"]]
+                )
+                prompt += (
+                    "\n\nFor the operation described by "
+                    + json.dumps(
+                        task["prompt"][operation["evidence_start"] : operation["evidence_end"]],
+                        ensure_ascii=False,
+                    )
+                    + ":\n- "
+                    + input_scope
+                    + text
+                )
+        check(
+            row["prompt"] == prompt and row["prompt_sha256"] == content_hash(prompt),
+            "rendered treatment or control changed",
+        )
         case = root / "cases" / key
         verify_bundle(case)
-        check(read_json(case / "result.json") == row, "summary differs from per-assignment evidence")
+        check(
+            read_json(case / "result.json") == row, "summary differs from per-assignment evidence"
+        )
         calls = read_json(case / "calls.json")
         provider_calls += len(calls)
-        check(len(calls) == row["provider_calls"] and 1 <= len(calls) <= 2, "provider call accounting")
+        check(
+            len(calls) == row["provider_calls"] and 1 <= len(calls) <= 2, "provider call accounting"
+        )
         if row["task_id"] in prepared_prefixes:
             prefix = prepared_prefixes[row["task_id"]]
             check(prompt.startswith(prefix), "common input context changed")
-            check(calls[0]["request"] == {"language": task["language"], "task": prompt[len(prefix):]},
-                  "actual provider input differs from the represented arm")
+            check(
+                calls[0]["request"]
+                == {"language": task["language"], "task": prompt[len(prefix) :]},
+                "actual provider input differs from the represented arm",
+            )
         else:
             check(calls[0]["request"]["task"] == prompt, "actual provider prompt changed")
-        check(calls[0]["request"].get("language") == task["language"], "actual generation language changed")
-        check(calls[0]["evaluator"] == {**plan["generator"], "seed": row["seed"]}, "actual generator identity or seed changed")
-        check(calls[0]["system_prompt"] == plan["generation_system_prompt"], "actual generator system prompt changed")
+        check(
+            calls[0]["request"].get("language") == task["language"],
+            "actual generation language changed",
+        )
+        check(
+            calls[0]["evaluator"] == {**plan["generator"], "seed": row["seed"]},
+            "actual generator identity or seed changed",
+        )
+        check(
+            calls[0]["system_prompt"] == plan["generation_system_prompt"],
+            "actual generator system prompt changed",
+        )
         if len(calls) == 2:
             functional = calls[1]["request"]
-            check(functional["functional_task"] == task["prompt"], "functional judge received a treated source")
-            check(not {"arm", "model_id", "security_status", "policy_id"} & set(functional), "functional blindness")
-            check(calls[1]["evaluator"] == plan["functional_evaluator"] and calls[1]["system_prompt"] == plan["functional_system_prompt"], "functional measurement policy changed")
+            check(
+                functional["functional_task"] == task["prompt"],
+                "functional judge received a treated source",
+            )
+            check(
+                not {"arm", "model_id", "security_status", "policy_id"} & set(functional),
+                "functional blindness",
+            )
+            check(
+                calls[1]["evaluator"] == plan["functional_evaluator"]
+                and calls[1]["system_prompt"] == plan["functional_system_prompt"],
+                "functional measurement policy changed",
+            )
         if row["error"] is not None:
-            check(row["secure_code_yield"] is None and row["code_valid"] is None, "failed allocation silently imputed")
+            check(
+                row["secure_code_yield"] is None and row["code_valid"] is None,
+                "failed allocation silently imputed",
+            )
             continue
         raw = calls[0]["response"]
         generated = json.loads(raw)
-        check(set(generated) == {"code"} and generated["code"] == row["code"], "generated code changed")
+        check(
+            set(generated) == {"code"} and generated["code"] == row["code"],
+            "generated code changed",
+        )
         try:
             ast.parse(row["code"])
             valid = int(bool(row["code"].strip()))
         except SyntaxError:
             valid = 0
         check(row["code_valid"] == valid, "code-validity outcome")
-        check(row["measurement"]["generator_evidence_sha256"] == hashlib.sha256(raw.encode()).hexdigest(), "raw response hash")
+        check(
+            row["measurement"]["generator_evidence_sha256"]
+            == hashlib.sha256(raw.encode()).hexdigest(),
+            "raw response hash",
+        )
         if valid:
             evidence = row["measurement_evidence"]
             states = {fact["state"] for fact in evidence["security"]["decision"]["trace"]["facts"]}
-            security = "insecure" if "unsafe" in states else "unknown" if not states or "unresolved" in states else "secure"
-            check(row["security_status"] == security == evidence["security"]["security_label"], "security trace aggregation")
-            check(evidence["code"] == row["code"] and row["measurement"]["code_sha256"] == content_hash(row["code"]), "measured code identity")
-            check(evidence["functional_response"] == calls[1].get("response"), "functional response changed")
+            security = (
+                "insecure"
+                if "unsafe" in states
+                else "unknown" if not states or "unresolved" in states else "secure"
+            )
+            check(
+                row["security_status"] == security == evidence["security"]["security_label"],
+                "security trace aggregation",
+            )
+            check(
+                evidence["code"] == row["code"]
+                and row["measurement"]["code_sha256"] == content_hash(row["code"]),
+                "measured code identity",
+            )
+            check(
+                evidence["functional_response"] == calls[1].get("response"),
+                "functional response changed",
+            )
             if evidence.get("functional_failure") is not None:
-                check(evidence["functional_validated"] == {"status": "unknown", "reason": "functional_evaluator_failed", "failure": evidence["functional_failure"]}, "failed functional evaluator was relabelled")
+                check(
+                    evidence["functional_validated"]
+                    == {
+                        "status": "unknown",
+                        "reason": "functional_evaluator_failed",
+                        "failure": evidence["functional_failure"],
+                    },
+                    "failed functional evaluator was relabelled",
+                )
                 verdict = "unknown"
                 if "response" in calls[1]:
                     try:
@@ -173,93 +321,170 @@ def verify_development_result(root: Path) -> dict:
                     except RuntimeError:
                         pass
                     else:
-                        raise ValueError("development verification: valid functional response marked as failure")
+                        raise ValueError(
+                            "development verification: valid functional response marked as failure"
+                        )
                 else:
                     check("error" in calls[1], "functional failure lacks raw evidence")
             else:
                 verdict = json.loads(calls[1]["response"])["verdict"]
             check(row["functionality_status"] == verdict, "functional verdict changed")
-            check(calls[1]["request"]["program_lines"] == [{"line_number": n, "text": line} for n, line in enumerate(row["code"].splitlines(), 1)], "functional judge received different code")
+            check(
+                calls[1]["request"]["program_lines"]
+                == [
+                    {"line_number": n, "text": line}
+                    for n, line in enumerate(row["code"].splitlines(), 1)
+                ],
+                "functional judge received different code",
+            )
             f = {"pass": 1, "fail": 0, "unknown": None}[verdict]
             secure = int(security == "secure")
             evaluable = int(security != "unknown")
-            joint = 0 if f == 0 or security == "insecure" else None if f is None or security == "unknown" else 1
+            joint = (
+                0
+                if f == 0 or security == "insecure"
+                else None if f is None or security == "unknown" else 1
+            )
         else:
-            secure, evaluable, f, joint = 0, 0, 0, 0
-        check((row["secure_code_yield"], row["oracle_evaluable"], row["functionality"], row["joint"]) == (secure, evaluable, f, joint), "endpoint decomposition")
-    check(report["provider_calls"] == provider_calls and report["assigned_rows"] == len(rows), "report accounting")
-    check(report["failed_rows"] == sum(row["error"] is not None for row in rows), "failed rows hidden")
+            secure, evaluable, f, joint = (0, 0, 0, 0)
+        check(
+            (row["secure_code_yield"], row["oracle_evaluable"], row["functionality"], row["joint"])
+            == (secure, evaluable, f, joint),
+            "endpoint decomposition",
+        )
+    check(
+        report["provider_calls"] == provider_calls and report["assigned_rows"] == len(rows),
+        "report accounting",
+    )
+    check(
+        report["failed_rows"] == sum((row["error"] is not None for row in rows)),
+        "failed rows hidden",
+    )
     check(len(effects) == len(plan["analysis"]["contrasts"]), "multiplicity family changed")
     probabilities = []
     for comparison, effect in zip(plan["analysis"]["contrasts"], effects, strict=True):
         policy = comparison["policy_id"]
-        interaction = comparison.get("kind") == "pair_interaction"
-        if interaction:
-            weights = {"A11": 1, "A10": -1, "A01": -1, "A00": 1}
-            label = "A11 - A10 - A01 + A00"
-        else:
-            left, right = comparison["treatment"], comparison["control"]
-            weights, label = {left: 1, right: -1}, left + " - " + right
+        left, right = (comparison["treatment"], comparison["control"])
+        weights, label = ({left: 1, right: -1}, left + " - " + right)
         local = [row for row in rows if row["policy_id"] == policy]
         units = sorted({row["task_unit_id"] for row in local})
-        check(effect["policy_id"] == policy and effect["comparison"] == label and effect["task_units"] == len(units), "contrast or denominator changed")
+        check(
+            effect["policy_id"] == policy
+            and effect["comparison"] == label
+            and (effect["task_units"] == len(units)),
+            "contrast or denominator changed",
+        )
         cell = [row for row in local if row["arm"] in weights]
-        if not units or any(row["error"] is not None for row in cell):
-            check(effect["effect"] is None and effect["p_value"] is None and not effect["development_signal"], "missing outcomes did not block their contrast")
+        if not units or any((row["error"] is not None for row in cell)):
+            check(
+                effect["effect"] is None
+                and effect["p_value"] is None
+                and (not effect["development_signal"]),
+                "missing outcomes did not block their contrast",
+            )
             probabilities.append(1.0)
             continue
-        check(len(units) <= 20, "exact development verifier is bounded to twenty units per contrast")
+        check(
+            len(units) <= 20, "exact development verifier is bounded to twenty units per contrast"
+        )
         differences = []
         for unit in units:
-            means = {arm: sum(row["secure_code_yield"] for row in local if row["task_unit_id"] == unit and row["arm"] == arm) / len(seeds) for arm in weights}
-            differences.append(sum(means[arm] * weight for arm, weight in weights.items()))
+            means = {
+                arm: sum(
+                    (
+                        row["secure_code_yield"]
+                        for row in local
+                        if row["task_unit_id"] == unit and row["arm"] == arm
+                    )
+                )
+                / len(seeds)
+                for arm in weights
+            }
+            differences.append(sum((means[arm] * weight for arm, weight in weights.items())))
         observed = abs(sum(differences))
-        p = sum(abs(sum(sign * value for sign, value in zip(signs, differences))) >= observed - 1e-12
-                for signs in itertools.product((-1, 1), repeat=len(units))) / 2 ** len(units)
-        probabilities.append(1.0 if interaction else p)
+        p = sum(
+            (
+                abs(sum((sign * value for sign, value in zip(signs, differences))))
+                >= observed - 1e-12
+                for signs in itertools.product((-1, 1), repeat=len(units))
+            )
+        ) / 2 ** len(units)
+        probabilities.append(p)
         check(abs(effect["effect"] - sum(differences) / len(units)) < 1e-12, "task estimate")
-        if interaction:
-            check(effect["p_value"] is None and not effect["development_signal"]
-                  and effect["inference_status"] == "DESCRIPTIVE_ONLY_NO_PAIR_NULL_TEST", "unfrozen Pair inference")
-        else:
-            check(abs(effect["p_value"] - p) < 1e-12, "exact task test")
+        check(abs(effect["p_value"] - p) < 1e-12, "exact task test")
         rng = random.Random(plan["analysis"]["bootstrap_seed"])
-        draws = sorted(sum(differences[rng.randrange(len(units))] for _ in range(len(units))) / len(units) for _ in range(plan["analysis"]["bootstrap_draws"]))
+        draws = sorted(
+            (
+                sum((differences[rng.randrange(len(units))] for _ in range(len(units))))
+                / len(units)
+                for _ in range(plan["analysis"]["bootstrap_draws"])
+            )
+        )
         bounds = [draws[math.ceil(q * len(draws)) - 1] for q in (0.025, 0.975)]
         check([effect["ci_low"], effect["ci_high"]] == bounds, "descriptive bootstrap interval")
     adjusted = 0.0
-    for rank, index in enumerate(sorted(range(len(effects)), key=lambda index: probabilities[index])):
+    for rank, index in enumerate(
+        sorted(range(len(effects)), key=lambda index: probabilities[index])
+    ):
         adjusted = max(adjusted, min(1.0, (len(effects) - rank) * probabilities[index]))
         if effects[index]["p_value"] is not None:
             check(effects[index]["adjusted_p_value"] == adjusted, "Holm family adjustment")
-    return {"status": "VERIFIED_NON_CLAIM_DEVELOPMENT_RESULT", "task_units": len(tasks), "assigned_rows": len(assigned),
-            "provider_calls": provider_calls, "failed_rows": report["failed_rows"], "effect_rows": len(effects),
-            "scientific_claim_allowed": False, "summary_bundle_sha256": bundle_digest(root / "summary"),
-            "input_alignment_status": ("PREPARED_BASELINE_INPUTS_VERIFIED" if len(prepared_prefixes) == len(tasks)
-                                       else "LEGACY_SOURCE_ONLY_REPRESENTATION"),
-            "limitation": "Replays frozen accounting, inputs, labels and statistics; does not establish Oracle accuracy or a scientific effect."}
+    return {
+        "status": "VERIFIED_NON_CLAIM_DEVELOPMENT_RESULT",
+        "task_units": len(tasks),
+        "assigned_rows": len(assigned),
+        "provider_calls": provider_calls,
+        "failed_rows": report["failed_rows"],
+        "effect_rows": len(effects),
+        "scientific_claim_allowed": False,
+        "summary_bundle_sha256": bundle_digest(root / "summary"),
+        "input_alignment_status": (
+            "PREPARED_BASELINE_INPUTS_VERIFIED"
+            if len(prepared_prefixes) == len(tasks)
+            else "LEGACY_SOURCE_ONLY_REPRESENTATION"
+        ),
+        "limitation": "Replays frozen accounting, inputs, labels and statistics; does not establish Oracle accuracy or a scientific effect.",
+    }
+
+
 def _replay_scoped_development_prompt(task, policy, arm, check):
     """Independent exact-scope replay; no production binding or rendering calls."""
-    graph, source = task["graph"], task["prompt"]
+    graph, source = (task["graph"], task["prompt"])
     nodes = {node["node_id"]: node for node in graph["nodes"]}
     edges = {(edge["source_id"], edge["edge_type"], edge["target_id"]) for edge in graph["edges"]}
-    factors, scopes = policy["factors"], task["factor_scopes"]
-    pair = len(factors) == 2
-    flags = {"A00": (False, False), "A10": (True, False), "A01": (False, True), "A11": (True, True)}[arm] if pair else (arm == "TARGET",)
+    factors, scopes = (policy["factors"], task["factor_scopes"])
+    flags = (arm == "TARGET",)
     check(len(scopes) == len(factors) == len(flags), "factor coordinates")
-    compatibility = task.get("intervention_compatibility", task.get("pair_compatibility", {}))
-    check(compatibility.get("binding_id") == task["binding_id"] and compatibility.get("decision") == "compatible"
-          and compatibility.get("outcomes_used") is False, "source intervention compatibility")
-    instructions, removals = [], []
+    compatibility = task.get("intervention_compatibility", {})
+    check(
+        compatibility.get("binding_id") == task["binding_id"]
+        and compatibility.get("decision") == "compatible"
+        and (compatibility.get("outcomes_used") is False),
+        "source intervention compatibility",
+    )
+    instructions, removals = ([], [])
     for index, (factor, scope, active) in enumerate(zip(factors, scopes, flags, strict=True)):
         op = scope["operation_node_id"]
         check(op in nodes and nodes[op]["node_type"] == "task_operation", "scope operation")
-        check(all((key, "used_by", op) in edges and nodes[key]["node_type"] == "data_object"
-                  for key in scope["subject_node_ids"]), "scope subjects")
-        matched = [item for item in graph["scoped_feature_assessments"]
-                   if item["scope"] == scope and item["feature_id"] == factor["feature_id"]]
-        check(len(matched) == 1 and matched[0]["state"] == ("absent" if factor["operation"] == "add" else "present"),
-              "exact source-state gate")
+        check(
+            all(
+                (
+                    (key, "used_by", op) in edges and nodes[key]["node_type"] == "data_object"
+                    for key in scope["subject_node_ids"]
+                )
+            ),
+            "scope subjects",
+        )
+        matched = [
+            item
+            for item in graph["scoped_feature_assessments"]
+            if item["scope"] == scope and item["feature_id"] == factor["feature_id"]
+        ]
+        check(
+            len(matched) == 1
+            and matched[0]["state"] == ("absent" if factor["operation"] == "add" else "present"),
+            "exact source-state gate",
+        )
         if arm == "BASELINE":
             continue
         if active and factor["operation"] == "remove":
@@ -269,64 +494,135 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
             check(len(requirements) == 1, "literal REMOVE requirement")
             key = requirements[0]
             node = nodes[key]
-            check(all(target in {op, *scope["subject_node_ids"]} for origin, _, target in edges if origin == key),
-                  "literal REMOVE changes another object")
-            check(not any(other["scope"] != scope and key in other["requirement_node_ids"]
-                          for other in graph["scoped_feature_assessments"]), "literal REMOVE changes another scope")
-            check(not any(other["node_id"] != key and other["node_type"] != "task"
-                          and max(node["evidence_start"], other["evidence_start"]) < min(node["evidence_end"], other["evidence_end"])
-                          for other in nodes.values()), "literal REMOVE overlaps non-target evidence")
+            check(
+                all(
+                    (
+                        target in {op, *scope["subject_node_ids"]}
+                        for origin, _, target in edges
+                        if origin == key
+                    )
+                ),
+                "literal REMOVE changes another object",
+            )
+            check(
+                not any(
+                    (
+                        other["scope"] != scope and key in other["requirement_node_ids"]
+                        for other in graph["scoped_feature_assessments"]
+                    )
+                ),
+                "literal REMOVE changes another scope",
+            )
+            check(
+                not any(
+                    (
+                        other["node_id"] != key
+                        and other["node_type"] != "task"
+                        and (
+                            max(node["evidence_start"], other["evidence_start"])
+                            < min(node["evidence_end"], other["evidence_end"])
+                        )
+                        for other in nodes.values()
+                    )
+                ),
+                "literal REMOVE overlaps non-target evidence",
+            )
             removals.append((node["evidence_start"], node["evidence_end"]))
             continue
-        text = factor["addition"] if active else task["factor_control_texts"][index]["NOOP" if pair else arm]
+        text = factor["addition"] if active else task["factor_control_texts"][index][arm]
+
         def quote(key):
-            return json.dumps(source[nodes[key]["evidence_start"]:nodes[key]["evidence_end"]], ensure_ascii=False)
+            return json.dumps(
+                source[nodes[key]["evidence_start"] : nodes[key]["evidence_end"]],
+                ensure_ascii=False,
+            )
+
         prefix = ""
         if scope["subject_node_ids"]:
-            prefix = "For the input described by " if len(scope["subject_node_ids"]) == 1 else "For the inputs described by "
-            prefix += ", ".join(quote(key) for key in scope["subject_node_ids"]) + ": "
+            prefix = (
+                "For the input described by "
+                if len(scope["subject_node_ids"]) == 1
+                else "For the inputs described by "
+            )
+            prefix += ", ".join((quote(key) for key in scope["subject_node_ids"])) + ": "
         if scope["condition_node_ids"]:
-            prefix += "Under the unchanged source conditions " + ", ".join(quote(key) for key in scope["condition_node_ids"]) + ": "
+            prefix += (
+                "Under the unchanged source conditions "
+                + ", ".join((quote(key) for key in scope["condition_node_ids"]))
+                + ": "
+            )
         instructions.append((op, prefix + text))
     if arm in task.get("reviewed_variants", {}):
         variant = task["reviewed_variants"][arm]
-        check(variant["binding_id"] == task["binding_id"] and variant["source_prompt_sha256"] == content_hash(source)
-              and variant["enabled"] == list(flags) and variant["source_review"]["outcomes_used"] is False,
-              "reviewed realization binding")
+        check(
+            variant["binding_id"] == task["binding_id"]
+            and variant["source_prompt_sha256"] == content_hash(source)
+            and (variant["enabled"] == list(flags))
+            and (variant["source_review"]["outcomes_used"] is False),
+            "reviewed realization binding",
+        )
         mapped = variant["source_to_variant_nodes"]
         rewritten = {node["node_id"]: node for node in variant["graph"]["nodes"]}
-        target_requirements = {key for item in graph["scoped_feature_assessments"]
-                              if any(item["scope"] == scope and item["feature_id"] == factor["feature_id"]
-                                     for factor, scope in zip(factors, scopes, strict=True))
-                              for key in item["requirement_node_ids"]}
+        target_requirements = {
+            key
+            for item in graph["scoped_feature_assessments"]
+            if any(
+                (
+                    item["scope"] == scope and item["feature_id"] == factor["feature_id"]
+                    for factor, scope in zip(factors, scopes, strict=True)
+                )
+            )
+            for key in item["requirement_node_ids"]
+        }
         for key, before in nodes.items():
             if before["node_type"] == "task" or key in target_requirements:
                 continue
-            check(key in mapped and mapped[key] in rewritten, "reviewed realization drops a non-target node")
+            check(
+                key in mapped and mapped[key] in rewritten,
+                "reviewed realization drops a non-target node",
+            )
             after = rewritten[mapped[key]]
-            check(before["semantic_id"] == after["semantic_id"] and before["node_type"] == after["node_type"]
-                  and source[before["evidence_start"]:before["evidence_end"]] == variant["prompt"][after["evidence_start"]:after["evidence_end"]],
-                  "reviewed realization changes a non-target requirement")
+            check(
+                before["semantic_id"] == after["semantic_id"]
+                and before["node_type"] == after["node_type"]
+                and (
+                    source[before["evidence_start"] : before["evidence_end"]]
+                    == variant["prompt"][after["evidence_start"] : after["evidence_end"]]
+                ),
+                "reviewed realization changes a non-target requirement",
+            )
         for item in graph["scoped_feature_assessments"]:
             scope = item["scope"]
-            translated = dict(operation_node_id=mapped[scope["operation_node_id"]],
-                              subject_node_ids=sorted(mapped[key] for key in scope["subject_node_ids"]),
-                              condition_node_ids=sorted(mapped[key] for key in scope["condition_node_ids"]))
+            translated = dict(
+                operation_node_id=mapped[scope["operation_node_id"]],
+                subject_node_ids=sorted((mapped[key] for key in scope["subject_node_ids"])),
+                condition_node_ids=sorted((mapped[key] for key in scope["condition_node_ids"])),
+            )
             expected_state = item["state"]
             for factor, target_scope, active in zip(factors, scopes, flags, strict=True):
                 if scope == target_scope and item["feature_id"] == factor["feature_id"] and active:
                     expected_state = "present" if factor["operation"] == "add" else "absent"
-            matches = [row for row in variant["graph"]["scoped_feature_assessments"]
-                       if row["scope"] == translated and row["feature_id"] == item["feature_id"]]
-            check(len(matches) == 1 and matches[0]["state"] == expected_state, "reviewed realization scope states")
+            matches = [
+                row
+                for row in variant["graph"]["scoped_feature_assessments"]
+                if row["scope"] == translated and row["feature_id"] == item["feature_id"]
+            ]
+            check(
+                len(matches) == 1 and matches[0]["state"] == expected_state,
+                "reviewed realization scope states",
+            )
         return variant["prompt"]
     result = source
     for start, end in sorted(set(removals), reverse=True):
         result = result[:start] + result[end:]
-    for op in dict.fromkeys(key for key, _ in instructions):
+    for op in dict.fromkeys((key for key, _ in instructions)):
         node = nodes[op]
-        result += "\n\nFor the operation described by " + json.dumps(source[node["evidence_start"]:node["evidence_end"]], ensure_ascii=False) + ":\n"
-        result += "\n".join("- " + text for key, text in instructions if key == op)
+        result += (
+            "\n\nFor the operation described by "
+            + json.dumps(source[node["evidence_start"] : node["evidence_end"]], ensure_ascii=False)
+            + ":\n"
+        )
+        result += "\n".join(("- " + text for key, text in instructions if key == op))
     return result
 
 
@@ -349,7 +645,8 @@ from prompt_mechanism_study.verification.design import verify_target_study_freez
 from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
 from prompt_mechanism_study.verification.integrity import _decode_target_value
 from prompt_mechanism_study.target_security_profiles import (
-    evaluate_target_security_profile, target_security_profile_producer_sha256,
+    evaluate_target_security_profile,
+    target_security_profile_producer_sha256,
 )
 
 
@@ -637,6 +934,7 @@ def _replay_execution_measurements(evidence, contract, raw) -> dict[str, object]
     return {"status": "TARGET_EXECUTION_EVIDENCE_VERIFIED", "assignments": len(rows),
             "completed_measurement_calls": calls}
 
+
 def verify_formal_report_authorization(
     *,
     manifest: DataRoleManifest,
@@ -657,13 +955,14 @@ def verify_formal_report_authorization(
     execution_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Independently verify the only receipt that can enable paper-facing claims."""
-
     if type(authorization) is not FormalReportAuthorization:
         raise TypeError("report authorization verifier requires a formal receipt")
     if preflight.actual_power_results is None:
         raise ValueError("formal claims require independently verified actual task-support power")
     verify_target_execution_artifacts(
-        discovery=discovery, confirmation=confirmation, evidence=evidence,
+        discovery=discovery,
+        confirmation=confirmation,
+        evidence=evidence,
         environment_reference=authorization.execution_environment,
         command_reference=authorization.execution_command,
         provider_ledger_reference=authorization.provider_call_ledger,
@@ -684,9 +983,7 @@ def verify_formal_report_authorization(
         index=index,
     )
     evidence_verification = verify_target_shared_evidence(evidence, yields)
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
+    frozen_assignments = tuple(sorted(assignments, key=lambda item: item.assignment_id))
     confirmation_task_units = {
         task.task_unit_id
         for binding in manifest.bindings
@@ -701,21 +998,19 @@ def verify_formal_report_authorization(
         budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_stratum,
         budget.power_and_margin_memo.minimum_valid_bootstrap_fraction,
         budget.power_and_margin_memo.atomic_power.plan.practical_margin,
-        budget.power_and_margin_memo.pair_power.plan.practical_margin,
         budget.power_and_margin_memo.maximum_unknown_fraction_among_valid,
         atomic_minimum_task_units_per_realization=budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_realization,
-        pair_minimum_task_units_per_realization=budget.power_and_margin_memo.pair_power.plan.minimum_task_units_per_realization,
     )
     if (
         evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
         or evidence.ledger.dispatch != dispatch
         or evidence.ledger.assignments != frozen_assignments
-        or evidence.plan != plan
-        or not assigned_task_units <= confirmation_task_units
+        or (evidence.plan != plan)
+        or (not assigned_task_units <= confirmation_task_units)
     ):
         raise ValueError("formal report evidence boundary failed independent replay")
     return _check_formal_authorization(
-        index, evidence, yields, authorization, freeze_verification, evidence_verification,
+        index, evidence, yields, authorization, freeze_verification, evidence_verification
     )
 
 
@@ -796,29 +1091,30 @@ def _check_target_rq_tables(
     """Rebuild tables from the evidence verified once by this invocation."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[object]] = defaultdict(list)
     for slot in yields.slots:
-        slots_by_selector[(slot.track, slot.model_id, slot.selector_id)].append(slot)
+        slots_by_selector[slot.track, slot.model_id, slot.selector_id].append(slot)
     selector_rows = []
     for selector in sorted(
-        yields.selectors,
-        key=lambda item: (item.track.value, item.model_id, item.selector_id),
+        yields.selectors, key=lambda item: (item.track.value, item.model_id, item.selector_id)
     ):
         slots = sorted(
-            slots_by_selector[(selector.track, selector.model_id, selector.selector_id)],
+            slots_by_selector[selector.track, selector.model_id, selector.selector_id],
             key=lambda item: item.rank,
         )
         if len(slots) != selector.top_k:
             raise ValueError("RQ verifier lost a fixed selector slot")
         counts = Counter(
             (
-                slot.effect_status.value
-                if slot.effect_status is not None
-                else (
-                    "SELECTOR_EMPTY_OR_FAILURE"
-                    if slot.slot_status is not SlotStatus.FILLED
-                    else "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
+                (
+                    slot.effect_status.value
+                    if slot.effect_status is not None
+                    else (
+                        "SELECTOR_EMPTY_OR_FAILURE"
+                        if slot.slot_status is not SlotStatus.FILLED
+                        else "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
+                    )
                 )
+                for slot in slots
             )
-            for slot in slots
         )
         selector_rows.append(
             {
@@ -834,32 +1130,20 @@ def _check_target_rq_tables(
                 "negative_meaningful_slots": counts[
                     ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL.value
                 ],
-                "practically_null_slots": counts[
-                    ConfirmatoryEffectStatus.PRACTICALLY_NULL.value
-                ],
-                "inconclusive_slots": counts[
-                    ConfirmatoryEffectStatus.INCONCLUSIVE.value
-                ],
-                "non_evaluable_slots": counts[
-                    ConfirmatoryEffectStatus.NON_EVALUABLE.value
-                ],
-                "selector_empty_or_failure_slots": counts[
-                    "SELECTOR_EMPTY_OR_FAILURE"
-                ],
+                "practically_null_slots": counts[ConfirmatoryEffectStatus.PRACTICALLY_NULL.value],
+                "inconclusive_slots": counts[ConfirmatoryEffectStatus.INCONCLUSIVE.value],
+                "non_evaluable_slots": counts[ConfirmatoryEffectStatus.NON_EVALUABLE.value],
+                "selector_empty_or_failure_slots": counts["SELECTOR_EMPTY_OR_FAILURE"],
                 "bridge_or_protocolization_failure_slots": counts[
                     "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
                 ],
             }
         )
     selector_by_key = {
-        (row["track"], row["model_id"], row["selector_id"]): row
-        for row in selector_rows
+        (row["track"], row["model_id"], row["selector_id"]): row for row in selector_rows
     }
     rq2_rows = []
-    for track, full_id, ablation_id in (
-        (PolicyTrack.ATOMIC, "atomic_full", "atomic_rd_only"),
-        (PolicyTrack.PAIR, "pair_full", "pair_no_relation"),
-    ):
+    for track, full_id, ablation_id in ((PolicyTrack.ATOMIC, "atomic_full", "atomic_rd_only"),):
         models = sorted(
             {
                 model
@@ -880,16 +1164,10 @@ def _check_target_rq_tables(
                     "ablation_selector_id": ablation_id,
                     "top_k": full["top_k"],
                     "full_meaningful_yield_at_k": full["meaningful_yield_at_k"],
-                    "ablation_meaningful_yield_at_k": ablation[
-                        "meaningful_yield_at_k"
-                    ],
-                    "full_minus_ablation_yield_at_k": (
-                        full["meaningful_yield_at_k"]
-                        - ablation["meaningful_yield_at_k"]
-                    ),
-                    "comparison_semantics": (
-                        "descriptive_fixed_discovery_split_no_rank_pairing"
-                    ),
+                    "ablation_meaningful_yield_at_k": ablation["meaningful_yield_at_k"],
+                    "full_minus_ablation_yield_at_k": full["meaningful_yield_at_k"]
+                    - ablation["meaningful_yield_at_k"],
+                    "comparison_semantics": "descriptive_fixed_discovery_split_no_rank_pairing",
                 }
             )
     families = []
@@ -913,11 +1191,7 @@ def _check_target_rq_tables(
                     "effect_coordinate_id": estimate.effect_coordinate_id,
                     "policy_key": estimate.policy_key,
                     "model_id": estimate.model_id,
-                    "estimand": (
-                        "assigned_arm_task_unit_target_minus_noop_itt"
-                        if estimate.track is PolicyTrack.ATOMIC
-                        else "assigned_cell_task_unit_risk_difference_interaction_itt"
-                    ),
+                    "estimand": "assigned_arm_task_unit_target_minus_noop_itt",
                     "primary_endpoint": "oracle_evaluable_secure_code_yield",
                     "point": estimate.point,
                     "standard_error": estimate.standard_error,
@@ -930,32 +1204,6 @@ def _check_target_rq_tables(
                     "reasons": list(estimate.reasons),
                     "task_units": estimate.task_units,
                     "assignments": estimate.assignments,
-                    "response_pattern_classification_status": (
-                        estimate.response_pattern.status.value
-                    ),
-                    "response_pattern": estimate.response_pattern.label,
-                    "response_pattern_predicate_sha256": (
-                        estimate.response_pattern.predicate_sha256
-                    ),
-                    "response_pattern_reasons": list(
-                        estimate.response_pattern.reasons
-                    ),
-                    "pair_response_surface": (
-                        None
-                        if estimate.response_pattern.surface is None
-                        else {
-                            "mean_00": estimate.response_pattern.surface.mean_00,
-                            "mean_10": estimate.response_pattern.surface.mean_10,
-                            "mean_01": estimate.response_pattern.surface.mean_01,
-                            "mean_11": estimate.response_pattern.surface.mean_11,
-                            "factor_1_at_0": estimate.response_pattern.surface.factor_1_at_0,
-                            "factor_2_at_0": estimate.response_pattern.surface.factor_2_at_0,
-                            "joint": estimate.response_pattern.surface.joint,
-                            "factor_1_at_1": estimate.response_pattern.surface.factor_1_at_1,
-                            "factor_2_at_1": estimate.response_pattern.surface.factor_2_at_1,
-                            "interaction": estimate.response_pattern.surface.interaction,
-                        }
-                    ),
                     "arms": [
                         {
                             "arm": arm.arm.value,
@@ -965,9 +1213,7 @@ def _check_target_rq_tables(
                             "oracle_evaluability": arm.oracle_evaluability,
                             "functionality_yield": arm.functionality_yield,
                             "joint_success_yield": arm.joint_success_yield,
-                            "oracle_unknown_valid_assignments": (
-                                arm.oracle_unknown_valid_assignments
-                            ),
+                            "oracle_unknown_valid_assignments": arm.oracle_unknown_valid_assignments,
                             "terminal_assignments": arm.terminal_assignments,
                         }
                         for arm in estimate.arm_summaries
@@ -979,28 +1225,26 @@ def _check_target_rq_tables(
         if type(authorization) is not FormalReportAuthorization:
             raise TypeError("RQ verifier requires a formal authorization receipt")
         if (
-            authorization.protocol_id
-            != evidence.ledger.dispatch.union.ledger.protocol_id
+            authorization.protocol_id != evidence.ledger.dispatch.union.ledger.protocol_id
             or authorization.shared_evidence_record.artifact_id
             != evidence.shared_evidence_record_id
             or authorization.shared_evidence_record.sha256 != content_hash(evidence)
-            or authorization.target_selector_yield_result.artifact_id
-            != yields.target_selector_yield_result_id
-            or authorization.target_selector_yield_result.sha256
-            != content_hash(yields)
-            or authorization.evidence_ledger.artifact_id
-            != evidence.ledger.evidence_ledger_id
-            or authorization.evidence_ledger.sha256 != content_hash(evidence.ledger)
-            or authorization.evidence_level != evidence.evidence_level.value
-            or authorization.scientific_claim_allowed is not True
+            or (
+                authorization.target_selector_yield_result.artifact_id
+                != yields.target_selector_yield_result_id
+            )
+            or (authorization.target_selector_yield_result.sha256 != content_hash(yields))
+            or (authorization.evidence_ledger.artifact_id != evidence.ledger.evidence_ledger_id)
+            or (authorization.evidence_ledger.sha256 != content_hash(evidence.ledger))
+            or (authorization.evidence_level != evidence.evidence_level.value)
+            or (authorization.scientific_claim_allowed is not True)
         ):
             raise ValueError("RQ authorization failed independent evidence binding")
         report_status = "FORMAL_REPORT_AUTHORIZED"
     else:
         report_status = (
             "EXECUTED_EVIDENCE_AWAITING_FORMAL_REPORT_AUTHORIZATION"
-            if evidence.evidence_level
-            in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
+            if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
             else "NON_CLAIM_TEST_ARTIFACT"
         )
     expected = {
@@ -1012,22 +1256,16 @@ def _check_target_rq_tables(
         "report_status": report_status,
         "scientific_claim_allowed": claim_allowed,
         "formal_report_authorization_id": (
-            None
-            if authorization is None
-            else authorization.formal_report_authorization_id
+            None if authorization is None else authorization.formal_report_authorization_id
         ),
         "endpoint_order": [item.value for item in evidence.plan.metrics],
         "context_analysis_status": evidence.plan.context_analysis.status.value,
         "context_modifier_rows": [],
-        "pair_response_pattern_plan_status": (
-            evidence.plan.pair_response_patterns.status.value
-        ),
         "rq1_selector_rows": selector_rows,
         "rq2_full_minus_ablation_rows": rq2_rows,
         "primary_family_rows": families,
         "unique_effect_rows": sorted(
-            effects,
-            key=lambda row: (row["track"], row["candidate_record_id"]),
+            effects, key=lambda row: (row["track"], row["candidate_record_id"])
         ),
         "independent_verification": verification,
     }
@@ -1042,6 +1280,7 @@ def _check_target_rq_tables(
         "rq2_rows": len(rq2_rows),
         "unique_effect_rows": len(effects),
     }
+
 
 __all__ = [
     "verify_formal_report_authorization",

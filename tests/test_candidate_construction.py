@@ -79,11 +79,21 @@ def _development_sources(*, include_template=False):
 
 
 def _design():
-    return dict(outcome_id="oracle_evaluable_secure_code_yield", language_scope=["python"],
-                api_scope=["database"], task_archetype_scope=["query"], operations=["add", "remove"],
-                include_pairs=True, model_id="synthetic-offline", covariate_names=[],
-                support_rule=dict(minimum_state_task_units=2, minimum_shared_lineages=1,
-                                  maximum_unresolved_fraction=0.2, minimum_feature_reliability=0.8))
+    return dict(
+        outcome_id="oracle_evaluable_secure_code_yield",
+        language_scope=["python"],
+        api_scope=["database"],
+        task_archetype_scope=["query"],
+        operations=["add", "remove"],
+        model_id="synthetic-offline",
+        covariate_names=[],
+        support_rule=dict(
+            minimum_state_task_units=2,
+            minimum_shared_lineages=1,
+            maximum_unresolved_fraction=0.2,
+            minimum_feature_reliability=0.8,
+        ),
+    )
 
 
 def _proposal(request):
@@ -199,23 +209,32 @@ def test_compound_source_node_cannot_be_split_into_different_candidate_meanings(
     assert unresolved["dispositions"][0]["status"] == "unresolved"
 
 
-def test_reviewed_factors_emit_both_edits_and_pairs_without_atomic_support():
+def test_reviewed_factors_emit_both_atomic_edits_without_support_filtering():
     request, response, design, draft = _prepared_proposal()
     # Deliberately impossible natural-support counts cannot suppress proposal construction.
     design["support_rule"]["minimum_state_task_units"] = 10_000
-    compiled = compile_candidate_proposal(request, response, design, _review(request, response, draft))
+    compiled = compile_candidate_proposal(
+        request, response, design, _review(request, response, draft)
+    )
     atomic = [policy for policy in compiled["policies"] if "factor" in policy]
-    pairs = [policy for policy in compiled["policies"] if "factors" in policy]
-    assert len(atomic) == 4 and len(pairs) == 4
-    assert {tuple(factor["operation"] for factor in policy["factors"]) for policy in pairs} == {
-        ("add", "add"), ("add", "remove"), ("remove", "add"), ("remove", "remove")}
     features = {factor["feature_id"] for factor in compiled["factors"]}
+    assert len(atomic) == len(compiled["policies"]) == 4
+    assert {
+        (policy["factor"]["actionable_feature_id"], policy["factor"]["operation"])
+        for policy in atomic
+    } == {(feature, operation) for feature in features for operation in ("add", "remove")}
     for query in compiled["queries"]:
         context = set(query["required_semantics"]) | set(query["forbidden_semantics"])
-        context.update(concept for source, _, target in query["required_relations"] for concept in (source, target))
+        context.update(
+            concept
+            for source, _, target in query["required_relations"]
+            for concept in (source, target)
+        )
         assert not features & context
-        assert any(compiled["source_types"][concept] == "task_operation"
-                   for concept in query["required_semantics"])
+        assert any(
+            compiled["source_types"][concept] == "task_operation"
+            for concept in query["required_semantics"]
+        )
     assert compiled["formal_execution_authorized"] is False
 
 
