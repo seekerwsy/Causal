@@ -132,6 +132,18 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
+The [three-scheme extraction diagnostic](experiments/2026-09-17-tsg-extraction-comparison.md)
+compared current full records, focused bindings and inventory-then-binding on the
+same exposed pandoc task, twice per scheme. Eight calls completed for CNY2.444208.
+All six final outputs kept both API prohibitions in one atom. Focused extraction
+cost less but varied in omissions, guards and effective presentation constraints;
+staged extraction retained more prose while expanding targets in one repetition
+and moving runtime obligations to the generation layer in the other. Auxiliary
+relation omissions also limited the projected schemes' coverage. This isolated
+extraction, not review/repair or a complete candidate pipeline. No alternative was
+promoted. The one-task source audit and exact offline replay are development
+evidence, not population accuracy, independent qualification or model ranking.
+
 The [current-path validation](experiments/2026-09-16-atomic-current-workflow.md)
 ran the exposed pandoc task under the actual prepared input. Four baseline calls
 produced a graph and repaired missing exception/logging guards, but retained two
