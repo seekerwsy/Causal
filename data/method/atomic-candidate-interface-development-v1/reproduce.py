@@ -60,7 +60,7 @@ def candidate_probe(request, node, scope, definition):
                 approved_policies=len(draft["policies"]), draft=draft)
 
 
-def edit_probe(task, contract, graph, node, scope):
+def edit_probe(task, contract, graph, node, scope, reviewed_edit=None):
     """Exercise existing ADD/REMOVE gates with explicitly authored positive evidence."""
     nodes = {n.node_id: n for n in graph.nodes}
     links = {(e.source_id, e.edge_type, e.target_id) for e in graph.edges}
@@ -69,7 +69,9 @@ def edit_probe(task, contract, graph, node, scope):
                                     scope.condition_node_ids, links=links,
                                     node_types={k: n.node_type for k, n in nodes.items()})))
     assessment = ScopedFeatureAssessment(scope, node.semantic_id, "present", evidence)
-    assessed = replace(graph, scoped_feature_assessments=(assessment,))
+    other_assessments = tuple(item for item in graph.scoped_feature_assessments
+                             if (item.scope, item.feature_id) != (scope, node.semantic_id))
+    assessed = replace(graph, scoped_feature_assessments=(*other_assessments, assessment))
     validate_prompt_tsg(assessed, prompt=task["prompt"], catalog=contract.catalog)
     op = nodes[scope.operation_node_id]
     # Native source concepts for this renderer probe. No relabeling into the new
@@ -90,6 +92,27 @@ def edit_probe(task, contract, graph, node, scope):
                 permission_error_clause_retained='raise a "PermissionError" if the file is outside the download directory' in rendered["prompt"])
         except ValueError as error:
             outputs[edit] = dict(status="REJECTED", error=str(error))
+    if reviewed_edit is not None:
+        target_contract = task_context_contract_from_record(reviewed_edit["contract"])
+        target_graph = compile_task_context_contract(target_contract,
+            prompt=reviewed_edit["prompt"], catalog=reviewed_edit["input_catalog"])
+        before = local_nodes(contract, assessed, task["prompt"])
+        after = local_nodes(target_contract, target_graph, reviewed_edit["prompt"])
+        binding = bind_task_hypothesis(assessed, query=query, policy_id="diagnostic_remove",
+            factor_feature_ids=(node.semantic_id,), factor_operations=("remove",),
+            factor_scopes=(scope,))
+        realization = dict(binding_id=binding.binding_id,
+            source_prompt_sha256=content_hash(task["prompt"]), enabled=[True],
+            prompt=reviewed_edit["prompt"], graph=prompt_tsg_record(target_graph),
+            source_to_variant_nodes={before[key].node_id: after[key].node_id
+                                     for key in before.keys() & after.keys()},
+            source_review=reviewed_edit["source_review"])
+        rendered = render_task_hypothesis(binding, assessed, prompt=task["prompt"],
+            catalog=contract.catalog, enabled=(True,), additions={}, reviewed_variant=realization)
+        outputs["reviewed_remove"] = dict(status=rendered["semantic_fidelity_status"],
+            **rendered, realization=realization)
+        outputs["unchanged_source_control"] = render_task_hypothesis(binding, assessed,
+            prompt=task["prompt"], catalog=contract.catalog, enabled=(False,), additions={})
     return dict(assessment_origin="Developer source audit, not LLM output or independent qualification",
                 positive_evidence_node_ids=evidence, edits=outputs)
 
@@ -128,7 +151,8 @@ def run(inputs):
                         final_security_intervention_admission=False)
                     result["candidate_probe"] = candidate_probe(request, node, scope, result["definition"])
                     if probe["role"] == "security_requirement":
-                        result["edit_probe"] = edit_probe(task, contract, graph, node, scope)
+                        result["edit_probe"] = edit_probe(task, contract, graph, node, scope,
+                            case.get("reviewed_edit") if variant == "source_reviewed" else None)
                     results.append(result)
     source_root = Path(__file__).resolve().parents[3] / "src/prompt_mechanism_study"
     code = {name:hashlib.sha256((source_root/name).read_bytes()).hexdigest() for name in
@@ -147,8 +171,10 @@ def run(inputs):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Fresh output directory")
+    parser.add_argument("--inputs", type=Path, default=Path(__file__).with_name("inputs.json"),
+                        help="Explicit bounded diagnostic inputs; default replays the original three cases")
     args = parser.parse_args()
-    inputs = json.loads(Path(__file__).with_name("inputs.json").read_text(encoding="utf-8"))
+    inputs = json.loads(args.inputs.read_text(encoding="utf-8"))
     outputs = run(inputs)
     write_bundle(args.output, outputs)
     print(json.dumps(outputs["report.json"], ensure_ascii=False, indent=2))

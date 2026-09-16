@@ -23,3 +23,14 @@ model verdicts or independent human labels. No probe is an approved intervention
 
 See the [Chinese report](../../../docs/experiments/2026-09-16-atomic-candidate-interface.md)
 for interpretation and source limitations.
+
+The bounded follow-up in `shell-removal/` preserves a separate one-task input and
+result bundle. It tests an independently editable subprocess prohibition using
+the same driver and the existing reviewed-rewrite interface. To replay it:
+
+```text
+python data/method/atomic-candidate-interface-development-v1/reproduce.py NEW_OUTPUT_DIRECTORY --inputs data/method/atomic-candidate-interface-development-v1/shell-removal/inputs.json
+```
+
+See the [follow-up report](../../../docs/experiments/2026-09-16-atomic-shell-removal.md).
+The original three-case inputs and saved results are unchanged and replay exactly.

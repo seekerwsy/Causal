@@ -132,15 +132,26 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
-The latest [Atomic interface diagnostic](experiments/2026-09-16-atomic-candidate-interface.md)
+The latest [single-requirement edit diagnostic](experiments/2026-09-16-atomic-shell-removal.md)
+found a source-audited feasible REMOVE in one exposed pandoc task. Removing only the
+subprocess prohibition preserved the os.system prohibition and non-target behavior.
+The existing reviewed-rewrite interface handled their shared sentence; no production
+mechanism was added. The historical automatic graph instead deleted only `with
+shell=True`, leaving a broader prohibition while reporting an intended absent state.
+Evidence spans are not automatically editable semantic units, and intended states
+are not measured fidelity. This was an author-audited interface probe, not fresh
+extraction, automatic candidate discovery or independent intervention qualification.
+Next, check this fixed comparison on the current exact-input extraction path before
+expanding tasks or generating code. No additional review component is proposed.
+
+The earlier [Atomic interface diagnostic](experiments/2026-09-16-atomic-candidate-interface.md)
 replayed three exposed tasks without provider calls. Correct requirement-only
 guards could not cross the candidate context gate, but those return/exception
 requirements were non-target functionality, not valid editable security factors.
 A directory-containment probe mechanically removed a security sentence while
 retaining required outside-directory rejection. No intervention was approved.
-The next diagnostic must first establish that one safety requirement can actually
-change while non-target behavior stays fixed, then compare automatic and
-source-reviewed graph use. Draft construction is not semantic approval.
+That negative result motivated the independently editable example above.
+Draft construction is not semantic approval.
 
 The [cross-task comparison](experiments/2026-09-16-tsg-binding-coverage-transfer.md)
 made16 review calls on eight authored variants of two previously exposed tasks,
