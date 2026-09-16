@@ -1,0 +1,110 @@
+{
+  "status": "DESCRIPTIVE_TABLES_GENERATED_NOT_SCIENTIFIC_EFFECT_RESULTS",
+  "selection_rule": "20 most frequent source CWE labels in the 1,992-task candidate pool; descending count, ascending numeric CWE ID for ties",
+  "selection_changes_study_scope": false,
+  "selected_cwe_ids_by_rank": [
+    "CWE-120",
+    "CWE-338",
+    "CWE-78",
+    "CWE-680",
+    "CWE-807",
+    "CWE-327",
+    "CWE-798",
+    "CWE-89",
+    "CWE-502",
+    "CWE-94",
+    "CWE-95",
+    "CWE-121",
+    "CWE-918",
+    "CWE-79",
+    "CWE-22",
+    "CWE-352",
+    "CWE-330",
+    "CWE-119",
+    "CWE-611",
+    "CWE-20"
+  ],
+  "main_cwe_rows": 20,
+  "main_cwe_memberships": 1334,
+  "main_unique_task_units": 1333,
+  "main_candidate_pool_coverage_percent": 66.91767068273093,
+  "main_categories": [
+    {
+      "category": "Memory and resources",
+      "cwe_ids": [
+        "CWE-120",
+        "CWE-680",
+        "CWE-121",
+        "CWE-119"
+      ],
+      "unique_task_units": 322
+    },
+    {
+      "category": "Injection and interpretation",
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-89",
+        "CWE-94",
+        "CWE-95",
+        "CWE-79"
+      ],
+      "unique_task_units": 349
+    },
+    {
+      "category": "Crypto and randomness",
+      "cwe_ids": [
+        "CWE-338",
+        "CWE-327",
+        "CWE-330"
+      ],
+      "unique_task_units": 254
+    },
+    {
+      "category": "Identity, credentials, and trust",
+      "cwe_ids": [
+        "CWE-807",
+        "CWE-798",
+        "CWE-352"
+      ],
+      "unique_task_units": 190
+    },
+    {
+      "category": "Input processing",
+      "cwe_ids": [
+        "CWE-502",
+        "CWE-611",
+        "CWE-20"
+      ],
+      "unique_task_units": 134
+    },
+    {
+      "category": "Files and networks",
+      "cwe_ids": [
+        "CWE-918",
+        "CWE-22"
+      ],
+      "unique_task_units": 84
+    }
+  ],
+  "appendix_cwe_rows": 117,
+  "appendix_cwe_memberships": 1993,
+  "appendix_unique_task_units": 1992,
+  "source_example_count": 214,
+  "pattern_count": null,
+  "per_pattern_counts": null,
+  "generated_code_or_outcomes_used": false,
+  "provider_calls": 0,
+  "formal_use_authorized": false,
+  "input_sha256": {
+    "docs/experiments/cwe-pattern-inventory-20260911/inventory.json": "579034233cda8c4a66439eff8102f9745d64d46e74763d4a802bf978c2156b67",
+    "data/dataset-curation/research-candidate-pool-v2/tasks.json": "8fe351cf97c55686252ed88cdf14c77ae268633ad2a8e52db8d73b3bd00497c7",
+    "docs/experiments/cwe-pattern-inventory-20260911/paper-tables/display.tsv": "1f1cb5797e0eb747f8dbf3d05e5c46ad63213407df7161357855321ded4f1af3",
+    "docs/experiments/cwe-pattern-inventory-20260911/paper-tables/build.py": "61ea2c6a332e914a8a858dadff963a4f970473c10141a8566bf103feeeb26c05"
+  },
+  "output_sha256": {
+    "cwe-main.tex": "a41fc266a88cf21c5c865f131ae70cb41e3a249f99462e2b4bd8aaad0682e86c",
+    "cwe-appendix.tex": "87949cfa04ac5b44ff54a4f612f6f589763637dd693b14a6802182701a352f80",
+    "preview.tex": "8cfa679483eb50f309462731284fd784eb1cb5a48303e342e7e4e6b54a9d6e13",
+    "main-preview.tex": "0d92e9c07462cc54c4acf9d0070dc5c8a16ab5f1fc322be8f57e473e8ae25499"
+  }
+}

@@ -45,7 +45,7 @@
     "automatic_retry_ceiling": 0,
     "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
     "credential_material_recorded": false,
-    "scope": "all prospective external LLM calls, including representation qualification, intervention materialization and validation, code generation, and functional judgment",
+    "scope": "Default for all prospective external LLM calls, including representation, interventions, generation and functional judgment; the explicitly bounded representation-development exception below is separately author-approved.",
     "formal_budget_call_kinds": [
       "materialization",
       "generation",
@@ -96,10 +96,33 @@
       "provider_calls_authorized_after_required_preflight": true,
       "formal_experiment_authorized": false,
       "full_formal_budget_status": "UNAPPROVED",
-      "full_formal_budget_recommendation_basis": "core_k5_k3_atomic100_pair170_two_slots_no_overlap_credit_v1",
-      "full_formal_budget_recommendation_cny": 200,
-      "full_baseline_envelope_recommendation_cny": 300,
-      "candidate_budget_envelope_id": "rq1_budget_envelope_2271756bab8d848b339baa7c99a4bb3956b908906e9a4a734ccd4ff19af79ac0"
+      "full_formal_budget_recommendation_status": "BLOCKED_PENDING_TASK_LEVEL_POWER_QUALIFICATION",
+      "full_formal_budget_recommendation_basis": null,
+      "full_formal_budget_recommendation_cny": null,
+      "full_baseline_envelope_recommendation_cny": null,
+      "candidate_budget_envelope_id": null
+    },
+    "bounded_representation_development_exception": {
+      "approved_on": "2026-09-12",
+      "author_response": "授权",
+      "status": "EXECUTED_BOUNDED_CHECK_NOT_QUALIFIED",
+      "model_id": "qwen3.7-plus-2026-05-26",
+      "scope": "Source representation capability only: one exposed pilot, then six remaining exposed cases only if pilot passes the frozen critical and source-semantic review.",
+      "prepared_plan_path": "data/method/open-tsg-scope-development-v1/plus-proposal/inputs/plan.json",
+      "prepared_inputs_bundle_sha256": "6995ee40eb5586d1dca5ad4af6209fb96327d2821e54f3f6eb7c1540730c9808",
+      "execution_source_archive_sha256": "cb3889e2fbdfad748270cc61afd1257c3de46caa7230b2793536d8a7ab6bb74d",
+      "maximum_provider_calls": 14,
+      "maximum_conservative_cost_microunits": 8400000,
+      "funding": "Within existing CNY100 preexperiment authorization; no additional budget.",
+      "retry_ceiling": 0,
+      "new_natural_task_exposures": 0,
+      "qualification_accept_consumed": false,
+      "code_generation_authorized": false,
+      "functional_judgment_authorized": false,
+      "formal_execution_authorized": false,
+      "actual_provider_calls": 13,
+      "actual_conservative_cost_microunits": 7800000,
+      "result_path": "data/method/open-tsg-scope-development-v1/plus-proposal/analysis/summary.json"
     }
   },
   "prospective_source_population": {
@@ -115,26 +138,48 @@
       "readiness_summary_status",
       "workstream"
     ],
-    "population_id": "phase-context-policy-v3.quality-included-python-source.v1",
+    "population_id": "phase-context-policy-v3.full-source-preparation.v1",
     "prompt_tsg_status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
     "selection_rule": {
-      "language": "python",
-      "quality_disposition": "QUALITY_INCLUDED"
+      "language_scope": [
+        "c",
+        "cpp",
+        "csharp",
+        "go",
+        "java",
+        "javascript",
+        "php",
+        "python",
+        "rust"
+      ],
+      "quality_dispositions": [
+        "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION",
+        "QUALITY_EXCLUDED_SOURCE_DEFECT",
+        "QUALITY_INCLUDED"
+      ],
+      "purpose": "SOURCE_PREPARATION_ONLY"
     },
     "source_lineage_counts": {
-      "codesec_eval_plus": 128,
-      "cweval": 15,
-      "cyberseceval_instruct_prime": 44,
-      "llmseceval": 20,
-      "sallm": 56,
-      "secodeplt": 64,
-      "securityeval": 54
+      "codesec_eval_plus": 140,
+      "cweval": 119,
+      "cyberseceval_instruct_prime": 1402,
+      "llmseceval": 150,
+      "sallm": 99,
+      "secodeplt": 134,
+      "securityeval": 121
     },
-    "status": "SOURCE_POPULATION_FROZEN_PENDING_REPRESENTATION_QUALIFICATION",
-    "task_unit_count": 381,
-    "task_unit_id_set_sha256": "d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8",
+    "status": "FULL_SOURCE_PREPARED_PENDING_CANDIDATE_AND_MEASUREMENT_QUALIFICATION",
+    "task_unit_count": 2165,
+    "task_unit_id_set_sha256": "3d6811cf740db50afca5762e81ca4d11b8fc2c192b6db34dccc03de87e9fe3d0",
     "technical_readiness_diagnostic_count": 101,
-    "technical_readiness_is_not_an_admission_rule": true
+    "technical_readiness_is_not_an_admission_rule": true,
+    "prepared_data_bundle_path": "data/dataset-curation/research-source-use-v2",
+    "prepared_data_manifest_sha256": "2015d760cbeaacff16e701ad25a507e5973960a31b0ecd7de8d4b769bf7a741c",
+    "source_use_rule_sha256": "ac2f1608e9fdc16e02410bd2aed8268bbd08070dec11435cc2d12d2692361f67",
+    "source_contract_reviews_pending_for_restored_inputs": 0,
+    "candidate_source_reviews_completed": 1482,
+    "available_for_source_review_count": 2043,
+    "available_independent_group_count": 2042
   },
   "model_dispatch": {
     "confirmation_cross_product_models": false,
@@ -175,7 +220,12 @@
   "realization_allocation": {
     "arms_share_assigned_realization": true,
     "assignments_per_task_policy_coordinate": 1,
-    "global_realization_count_is_not_a_per_task_multiplier": true
+    "global_realization_count_is_not_a_per_task_multiplier": true,
+    "allocation_precedes_task_specific_materialization": true,
+    "allocation_rule": "largest_remainder_with_seeded_task_order_within_policy_and_stratum",
+    "failed_allocations_are_retained_without_replacement": true,
+    "primary_estimand": "fixed_weight_mixture_of_realization_specific_protocolizable_task_populations",
+    "estimator": "equal_task_unit_mean_within_realization_then_original_policy_weights"
   },
   "schema_version": "1.0",
   "scientific_effect_claim_allowed": false,

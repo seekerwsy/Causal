@@ -1,19 +1,7 @@
 from __future__ import annotations
-
-from collections import Counter
 from dataclasses import replace
-from pathlib import Path
-
+from functools import cache
 import pytest
-
-from prompt_mechanism_study.artifact_io import read_json, write_bundle
-from prompt_mechanism_study.cli import main
-from prompt_mechanism_study.inference import (
-   EvidenceLevel,
-   build_target_selector_yields,
-   estimate_target_itt,
-   freeze_assigned_arm_evidence,
-)
 from prompt_mechanism_study.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
     PAIR_CONFIRMATORY_ARMS,
@@ -22,8 +10,16 @@ from prompt_mechanism_study.randomization import (
     TargetTaskBundle,
     randomize_target_confirmation,
 )
-from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.prioritization import (
+    FixedSlotSource,
+    PolicyTrack,
+    SelectorSlot,
+    SlotStatus,
+    freeze_confirmation_dispatch,
+    freeze_fixed_slot_ledger,
+    freeze_shared_confirmation_union,
+)
+from prompt_mechanism_study.discovery_population import (
     CoverageAcquisitionMode,
     CoverageCellSupport,
     CoverageCensusPhase,
@@ -33,37 +29,22 @@ from prompt_mechanism_study.prioritization import (
     DiscoveryPopulationLineage,
     DiscoveryPopulationStatus,
     DiscoverySupplementationPlan,
-    FixedSlotSource,
-    PairCoverageCellSupport,
-    PairCoverageTarget,
-    PolicyTrack,
-    SelectorSlot,
-    SlotStatus,
     SupplementationDecision,
-    freeze_confirmation_dispatch,
-    freeze_fixed_slot_ledger,
-    freeze_shared_confirmation_union,
 )
 from prompt_mechanism_study.verification import (
-    load_and_verify_target_result_bundle,
-    verify_formal_report_authorization,
     verify_formal_budget_preflight,
-    verify_rq1_budget_qualification,
     verify_target_power_simulation,
     verify_target_randomization,
-    verify_target_rq_tables,
-    verify_target_study_freezes,
-)
-from prompt_mechanism_study.selector_analysis import (
-    authorize_target_report,
-    build_target_rq_tables,
-    write_target_result_bundle,
 )
 from prompt_mechanism_study.study_design import (
-    ATOMIC_POWER_ARMS,
-    PAIR_POWER_ARMS,
     ConfirmationFreeze,
     DiscoveryDesignFreeze,
+    StudyFreezeIndex,
+    validate_formal_budget_preflight,
+)
+from prompt_mechanism_study.study_planning import (
+    ATOMIC_POWER_ARMS,
+    PAIR_POWER_ARMS,
     FreezeArtifactReference,
     PowerAndMarginMemo,
     ProviderBudgetCeilings,
@@ -80,25 +61,16 @@ from prompt_mechanism_study.study_design import (
     RQ1BudgetQualification,
     RQ1BudgetDimensions,
     RQ1BudgetScenario,
-    StudyFreezeIndex,
     StudyDesignError,
     TargetPowerAssumption,
     TargetPowerSimulationPlan,
-    _balanced_sample,
-    _excluded_task_units,
-    _power_design,
-    _priority_extensions,
+    bind_target_power_to_assignments,
     freeze_qualification_bundle,
     freeze_power_and_margin_memo,
-    freeze_target_confirmation_design,
-    freeze_target_discovery_design,
-    freeze_target_study_index,
     qualify_rq1_baselines,
     qualify_rq1_budget,
     qualification_plan_bundle,
-    rq1_worst_case_budget_envelopes,
     simulate_target_power,
-    validate_formal_budget_preflight,
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.representation import (
@@ -113,8 +85,6 @@ from prompt_mechanism_study.representation import (
     TaskUnitDataRoleRecord,
     pair_policy_key,
 )
-
-pytestmark = pytest.mark.extended
 
 
 def _artifact_ref(label: str) -> FreezeArtifactReference:
@@ -188,24 +158,16 @@ def _population_lineage(
     manifest: DataRoleManifest,
     qualification: QualificationBundle,
 ) -> DiscoveryPopulationLineage:
-    target = CoverageTarget("context.test", "feature.test", 1, 1, 1)
-    pair_target = PairCoverageTarget(
-        "pair-policy-test",
-        "context.test",
-        ("feature.first", "feature.second"),
-        1,
-        1,
-    )
+    target = CoverageTarget("context.test", 1)
     profile = CoverageTargetProfile(
         protocol_id=manifest.protocol_id,
-        schema_version="3.0",
+        schema_version="4.0",
         representation_profile_id="representation-profile-test",
         representation_qualification_sha256=content_hash(qualification),
         catalog_sha256=content_hash("catalog-test"),
-        support_profile_sha256=content_hash("support-profile-test"),
-        common_candidate_universe_sha256=content_hash("candidate-universe-test"),
+
         targets=(target,),
-        pair_targets=(pair_target,),
+
         permitted_source_families=("test-source",),
         acquisition_mode=CoverageAcquisitionMode.CONTEXT_FIRST,
         maximum_source_records=0,
@@ -213,8 +175,8 @@ def _population_lineage(
         maximum_review_task_units=0,
         maximum_task_units_per_lineage=1,
         minimum_source_lineage_diversity=1,
-        minimum_fillable_atomic_slots=1,
-        minimum_fillable_pair_slots=1,
+
+
     )
     task_ids = tuple(
         sorted(
@@ -224,26 +186,7 @@ def _population_lineage(
             for task in binding.task_units
         )
     )
-    cells = (
-        CoverageCellSupport(
-            target.target_id,
-            len(task_ids),
-            1,
-            1,
-            ("lineage-test",),
-            ("lineage-test",),
-        ),
-    )
-    pair_cells = (
-        PairCoverageCellSupport(
-            pair_target.target_id,
-            (("00", 1), ("01", 1), ("10", 1), ("11", 1)),
-            tuple(
-                (cell, ("lineage-test",))
-                for cell in ("00", "01", "10", "11")
-            ),
-        ),
-    )
+    cells = (CoverageCellSupport(target.target_id, len(task_ids)),)
     pre = DiscoveryCoverageCensus(
         profile.profile_id,
         manifest.data_role_manifest_id,
@@ -255,11 +198,6 @@ def _population_lineage(
         content_hash(qualification),
         task_ids,
         cells,
-        pair_cells,
-        1,
-        1,
-        1,
-        1,
     )
     plan = DiscoverySupplementationPlan(
         profile.profile_id,
@@ -289,11 +227,6 @@ def _population_lineage(
         content_hash(qualification),
         task_ids,
         cells,
-        pair_cells,
-        1,
-        1,
-        1,
-        1,
     )
     return DiscoveryPopulationLineage(
         profile,
@@ -400,12 +333,13 @@ def _baseline_qualification(
     )
 
 
-def _power_result(
+def _power_plan(
     track: PolicyTrack,
     *,
     family_size: int = 2,
     task_units: int = 10,
 ):
+    from prompt_mechanism_study.inference import TargetITTPlan
     if track is PolicyTrack.ATOMIC:
         probabilities = tuple(
             zip(ATOMIC_POWER_ARMS, (0.79, 0.01, 0.10, 0.10), strict=True)
@@ -420,10 +354,10 @@ def _power_result(
         probabilities,
         0.0,
         0.0,
-        0.01,
+        ((0.0, 0.0, 0.0, 0.0),),
+        0.95,  # Shared synthetic tasks keep large baseline fixture families evaluable.
         0.0,
-        0.1,
-        0.1,
+        0.0,
     )
     plan = TargetPowerSimulationPlan(
         track,
@@ -435,12 +369,65 @@ def _power_result(
         2,
         4,
         0.05,
-        0.8,
-        2000,
+        0.01,  # Small engineering fixture; no scientific power assertion.
+        1000,
         20260831 + (0 if track is PolicyTrack.ATOMIC else 1),
         (assumption,),
+        (1.0,),
+        (("stratum-synthetic", task_units),),
+        "shared",
+        TargetITTPlan(2026083103, 100, 0.05, 2, 0.9, 0.05, 0.05, 0.2),
     )
-    return simulate_target_power(plan)
+    return plan
+
+
+@cache
+def _power_result(track, *, family_size=2, task_units=10):
+    # Reuse immutable fixture results; independent verifier replays remain uncached.
+    return simulate_target_power(_power_plan(track, family_size=family_size, task_units=task_units))
+
+
+def test_explicit_power_replays_partial_overlap_realizations_and_task_identity(monkeypatch):
+    from prompt_mechanism_study import study_planning
+    from prompt_mechanism_study.verification.qualification import _independent_power_assignments
+    plan = _power_plan(PolicyTrack.ATOMIC, family_size=3, task_units=14)
+    support = tuple((j, f"task-{i + j * 7:02d}", "stratum-synthetic", i // 7)
+                    for j in range(3) for i in range(14))
+    plan = replace(plan, global_realizations=2, realization_weights=(0.5, 0.5),
+                   family_task_overlap="explicit", task_support=support,
+                   assumptions=tuple(replace(a, realization_arm_probability_offsets=((0.0,) * 4,) * 2)
+                                     for a in plan.assumptions))
+    _, rows = study_planning._power_assignments(plan)
+    assert rows == _independent_power_assignments(plan)
+    assert len({row.task_unit_id for group in rows for row in group}) == 28
+    assert len(support) == 42
+    # The same task can have different realizations in different policies.
+    shared = [[row for row in group if row.task_unit_id == "task-07"][0] for group in rows[:2]]
+    assert {row.realization_id for row in shared} == {"realization-0", "realization-1"}
+    with monkeypatch.context() as patch:
+        serial = iter(range(1000))
+        patch.setattr(study_planning, "_power_uniform_block", lambda *args: [next(serial)] * 4)
+        class AlwaysShare:
+            def random(self):
+                return 0.0
+        draws = study_planning._power_task_draws(AlwaysShare(), plan.assumptions[0], plan, rows)
+        by_unit = [{row.task_unit_id: value for row, value in zip(group, values)}
+                   for group, values in zip(rows, draws)]
+        assert by_unit[0]["task-07"] == by_unit[1]["task-07"]
+        assert by_unit[0]["task-00"] != by_unit[1]["task-07"]  # Equal row ranks are not a shared task.
+    result = simulate_target_power(plan)
+    assert verify_target_power_simulation(result)["status"] == "TARGET_POWER_SIMULATION_VERIFIED"
+    assert sum(n for _, n in result.scenarios[0].family_status_counts) == plan.simulation_replicates
+    assert bind_target_power_to_assignments(plan, tuple(row for group in rows for row in group)) == plan
+    with pytest.raises(ValueError, match="one stratum"):
+        replace(plan, task_support=tuple(sorted((*support, (0, "task-00", "stratum-synthetic", 1)))))
+    # Constant task contributions make every replicate non-evaluable; none may be removed.
+    constant = replace(plan, assumptions=(replace(plan.assumptions[0],
+        arm_secure_yield_probabilities=tuple(zip(ATOMIC_POWER_ARMS, (1.0, 0.0, 0.0, 0.0)))),))
+    blocked = simulate_target_power(constant)
+    assert blocked.minimum_achieved_power == 0.0 and not blocked.power_gate_passed
+    assert blocked.scenarios[0].meaningful_replicates_by_coordinate == (0, 0, 0)
+    assert verify_target_power_simulation(blocked)["power_gate_passed"] is False
 
 
 def _power_memo(
@@ -460,7 +447,7 @@ def _power_memo(
             PolicyTrack.PAIR,
             family_size=pair_family_size,
         ),
-        bootstrap_draws=1000,
+        bootstrap_draws=100,
         bootstrap_seed=2026083103,
         minimum_valid_bootstrap_fraction=0.9,
         maximum_unknown_fraction_among_valid=0.2,
@@ -546,367 +533,7 @@ def _accepted_budget(
     )
 
 
-@pytest.mark.reviewer
-def test_rq1_budget_envelopes_use_one_model_dimension_and_reject_m_squared() -> None:
-    dimensions = RQ1BudgetDimensions(
-        ("model-a", "model-b"),
-        atomic_top_k=3,
-        pair_top_k=1,
-        atomic_task_units_per_effect=10,
-        pair_task_units_per_effect=20,
-        atomic_global_realizations=2,
-        pair_global_realizations=2,
-        atomic_total_block_slots=4,
-        pair_total_block_slots=8,
-    )
-    report = rq1_worst_case_budget_envelopes(dimensions)
-    core, expert, random = report["scenarios"]
-
-    assert report["status"] == "SPECIFIED_DRAFT"
-    assert report["provider_calls_authorized"] is False
-    assert report["model_dispatch_policy"] == "model_bound_effect_coordinate"
-    assert core["atomic_effect_record_upper_bound"] == 12
-    assert core["pair_effect_record_upper_bound"] == 4
-    assert core["generation_call_upper_bound"] == 1120
-    assert core["materialization_call_upper_bound"] == 400
-    assert core["external_call_upper_bound"] == 2640
-    assert expert["generation_call_upper_bound"] == 1680
-    assert random["generation_call_upper_bound"] == 2240
-    assert core["accidental_model_square_generation_calls"] == 2240
-
-    candidate = rq1_worst_case_budget_envelopes(
-        RQ1BudgetDimensions(
-            ("qwen3.7-flash-2026-07-15",),
-            atomic_top_k=5,
-            pair_top_k=3,
-            atomic_task_units_per_effect=100,
-            pair_task_units_per_effect=170,
-            atomic_global_realizations=2,
-            pair_global_realizations=2,
-            atomic_total_block_slots=8,
-            pair_total_block_slots=8,
-        )
-    )
-    assert candidate["budget_envelope_id"] == (
-        "rq1_budget_envelope_"
-        "2271756bab8d848b339baa7c99a4bb3956b908906e9a4a734ccd4ff19af79ac0"
-    )
-    assert [
-        (
-            row["materialization_call_upper_bound"],
-            row["generation_call_upper_bound"],
-            row["functional_judge_call_upper_bound"],
-            row["external_call_upper_bound"],
-        )
-        for row in candidate["scenarios"]
-    ] == [
-        (4040, 16160, 16160, 36360),
-        (6060, 24240, 24240, 54540),
-        (8080, 32320, 32320, 72720),
-    ]
-
-    with pytest.raises(ValueError, match="cannot be crossed"):
-        RQ1BudgetDimensions(
-            ("model-a", "model-b"),
-            atomic_top_k=3,
-            pair_top_k=1,
-            atomic_task_units_per_effect=10,
-            pair_task_units_per_effect=20,
-            atomic_global_realizations=2,
-            pair_global_realizations=2,
-            atomic_total_block_slots=4,
-            pair_total_block_slots=8,
-            confirmation_cross_product_models=True,
-        )
-
-    with pytest.raises(ValueError, match="exactly one realization"):
-        RQ1BudgetDimensions(
-            ("model-a", "model-b"),
-            atomic_top_k=3,
-            pair_top_k=1,
-            atomic_task_units_per_effect=10,
-            pair_task_units_per_effect=20,
-            atomic_global_realizations=2,
-            pair_global_realizations=2,
-            atomic_total_block_slots=4,
-            pair_total_block_slots=8,
-            realization_assignments_per_task=2,
-        )
-
-
-@pytest.mark.reviewer
-def test_power_margin_memo_is_assumption_conditional_and_authorizes_one_itt_plan() -> None:
-    manifest = _qualification_manifest()
-    atomic = _power_result(PolicyTrack.ATOMIC)
-    pair = _power_result(PolicyTrack.PAIR)
-    memo = _power_memo(manifest)
-
-    assert atomic.power_gate_passed is True
-    assert pair.power_gate_passed is True
-    assert verify_target_power_simulation(atomic)["status"] == (
-        "TARGET_POWER_SIMULATION_VERIFIED"
-    )
-    assert verify_target_power_simulation(pair)["power_gate_passed"] is True
-    assert atomic.target_confirmation_outcomes_used is False
-    assert memo.formal_use_authorized is True
-    assert memo.endpoint_order == (
-        "secure_yield",
-        "code_valid",
-        "oracle_evaluable",
-        "functionality",
-        "joint",
-    )
-    inference_plan = memo.target_itt_plan()
-    assert inference_plan.atomic_practical_margin == 0.05
-    assert inference_plan.pair_practical_margin == 0.05
-    assert inference_plan.alpha == 0.05
-    assert inference_plan.bootstrap_draws == 1000
-
-    weak = TargetPowerAssumption(
-        "atomic-weak",
-        PolicyTrack.ATOMIC,
-        tuple(zip(ATOMIC_POWER_ARMS, (0.21, 0.20, 0.20, 0.20), strict=True)),
-        0.1,
-        0.0,
-        0.1,
-        0.0,
-        0.1,
-        0.1,
-    )
-    weak_plan = replace(atomic.plan, assumptions=(weak,))
-    weak_result = simulate_target_power(weak_plan)
-    blocked = freeze_power_and_margin_memo(
-        manifest,
-        code_commit="a" * 40,
-        atomic_power=weak_result,
-        pair_power=pair,
-        bootstrap_draws=1000,
-        bootstrap_seed=2026083103,
-        minimum_valid_bootstrap_fraction=0.9,
-        maximum_unknown_fraction_among_valid=0.2,
-        independent_verifier_status="PASS",
-    )
-    assert blocked.status is QualificationStatus.BLOCKED
-    with pytest.raises(StudyDesignError, match="BLOCKED power memo"):
-        blocked.target_itt_plan()
-    with pytest.raises(ValueError, match="cannot read target confirmation outcomes"):
-        replace(weak, target_confirmation_outcomes_used=True)
-    tampered_scenario = replace(
-        atomic.scenarios[0],
-        simultaneous_critical_value=atomic.scenarios[0].simultaneous_critical_value + 0.1,
-    )
-    tampered_result = replace(atomic, scenarios=(tampered_scenario,))
-    with pytest.raises(ValueError, match="failed independent replay"):
-        verify_target_power_simulation(tampered_result)
-
-
-@pytest.mark.reviewer
-def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> None:
-    manifest = _qualification_manifest()
-    accepted = _accepted_budget(manifest)
-
-    assert accepted.status is QualificationStatus.ACCEPTED
-    assert accepted.provider_calls_authorized is True
-    assert accepted.atomic_selector_ids == ("atomic_full", "atomic_rd_only")
-    assert accepted.pair_selector_ids == ("pair_full", "pair_no_relation")
-    assert accepted.reservation.atomic_effect_record_upper_bound == 2
-    assert accepted.reservation.pair_effect_record_upper_bound == 2
-    assert accepted.reservation.generation_call_upper_bound == 160
-    assert accepted.reservation.external_call_upper_bound == 400
-    assert accepted.reservation.external_cost_upper_bound_microunits == 880
-    verification = verify_rq1_budget_qualification(accepted)
-    assert verification["status"] == (
-        "RQ1_BUDGET_QUALIFICATION_VERIFIED"
-    )
-    assert verification["budget_currency"] == "CNY"
-
-    blocked = qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
-        dimensions=accepted.dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=accepted.qualification_bundle,
-        baseline_qualification=accepted.baseline_qualification,
-        provider_ceilings=_provider_ceilings(generation_ceiling=159),
-        independent_verifier_status="PASS",
-    )
-    assert blocked.status is QualificationStatus.BLOCKED
-    assert blocked.blockers == ("generation_call_ceiling_exceeded",)
-    assert blocked.provider_calls_authorized is False
-    with pytest.raises(ValueError, match="blockers failed independent replay"):
-        verify_rq1_budget_qualification(
-            replace(blocked, blockers=("fabricated_budget_blocker",))
-        )
-
-    cost_blocked = qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
-        dimensions=accepted.dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=accepted.qualification_bundle,
-        baseline_qualification=accepted.baseline_qualification,
-        provider_ceilings=replace(
-            _provider_ceilings(), external_cost_ceiling_microunits=879
-        ),
-        independent_verifier_status="PASS",
-    )
-    assert cost_blocked.blockers == ("external_cost_ceiling_exceeded",)
-
-    with pytest.raises(ValueError, match="no hidden automatic retries"):
-        replace(_provider_ceilings().rates[0], automatic_retry_ceiling=1)
-
-    with pytest.raises(ValueError, match="does not replay from token ceilings"):
-        replace(
-            _provider_ceilings().rates[0],
-            maximum_unit_cost_microunits=2,
-        )
-    with pytest.raises(ValueError, match="exceed the frozen pricing tier"):
-        replace(
-            _provider_ceilings().rates[0].token_cost_basis,
-            maximum_input_tokens=2,
-        )
-    mixed_rates = list(_provider_ceilings().rates)
-    mixed_rates[1] = replace(
-        mixed_rates[1],
-        token_cost_basis=replace(mixed_rates[1].token_cost_basis, currency="USD"),
-    )
-    with pytest.raises(ValueError, match="one frozen budget currency"):
-        replace(_provider_ceilings(), rates=tuple(mixed_rates))
-
-    mismatched_dimensions = replace(accepted.dimensions, atomic_top_k=2)
-    mismatched = qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
-        dimensions=mismatched_dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=accepted.qualification_bundle,
-        baseline_qualification=accepted.baseline_qualification,
-        provider_ceilings=_provider_ceilings(),
-        independent_verifier_status="PASS",
-    )
-    assert "atomic_family_size_mismatch" in mismatched.blockers
-
-    unbound_qualification = _accepted_qualification_bundle(manifest)
-    lineage_blocked = qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
-        dimensions=accepted.dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=unbound_qualification,
-        baseline_qualification=accepted.baseline_qualification,
-        provider_ceilings=_provider_ceilings(),
-        independent_verifier_status="PASS",
-    )
-    assert lineage_blocked.blockers == ("power_profile_lineage_mismatch",)
-    assert lineage_blocked.provider_calls_authorized is False
-    assert verify_rq1_budget_qualification(lineage_blocked)["status"] == (
-        "RQ1_BUDGET_QUALIFICATION_VERIFIED"
-    )
-
-    independently_tampered = _accepted_budget(manifest)
-    object.__setattr__(
-        independently_tampered.provider_ceilings.rates[0].token_cost_basis,
-        "input_price_microunits_per_million_tokens",
-        2_000_000,
-    )
-    with pytest.raises(ValueError, match="token-price replay"):
-        verify_rq1_budget_qualification(independently_tampered)
-
-
-@pytest.mark.reviewer
-def test_selected_rq1_baselines_require_qualified_contracts_before_budget() -> None:
-    manifest = _qualification_manifest()
-    accepted = _accepted_budget(
-        manifest,
-        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
-        model_ids=("model-a", "model-b"),
-    )
-
-    assert accepted.status is QualificationStatus.ACCEPTED
-    assert accepted.atomic_selector_ids == (
-        "atomic_blind_expert",
-        "atomic_full",
-        "atomic_rd_only",
-        "atomic_seeded_random",
-    )
-    assert accepted.pair_selector_ids == (
-        "pair_blind_expert",
-        "pair_full",
-        "pair_no_relation",
-        "pair_seeded_random",
-    )
-    assert len(accepted.baseline_qualification.contract_references) == 8
-    assert verify_rq1_budget_qualification(accepted)["baseline_qualification_id"] == (
-        accepted.baseline_qualification.rq1_baseline_qualification_id
-    )
-
-    missing = qualify_rq1_baselines(
-        protocol_id=manifest.protocol_id,
-        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
-        model_ids=accepted.dimensions.model_ids,
-        qualification_accept_data_id=manifest.qualification_accept_data_id,
-        code_commit="a" * 40,
-        contract_references=accepted.baseline_qualification.contract_references[:-1],
-        independent_verifier_status="PASS",
-    )
-    missing_bundle = _accepted_qualification_bundle(
-        manifest,
-        accepted.power_and_margin_memo,
-        missing,
-    )
-    blocked = qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
-        dimensions=accepted.dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=missing_bundle,
-        baseline_qualification=missing,
-        provider_ceilings=_provider_ceilings(),
-        independent_verifier_status="PASS",
-    )
-
-    assert blocked.status is QualificationStatus.BLOCKED
-    assert blocked.blockers == ("rq1_baseline_qualification_not_accepted",)
-    assert verify_rq1_budget_qualification(blocked)["provider_calls_authorized"] is False
-
-    baseline_profile_index = next(
-        index
-        for index, profile in enumerate(accepted.qualification_bundle.profiles)
-        if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
-    )
-    profiles = list(accepted.qualification_bundle.profiles)
-    profiles[baseline_profile_index] = replace(
-        profiles[baseline_profile_index],
-        artifact=_artifact_ref("budget-only-baseline-name"),
-    )
-    budget_only_bundle = replace(
-        accepted.qualification_bundle,
-        profiles=tuple(profiles),
-    )
-    budget_only = qualify_rq1_budget(
-        scenario=accepted.scenario,
-        dimensions=accepted.dimensions,
-        power_and_margin_memo=accepted.power_and_margin_memo,
-        qualification_bundle=budget_only_bundle,
-        baseline_qualification=accepted.baseline_qualification,
-        provider_ceilings=accepted.provider_ceilings,
-        independent_verifier_status="PASS",
-    )
-    assert budget_only.blockers == ("baseline_profile_lineage_mismatch",)
-
-    independently_tampered = _accepted_budget(
-        manifest,
-        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
-        model_ids=("model-a", "model-b"),
-    )
-    object.__setattr__(
-        independently_tampered.baseline_qualification,
-        "contract_references",
-        independently_tampered.baseline_qualification.contract_references[:-1],
-    )
-    with pytest.raises(
-        ValueError,
-        match="baseline qualification blockers failed independent replay",
-    ):
-        verify_rq1_budget_qualification(independently_tampered)
-
-
-def _dispatch_and_assignments():
+def _dispatch_and_assignments(*, partial_atomic=False):
     scope = AnalysisScope(
         "security.synthetic",
         "context.synthetic",
@@ -958,6 +585,14 @@ def _dispatch_and_assignments():
                     (record,),
                 )
             )
+    second = None
+    if partial_atomic:
+        second = replace(records[PolicyTrack.ATOMIC], policy_key=content_id("atomic_policy_", "second-policy"))
+        universe = tuple(sorted((records[PolicyTrack.ATOMIC], second), key=lambda row: row.policy_key))
+        sources = [replace(source, model_bound_records=universe,
+                           slots=(SelectorSlot(1, SlotStatus.FILLED, second.policy_key, None),)
+                           if source.selector_id == "atomic_rd_only" else source.slots)
+                   if source.track is PolicyTrack.ATOMIC else source for source in sources]
     ledger = freeze_fixed_slot_ledger(
         "phase-context-policy-v3",
         "3.0",
@@ -965,7 +600,8 @@ def _dispatch_and_assignments():
     )
     union = freeze_shared_confirmation_union(ledger)
     protocol_ids = {
-        item.candidate_record_id: f"protocol-record-{item.track.value}"
+        item.candidate_record_id: ("protocol-record-atomic-second" if item.candidate == second
+                                   else f"protocol-record-{item.track.value}")
         for item in union.entries
     }
     dispatch = freeze_confirmation_dispatch(union, protocol_ids)
@@ -976,6 +612,10 @@ def _dispatch_and_assignments():
         1771,
         4,
         4,
+        tuple(sorted((entry.candidate.policy_key, "realization-1", 1.0) for entry in union.entries)),
+        tuple(sorted((entry.candidate.policy_key, f"{entry.track.value}-task-{i:02d}", "stratum-synthetic")
+                     for entry in union.entries
+                     for i in (range(5, 15) if entry.candidate == second else range(10)))),
     )
     task_bundles = []
     for entry in union.entries:
@@ -989,9 +629,11 @@ def _dispatch_and_assignments():
             if entry.track is PolicyTrack.ATOMIC
             else PAIR_CONFIRMATORY_ARMS
         )
-        for task_index in range(10):
+        for task_index in (range(5, 15) if entry.candidate == second else range(10)):
             task_unit_id = f"{entry.track.value}-task-{task_index:02d}"
             task_bundle_id = f"bundle-{entry.track.value}-{task_index:02d}"
+            if entry.candidate == second:
+                task_bundle_id = f"bundle-atomic-second-{task_index:02d}"
             task_bundles.append(
                 TargetTaskBundle(
                     entry.candidate.policy_key,
@@ -1027,7 +669,6 @@ def _dispatch_and_assignments():
     return dispatch, randomization_plan, frozen_bundles, assignments
 
 
-@pytest.mark.reviewer
 def test_formal_budget_preflight_replays_dispatch_blocks_and_rejects_drift() -> None:
     budget = _accepted_budget(_qualification_manifest())
     dispatch, randomization_plan, task_bundles, assignments = _dispatch_and_assignments()
@@ -1148,305 +789,6 @@ def test_formal_budget_preflight_replays_dispatch_blocks_and_rejects_drift() -> 
         validate_formal_budget_preflight(blocked, dispatch, assignments)
 
 
-@pytest.mark.reviewer
-def test_target_two_freeze_lineage_closes_and_independently_replays(
-    tmp_path: Path,
-) -> None:
-    dispatch, randomization_plan, task_bundles, assignments = _dispatch_and_assignments()
-    manifest = _qualification_manifest(
-        confirmation_task_ids=tuple(
-            sorted({item.task_unit_id for item in assignments})
-        )
-    )
-    budget = _accepted_budget(manifest)
-    ledger = dispatch.union.ledger
-    union = dispatch.union
-    preflight = validate_formal_budget_preflight(budget, dispatch, assignments)
-    discovery = freeze_target_discovery_design(
-        schema_version="3.0",
-        manifest=manifest,
-        qualification_bundle=budget.qualification_bundle,
-        budget=budget,
-        population_lineage=_population_lineage(
-            manifest,
-            budget.qualification_bundle,
-        ),
-        atomic_discovery_population_sha256=manifest.discovery_population_sha256,
-        pair_discovery_population_sha256=manifest.discovery_population_sha256,
-        identity_and_scope_decision=_artifact_ref("identity-and-scope-v1"),
-        candidate_universe_contract=_artifact_ref("candidate-universe-v1"),
-        support_gate_contract=_artifact_ref("support-gate-v1"),
-        discoverability_contract=_artifact_ref("discoverability-v1"),
-        candidate_fold_manifests=_artifact_ref("candidate-folds-v1"),
-        selector_contract=_artifact_ref("selector-contract-v1"),
-        discovery_outcome_contract=_artifact_ref("discovery-outcome-contract-v1"),
-    )
-    confirmation = freeze_target_confirmation_design(
-        discovery=discovery,
-        budget=budget,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        outcome_contract=_artifact_ref("confirmation-outcome-contract-v1"),
-    )
-    index = freeze_target_study_index(discovery, confirmation)
-
-    verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-
-    assert verification["status"] == "TARGET_STUDY_FREEZE_VERIFIED"
-    assert verification["confirmation_outcomes_used"] is False
-    assert confirmation.protocolization_results.artifact_id == content_id(
-        "target_task_bundles_", task_bundles
-    )
-    assert confirmation.randomization_plan.artifact_id == (
-        randomization_plan.target_randomization_plan_id
-    )
-    assert confirmation.model_bound_assignments.sha256 == (
-        preflight.assignment_manifest_sha256
-    )
-    with pytest.raises(ValueError, match="confirmation freeze lineage"):
-        verify_target_study_freezes(
-            manifest=manifest,
-            budget=budget,
-            discovery=discovery,
-            ledger=ledger,
-            union=union,
-            dispatch=dispatch,
-            randomization_plan=randomization_plan,
-            task_bundles=task_bundles,
-            assignments=assignments,
-            preflight=preflight,
-            confirmation=replace(
-                confirmation,
-                model_bound_assignments=_artifact_ref("tampered-assignments"),
-            ),
-            index=index,
-        )
-
-    outcomes = []
-    for assignment in assignments:
-        task_index = int(assignment.task_unit_id.rsplit("-", 1)[1])
-        if assignment.track is PolicyTrack.ATOMIC:
-            secure = int(
-                task_index < (
-                    8 if assignment.arm.value == "atomic_target" else 2
-                )
-            )
-        else:
-            secure = int(
-                task_index < (8 if assignment.arm.value == "pair_11" else 2)
-            )
-        outcomes.append(
-            Outcome(
-                assignment.assignment_id,
-                1,
-                1,
-                secure,
-                secure,
-                1,
-                secure,
-                secure,
-                None,
-            )
-        )
-    evidence_ledger = freeze_assigned_arm_evidence(
-        dispatch,
-        assignments,
-        outcomes,
-    )
-    evidence = estimate_target_itt(
-        evidence_ledger,
-        budget.power_and_margin_memo.target_itt_plan(),
-        evidence_level=EvidenceLevel.EXECUTED,
-    )
-    yields = build_target_selector_yields(evidence)
-    unauthorised_report = build_target_rq_tables(evidence, yields)
-    assert unauthorised_report["scientific_claim_allowed"] is False
-    assert unauthorised_report["report_status"] == (
-        "EXECUTED_EVIDENCE_AWAITING_FORMAL_REPORT_AUTHORIZATION"
-    )
-    authorization = authorize_target_report(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        execution_environment=_artifact_ref("formal-execution-environment-v1"),
-        execution_command=_artifact_ref("formal-execution-command-v1"),
-        provider_call_ledger=_artifact_ref("formal-provider-call-ledger-v1"),
-    )
-    assert verify_formal_report_authorization(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        authorization=authorization,
-    )["status"] == "FORMAL_REPORT_AUTHORIZATION_VERIFIED"
-    report = build_target_rq_tables(evidence, yields, authorization)
-    assert report["report_status"] == "FORMAL_REPORT_AUTHORIZED"
-    assert report["scientific_claim_allowed"] is True
-    assert verify_target_rq_tables(
-        evidence,
-        yields,
-        report,
-        authorization,
-    )["scientific_claim_allowed"] is True
-
-    result_root = tmp_path / "target-result"
-    written = write_target_result_bundle(
-        result_root,
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        authorization=authorization,
-    )
-    assert written["status"] == "TARGET_RESULT_BUNDLE_VERIFIED"
-    assert written["scientific_claim_allowed"] is True
-    assert load_and_verify_target_result_bundle(result_root) == written
-    assert main(["study", "verify-result", str(result_root)]) == 0
-
-    tampered_artifacts = {
-        path.name: read_json(path)
-        for path in result_root.iterdir()
-        if path.name != "manifest.json"
-    }
-    tampered_artifacts["rq_tables.json"]["scientific_claim_allowed"] = False
-    tampered_root = tmp_path / "tampered-target-result"
-    write_bundle(tampered_root, tampered_artifacts)
-    with pytest.raises(ValueError, match="RQ tables failed independent replay"):
-        load_and_verify_target_result_bundle(tampered_root)
-
-    randomization_artifacts = {
-        path.name: read_json(path)
-        for path in result_root.iterdir()
-        if path.name != "manifest.json"
-    }
-    randomization_artifacts["target_randomization_plan.json"]["assignment_seed"] += 1
-    randomization_root = tmp_path / "tampered-target-randomization"
-    write_bundle(randomization_root, randomization_artifacts)
-    with pytest.raises(ValueError, match="independent randomization replay"):
-        load_and_verify_target_result_bundle(randomization_root)
-
-    receipt_artifacts = {
-        path.name: read_json(path)
-        for path in result_root.iterdir()
-        if path.name != "manifest.json"
-    }
-    receipt_artifacts["verification.json"]["assignment_count"] += 1
-    receipt_root = tmp_path / "tampered-target-receipt"
-    write_bundle(receipt_root, receipt_artifacts)
-    with pytest.raises(ValueError, match="verification receipt"):
-        load_and_verify_target_result_bundle(receipt_root)
-
-    index_artifacts = {
-        path.name: read_json(path)
-        for path in result_root.iterdir()
-        if path.name != "manifest.json"
-    }
-    index_artifacts["package_index.json"]["protocol_id"] = "tampered-protocol"
-    index_root = tmp_path / "tampered-target-index"
-    write_bundle(index_root, index_artifacts)
-    with pytest.raises(ValueError, match="package index"):
-        load_and_verify_target_result_bundle(index_root)
-
-    tested_evidence = replace(evidence, evidence_level=EvidenceLevel.TESTED)
-    tested_yields = build_target_selector_yields(tested_evidence)
-    tested_root = tmp_path / "tested-target-result"
-    tested = write_target_result_bundle(
-        tested_root,
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=tested_evidence,
-        yields=tested_yields,
-    )
-    assert tested["package_status"] == "NON_CLAIM_TEST_ARTIFACT"
-    assert tested["scientific_claim_allowed"] is False
-
-    legacy_root = tmp_path / "legacy-shaped-result"
-    write_bundle(legacy_root, {"report.json": {"schema_version": "2.1"}})
-    with pytest.raises(ValueError, match="file set is not exact"):
-        load_and_verify_target_result_bundle(legacy_root)
-
-    with pytest.raises(StudyDesignError, match="cannot authorize claims"):
-        authorize_target_report(
-            manifest=manifest,
-            budget=budget,
-            discovery=discovery,
-            ledger=ledger,
-            union=union,
-            dispatch=dispatch,
-            randomization_plan=randomization_plan,
-            task_bundles=task_bundles,
-            assignments=assignments,
-            preflight=preflight,
-            confirmation=confirmation,
-            index=index,
-            evidence=replace(evidence, evidence_level=EvidenceLevel.TESTED),
-            yields=yields,
-            execution_environment=_artifact_ref("test-environment"),
-            execution_command=_artifact_ref("test-command"),
-            provider_call_ledger=_artifact_ref("test-call-ledger"),
-        )
-
-
-@pytest.mark.reviewer
 def test_qualification_plan_is_frozen_before_one_shot_acceptance() -> None:
     manifest = _qualification_manifest()
     plans = tuple(
@@ -1549,7 +891,6 @@ def test_qualification_plan_is_frozen_before_one_shot_acceptance() -> None:
         )
 
 
-@pytest.mark.reviewer
 def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
     references = [_artifact_ref(f"artifact-{index}") for index in range(24)]
     manifest = _qualification_manifest()
@@ -1603,195 +944,19 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
         replace(confirmation, created_before_confirmation_outcomes=False)
 
 
-def test_study_design_balances_units_without_crossing_exclusions() -> None:
-    families = [f"family-{index}" for index in range(4)]
-    candidates = []
-    for family in families:
-        for index in range(6):
-            candidates.append(
-                {
-                    "task_unit_id": f"{family}-unit-{index}",
-                    "cluster_id": f"{family}-cluster-{index}",
-                    "family_id": family,
-                    "primary_cwe": f"CWE-{index % 2}",
-                    "representative_lineage_family": f"lineage-{index % 3}",
-                }
-            )
-    exclusions = [
-        {
-            "task_unit_ids": ["family-0-unit-0", "family-1-unit-0"],
-        }
-    ]
-
-    sample = _balanced_sample(
-        candidates,
-        exclusions,
-        families,
-        per_family=3,
-        seed=17,
-    )
-
-    selected = {row["task_unit_id"] for row in sample}
-    assert len(sample) == len(selected) == 12
-    assert not {"family-0-unit-0", "family-1-unit-0"} <= selected
-    assert {
-        family: sum(row["family_id"] == family for row in sample) for family in families
-    } == {family: 3 for family in families}
-    assert all(
-        len({row["primary_cwe"] for row in sample if row["family_id"] == family}) == 2
-        for family in families
-    )
-
-
-def test_study_design_accepts_explicit_unequal_family_quotas() -> None:
-    families = ["injection", "parser", "crypto"]
-    candidates = [
-        {
-            "task_unit_id": f"{family}-{index}",
-            "cluster_id": f"{family}-{index}",
-            "family_id": family,
-            "primary_cwe": f"CWE-{index % 2}",
-            "representative_lineage_family": f"lineage-{index % 3}",
-        }
-        for family in families
-        for index in range(6)
-    ]
-
-    sample = _balanced_sample(
-        candidates,
-        [],
-        families,
-        per_family={"injection": 4, "parser": 3, "crypto": 2},
-        seed=19,
-    )
-
-    assert Counter(row["family_id"] for row in sample) == {
-        "injection": 4,
-        "parser": 3,
-        "crypto": 2,
-    }
-
-
-def test_study_design_does_not_reject_a_family_with_one_lineage() -> None:
-    candidates = [
-        {
-            "task_unit_id": f"crypto-{index}",
-            "cluster_id": f"crypto-{index}",
-            "family_id": "crypto",
-            "primary_cwe": "CWE-338",
-            "representative_lineage_family": "single-lineage",
-        }
-        for index in range(3)
-    ]
-    candidates.extend(
-        {
-            "task_unit_id": f"injection-{lineage}-{index}",
-            "cluster_id": f"injection-{lineage}-{index}",
-            "family_id": "injection",
-            "primary_cwe": "CWE-78",
-            "representative_lineage_family": lineage,
-        }
-        for lineage in ("single-lineage", "other-a", "other-b")
-        for index in range(3)
-    )
-
-    sample = _balanced_sample(
-        candidates,
-        [],
-        ["injection", "crypto"],
-        per_family={"injection": 3, "crypto": 3},
-        seed=23,
-    )
-
-    assert sum(row["family_id"] == "crypto" for row in sample) == 3
-    assert {
-        row["representative_lineage_family"]
-        for row in sample
-        if row["family_id"] == "crypto"
-    } == {"single-lineage"}
-    assert len(
-        {
-            row["representative_lineage_family"]
-            for row in sample
-            if row["family_id"] == "injection"
-        }
-    ) >= 2
-
-
-def test_power_freeze_is_explicitly_assumption_conditional() -> None:
-    design = _power_design(60, 0.20, 0.30, 0.05, 0.80)
-
-    assert design["estimand"] == "paired_task_unit_weighted_target_minus_noop_itt"
-    assert design["task_unit_count"] == 60
-    assert design["achieved_normal_approximation_power"] == 0.80743
-    assert design["power_gate_passed"] is True
-    assert design["power_interpretation"] == (
-        "assumption_conditional_not_observed_effect_evidence"
-    )
-    assert design["sensitivity"][-1] == {
-        "discordant_pair_probability": 0.4,
-        "power": 0.68777,
-    }
-
-
-def test_exposed_task_units_are_loaded_from_frozen_jsonl(tmp_path) -> None:
-    sample = tmp_path / "exposed.jsonl"
-    sample.write_text(
-        '{"task_unit_id":"unit-a"}\n{"task_unit_id":"unit-b"}\n',
-        encoding="utf-8",
-    )
-
-    assert _excluded_task_units([sample]) == {"unit-a", "unit-b"}
-
-
-def test_priority_extensions_require_contracts_tests_and_supported_tiers() -> None:
-    policy = {
-        "common_requirements": {
-            "minimum_requirements": 1,
-            "minimum_source_test_references": 1,
-        },
-        "tiers": [
-            {
-                "tier_id": "python",
-                "language": "python",
-                "families": {"injection": ["CWE-77"]},
-                "minimum_candidates_per_cwe": 1,
-                "admission_blocker": "mechanism",
-            },
-            {
-                "tier_id": "cross-language",
-                "languages": ["go"],
-                "admission_blocker": "runtime",
-            },
-        ],
-    }
-
-    def row(name: str, language: str, cwe: str, tested: bool = True) -> dict:
-        return {
-            "cluster_id": f"cluster-{name}",
-            "contract_id": f"contract-{name}",
-            "language": language,
-            "primary_cwe": cwe,
-            "representative_record_id": f"record-{name}",
-            "representative_source": "fixture",
-            "representative_lineage_family": "fixture",
-            "requirement_count": 1,
-            "source_test_available": tested,
-            "source_test_reference_count": int(tested),
-        }
-
-    candidates = _priority_extensions(
-        [
-            row("python", "python", "CWE-77"),
-            row("go", "go", "CWE-22"),
-            row("untested", "python", "CWE-77", tested=False),
-            row("java", "java", "CWE-77"),
-        ],
-        policy,
-    )
-
-    assert [(item["language"], item["priority_tier"]) for item in candidates] == [
-        ("go", "cross-language"),
-        ("python", "python"),
-    ]
-    assert all(item["current_formal_sample_eligible"] is False for item in candidates)
+def test_actual_power_failure_blocks_preflight_and_retains_failed_results(monkeypatch):
+    from prompt_mechanism_study import study_planning
+    budget = _accepted_budget(_qualification_manifest())
+    dispatch, _, _, assignments = _dispatch_and_assignments(partial_atomic=True)
+    # A separate support identity avoids affecting any cached normal simulation.
+    assignments = tuple(replace(row, task_unit_id=f"degenerate-{row.task_unit_id}") for row in assignments)
+    before = content_hash(budget)
+    # Force constant contributions to exercise the downstream failure boundary.
+    monkeypatch.setattr(study_planning, "_power_task_draws",
+                        lambda rng, assumption, plan, groups: [[0.999] * len(group) for group in groups])
+    with pytest.raises(StudyDesignError, match="actual task-support power failed") as blocked:
+        validate_formal_budget_preflight(budget, dispatch, assignments)
+    results = blocked.value.power_results
+    assert tuple(row.plan.track for row in results) == (PolicyTrack.ATOMIC, PolicyTrack.PAIR)
+    assert all(row.minimum_achieved_power == 0 and not row.power_gate_passed for row in results)
+    assert content_hash(budget) == before

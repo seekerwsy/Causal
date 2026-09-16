@@ -1,9 +1,65 @@
 \section{Related Work}
 
-\paragraph{Interpretation of Code-Generation Models.} Post-hoc methods associate input features, concepts, or rationales with model behavior~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser}. For code generation, CodeQ~\cite{khati2026codeq} maps token-level rationales to programming concepts, while NLPerturbator~\cite{chen2026nlperturbator} probes robustness under natural-language variations. These methods improve inspectability but do not construct task-scoped security requirement candidates or evaluate their effects on independently measured security outcomes.
+\paragraph{Explaining Code-Generation Behavior.}
+Feature-attribution and concept-based methods relate model predictions to input
+features, concepts, or rationales~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser}.
+In code generation, CodeQ~\cite{khati2026codeq} connects token-level rationales
+with programming concepts, and NLPerturbator~\cite{chen2026nlperturbator} probes
+robustness through natural-language prompt transformations. Such analyses make
+model behavior inspectable at different levels of abstraction. The explanation
+object in \model is a requirement-level modification decision: what a prompt
+edit changes in a given task scope and what evidence supports that change.
+Its task bindings identify the operation and input concerned; its policy-effect
+evidence concerns the specified comparison, rather than attributing one
+generation to a token or reconstructing internal reasoning. Whether experts
+find this explanation useful is a separate empirical question.
 
-\paragraph{Causal Analysis of Code Models.} Causal studies examine how specified factors affect code-model behavior. Palacio et al.~\cite{palacio2024causation} study software and model interventions on neural code-model predictions, while Galeras~\cite{rodriguezcardenas2023benchmarking} provides causal-evaluation testbeds for generative software tasks and predefined prompt-engineering treatments. Ji et al.~\cite{ji2025causality} model prompt--code concept relations, and CAM~\cite{lyu2026cam} attributes multi-agent outcomes to intermediate traces. More directly related to prompt intervention, Velasco et al.~\cite{velasco2026smells} analyze how generation strategy, model characteristics, and prompt formulation affect code-smell propensity and evaluate prompt-based mitigation. Causal analyses have also covered privacy leakage through training dynamics and membership inference under semantics-preserving code transformations~\cite{yang2025privacy,yang2025membership}. These works analyze specified code, model, training, trace, or prompt factors. \model also uses a fixed requirement catalog, but instantiates context-scoped candidates from individual tasks, prioritizes them under a shared budget, and freezes matched prompt policies before randomized held-out evaluation. The Prompt TSG constrains candidate semantics rather than encoding causal relations; observational discovery selects what to test, while randomization estimates policy effects on separate security and functionality outcomes.
+\paragraph{Causal Analysis and Guidance for Code Models.}
+Palacio et al.~\cite{palacio2024causation} examine software and model interventions
+on neural code-model predictions, while Galeras~\cite{rodriguezcardenas2023benchmarking}
+provides causal-evaluation testbeds for generative software tasks.
+Ji et al.~\cite{ji2025causality} represent prompt--code relationships through
+human-understandable concepts and use causal analysis to support prompt
+adjustment. Velasco et al.~\cite{velasco2026smells} study the effects of generation
+strategy, model characteristics, and prompt formulation on code-smell propensity,
+including prompt-based mitigation and a user study. Causal explanations and
+actionable prompt adjustment are therefore existing research directions.
+\model focuses on the correspondence between a source-bound security requirement,
+an explicit requirement-edit comparison, and the guidance supported by its
+independently measured policy effect. Prompt-TSG relations define task semantics;
+observational structure helps prioritize questions; held-out randomized
+comparisons supply effect evidence. The explanation preserves these distinct
+sources, together with functional outcomes, uncertainty, and applicability
+limits.
 
-\paragraph{Hardening LLMs for Secure Code.} Prompt-level studies have examined security reminders, CWE-specific instructions, and iterative repair~\cite{tony2025prompting,bruni2025promptbenchmark}. Other approaches use instruction tuning (SafeCoder), retrieved demonstrations (SecCoder), continuous steering (SVEN), prompt optimization (PromSec), constrained decoding (CodeGuard+), or representation intervention (Thea)~\cite{he2024safecoder,zhang2024seccoder,he2023sven,nazzal2024promsec,fu2024codeguard,elhusseini2026thea}. \model instead determines which catalog-bounded requirements apply to a task, which candidates warrant evaluation, and whether their ADD or REMOVE policies change security, with functionality and requirement specificity measured separately.
+\paragraph{Hardening LLMs for Secure Code.}
+Prompting studies examine security reminders, CWE-specific instructions, and
+iterative repair~\cite{tony2025prompting,bruni2025promptbenchmark}.
+Other approaches intervene through instruction tuning, retrieved demonstrations,
+continuous steering, constrained decoding, or model representations, as in
+SafeCoder, SecCoder, SVEN, CodeGuard+, and
+Thea~\cite{he2024safecoder,zhang2024seccoder,he2023sven,fu2024codeguard,elhusseini2026thea}.
+PromSec~\cite{nazzal2024promsec} optimizes prompts through a code-feedback loop
+that targets both security and functionality. Prompting and prompt-optimization
+studies motivate prompt modification as an actionable interface. \model uses explicit, scoped
+requirement additions and removals to obtain interpretable comparison evidence.
+Its output explains the tested change and what can be concluded about it,
+including harmful, null, and unresolved findings. The guidance contract
+separates reporting an effect from recommending adoption, which needs the
+corresponding security and task-preservation evidence.
 
-\paragraph{Evaluation Benchmarks for Secure Code Generation.} SecurityEval~\cite{siddiq2022securityeval} and LLMSecEval~\cite{tony2023llmseceval} established CWE-indexed prompt suites primarily evaluated through static analysis, while SALLM~\cite{siddiq2024sallm}, CWEval~\cite{peng2025cweval}, BaxBench~\cite{vero2025baxbench}, and SeCodePLT~\cite{nie2025secodeplt} incorporate executable checks or dynamic exploits. Because apparent security improvements can reflect functional degradation or measurement failures~\cite{dai2026rethinking}, \model keeps code validity, Oracle support, oracle-evaluable security, functionality, and secure-and-functional joint success as separate evaluation outcomes.
+\paragraph{Measuring Secure Code Generation.}
+SecurityEval~\cite{siddiq2022securityeval} and LLMSecEval~\cite{tony2023llmseceval}
+provide CWE-indexed evaluation tasks. Executable evaluation complements such
+task suites: CWEval~\cite{peng2025cweval} assesses functionality and security,
+and BaxBench~\cite{vero2025baxbench} combines backend functionality tests with
+end-to-end exploit checks. These benchmarks motivate measuring what generated
+programs do, alongside whether an analyzer can assess them.
+Dai et al.~\cite{dai2026rethinking} show why apparent security improvements must
+be considered together with functionality and measurement limitations.
+\model accordingly measures security and functionality on the same generated
+code, while keeping validity, Oracle coverage, unknown outcomes, and joint
+success distinct from its primary oracle-evaluable secure-code-yield endpoint.
+These distinctions also constrain guidance: an explanation must disclose what
+was measurable and what functional behavior was assessed before a developer
+can judge the scope of a proposed modification.

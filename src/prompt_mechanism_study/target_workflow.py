@@ -1,148 +1,80 @@
-"""One bounded seven-stage reviewer smoke for the prospective target method.
+"""Seven-stage reviewer smoke and bounded non-claim development execution.
 
 The formal provider runner remains deliberately unavailable while the
 prospective protocol is ``SPECIFIED_DRAFT``.  This module executes the exact
 scientific stage functions on a deterministic, zero-network fixture and emits
 an independently replayable ``NON_CLAIM_TEST_ARTIFACT``.  It is the smallest
 representative proof that the target path closes without treating a test run as
-study evidence.
+study evidence. Authorized development uses the same operation-bound renderer,
+measurement and outcome functions, with its separate frozen descriptive analysis.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
 from pathlib import Path
+from dataclasses import asdict
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+import json
+import random
+import sys
 
-from prompt_mechanism_study.artifact_io import bundle_digest
+from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
+from prompt_mechanism_study.reviewer_fixture import load_reviewer_smoke_fixture
+from prompt_mechanism_study.measurement import close_target_measurements, measure_generated_code
+from prompt_mechanism_study.target_security_profiles import evaluate_target_security_profile
 from prompt_mechanism_study.inference import (
-   EvidenceLevel,
-   build_target_selector_yields,
-   estimate_target_itt,
-   freeze_assigned_arm_evidence,
+    EvidenceLevel,
+    build_target_selector_yields,
+    estimate_target_itt,
+    freeze_assigned_arm_evidence,
 )
 from prompt_mechanism_study.randomization import (
-    ATOMIC_CONFIRMATORY_ARMS,
-    PAIR_CONFIRMATORY_ARMS,
-    AssignedArmITTRecord,
     TargetRandomizationPlan,
-    TargetTaskArmVariant,
-    TargetTaskBundle,
     randomize_target_confirmation,
 )
 from prompt_mechanism_study.interaction_selector import (
-    PairCandidateUniverseManifest,
-    PairShadowObservation,
-    PairShadowPlan,
-    freeze_pair_candidate_universe,
     freeze_pair_preoutcome_design,
     pair_preoutcome_observations,
-    pair_shadow_data_sha256,
     run_pair_shadow_qualification,
-)
-from prompt_mechanism_study.measurement import (
-    CodeStatus,
-    FunctionalStatus,
-    Measurement,
-    OracleStatus,
-    close_target_measurements,
-)
-from prompt_mechanism_study.mechanisms import (
-    FactorialCompatibility,
-    PairCompatibilityDecision,
-    PairRelationEvidence,
 )
 from prompt_mechanism_study.outcomes import derive_outcomes
 from prompt_mechanism_study.prioritization import (
-    AtomicCandidateUniverseManifest,
-    AtomicFCIBootstrapEvidence,
-    AtomicShadowPlan,
-    CandidateCoverageSummary,
-    CandidateKind,
-    CoverageAcquisitionMode,
-    CoverageCellSupport,
-    CoverageCensusPhase,
-    CoverageTarget,
-    CoverageTargetProfile,
-    DiscoveryCoverageCensus,
-    DiscoveryObservation,
-    DiscoveryPopulationLineage,
-    DiscoveryPopulationStatus,
-    DiscoverySupplementationPlan,
-    SupplementationDecision,
-    ConfirmationDispatchManifest,
     FixedSlotSource,
-    PairCoverageCellSupport,
-    PairCoverageTarget,
     PolicyTrack,
     atomic_preoutcome_observations,
-    discovery_data_sha256,
     freeze_atomic_candidate_folds,
-    freeze_atomic_candidate_universe,
     freeze_confirmation_dispatch,
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
     run_atomic_shadow_qualification,
 )
-from prompt_mechanism_study.prompt_tsg import QueryState
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.representation import (
-    AnalysisScope,
-    AtomicPolicyKey,
     DataRole,
-    DataRoleBinding,
-    DataRoleManifest,
-    ModelBoundCandidateRecord,
-    Operation,
-    PairPolicyKey,
-    PolicyFactor,
-    TaskUnitDataRoleRecord,
-    pair_policy_key,
     validate_data_role_firewall,
 )
 from prompt_mechanism_study.selector_analysis import write_target_result_bundle
 from prompt_mechanism_study.verification import (
-    load_and_verify_target_result_bundle,
     verify_target_study_freezes,
 )
 from prompt_mechanism_study.study_design import (
-    ATOMIC_POWER_ARMS,
-    PAIR_POWER_ARMS,
-    FreezeArtifactReference,
-    PowerAndMarginMemo,
-    ProviderBudgetCeilings,
-    ProviderCallKind,
-    ProviderRate,
-    ProviderTokenCostBasis,
-    QualificationBundle,
-    QualificationPlan,
-    QualificationProfileKind,
-    QualificationProfileResult,
-    QualificationStatus,
-    RQ1BaselineQualification,
-    RQ1BudgetDimensions,
-    RQ1BudgetQualification,
-    RQ1BudgetScenario,
-    TargetPowerAssumption,
-    TargetPowerSimulationPlan,
-    TargetPowerSimulationResult,
-    freeze_power_and_margin_memo,
-    freeze_qualification_bundle,
     freeze_target_confirmation_design,
     freeze_target_discovery_design,
     freeze_target_study_index,
-    qualify_rq1_baselines,
-    qualify_rq1_budget,
-    qualification_plan_bundle,
-    simulate_target_power,
     validate_formal_budget_preflight,
 )
+from prompt_mechanism_study.study_planning import FreezeArtifactReference
+from prompt_mechanism_study.task_input import prepare_task_input, generation_input_for_prompt
 
 
 PROTOCOL_ID = "phase-context-policy-v3"
 SCHEMA_VERSION = "3.0"
 SMOKE_MODEL_ID = "reviewer-smoke-model"
-SMOKE_CODE_COMMIT = "0" * 40
+DEVELOPMENT_CODE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
+    "name": "generated_python_code", "strict": True,
+    "schema": {"type": "object", "additionalProperties": False,
+               "properties": {"code": {"type": "string"}}, "required": ["code"]}}}
 SMOKE_STAGES = (
     "representation",
     "prioritization",
@@ -154,16 +86,248 @@ SMOKE_STAGES = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _SmokeDiscoveryInputs:
-    atomic_policy: AtomicPolicyKey
-    atomic_universe: AtomicCandidateUniverseManifest
-    atomic_observations: tuple[DiscoveryObservation, ...]
-    atomic_plan: AtomicShadowPlan
-    pair_policy: PairPolicyKey
-    pair_universe: PairCandidateUniverseManifest
-    pair_observations: tuple[PairShadowObservation, ...]
-    pair_plan: PairShadowPlan
+def prepare_development_assignments(plan: dict) -> list[dict]:
+    """Replay source-reviewed operation bindings before any development generation.
+
+    This tests measurement and intervention behavior; it does not execute Discovery,
+    select hypotheses from outcomes, assign formal roles, or activate the protocol.
+    """
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis
+    from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record, validate_prompt_tsg
+    from prompt_mechanism_study.target_security_profiles import target_security_profile_producer_sha256
+
+    if (plan.get("status") != "FROZEN_NON_CLAIM_DEVELOPMENT"
+            or plan.get("scientific_claim_allowed") is not False
+            or plan.get("qualification_accept_consumed") is not False
+            or plan.get("formal_execution_authorized") is not False):
+        raise ValueError("only an explicitly bounded non-claim development plan is executable")
+    if plan["security_producer_sha256"] != target_security_profile_producer_sha256():
+        raise ValueError("development security producer differs from its prospective freeze")
+    tasks = plan["tasks"]
+    if len({task["task_unit_id"] for task in tasks}) != len(tasks):
+        raise ValueError("development inputs must be deduplicated task units")
+    if sorted(task["task_id"] for task in tasks) != sorted(plan["development_exposed_task_ids"]):
+        raise ValueError("every task needs recorded development exposure before generation")
+    seeds = plan["generation_seeds"]
+    arms = plan["arms"]
+    if (not seeds or len(set(seeds)) != len(seeds) or any(type(seed) is not int for seed in seeds)
+            or arms not in (["BASELINE", "NOOP", "STYLE", "GENERIC", "TARGET"],
+                            ["NOOP", "STYLE", "GENERIC", "TARGET"], ["A00", "A10", "A01", "A11"])):
+        raise ValueError("development requires a complete Atomic or Pair arm family and unique generation seeds")
+    if plan["maximum_provider_calls"] != 2 * len(tasks) * len(seeds) * len(arms):
+        raise ValueError("development call ceiling must cover every generation and functional review")
+    if any(evaluator.get("max_attempts") != 1 for evaluator in (plan["generator"], plan["functional_evaluator"])):
+        raise ValueError("development has one prospective attempt and no outcome-driven replacements")
+    if plan["generator"].get("response_format") != DEVELOPMENT_CODE_RESPONSE_FORMAT:
+        raise ValueError("development code generation requires the strict code-only JSON response contract")
+    policies = {row["policy_id"]: row for row in plan["policies"]}
+    assignments = []
+    for task in tasks:
+        if "generation_input" not in task:
+            raise ValueError("prepare task input and re-extract its TSG before development generation")
+        task = prepare_task_input(task, generation_system_prompt=plan["generation_system_prompt"])
+        if task["language"] != "python" or task["prompt_sha256"] != content_hash(task["prompt"]):
+            raise ValueError("development source identity or language changed")
+        graph = prompt_tsg_from_record(task["graph"])
+        validate_prompt_tsg(graph, prompt=task["prompt"], catalog=plan["catalog"])
+        if task["functional_contract"].get("source_prompt_sha256") != task["prompt_sha256"]:
+            raise ValueError("functional contract must bind the same prepared baseline input")
+        policy = policies[task["policy_id"]]
+        subject_id = task.get("target_subject_node_id")
+        binding, prompts = _development_prompts(task, policy, graph, plan["catalog"], arms)
+        if binding.binding_id != task["binding_id"]:
+            raise ValueError("development task-hypothesis binding changed")
+        for seed in seeds:
+            for arm in arms:
+                generation_input_for_prompt(task, prompts[arm])
+                row = {"task_id": task["task_id"], "task_unit_id": task["task_unit_id"],
+                       "policy_id": policy["policy_id"], "binding_id": binding.binding_id,
+                       "target_operation_node_id": binding.target_operation_node_id,
+                       "arm": arm, "seed": seed, "prompt": prompts[arm],
+                       "prompt_sha256": content_hash(prompts[arm]), "security_profile_id": policy["security_profile_id"]}
+                if binding.factor_scopes:
+                    row["factor_scopes"] = task["factor_scopes"]
+                if subject_id is not None:
+                    row["target_subject_node_id"] = subject_id
+                row["assignment_id"] = content_id("development_assignment_", row)
+                assignments.append(row)
+    random.Random(plan["randomization_seed"]).shuffle(assignments)
+    return assignments
+
+
+def _development_prompts(task, policy, graph, catalog, arms):
+    """Use the same exact factor binding for every assigned treatment and control."""
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis
+    from prompt_mechanism_study.prompt_tsg import feature_scope_from_record, FeatureScope
+    factors = policy["factors"] if "factors" in policy else [{**policy, "operation": "add"}]
+    pair = len(factors) == 2
+    if len(factors) not in (1, 2) or pair != (arms == ["A00", "A10", "A01", "A11"]):
+        raise ValueError("development factors and arm family differ")
+    for factor in factors:
+        definition = factor.get("factor_definition", {})
+        if not task.get("factor_scopes"):
+            if arms != ["BASELINE", "NOOP", "STYLE", "GENERIC", "TARGET"]:
+                raise ValueError("new development arms require exact factor scopes")
+            if task.get("target_subject_node_id") is None:
+                continue
+            if not definition.get("subject_role"):
+                raise ValueError("subject-bound development requires a single-requirement subject role")
+        if (definition.get("semantic_decisions") != [factor["feature_id"]]
+            or definition.get("atomicity_review") != "SOURCE_REVIEWED_SINGLE_REQUIREMENT"
+            or (task.get("factor_scopes") and not definition.get("scope_rule")) or not definition.get("definition")):
+            raise ValueError("scoped development needs a reviewed single-requirement definition and scope rule")
+    coordinates = {"factor_scopes": tuple(feature_scope_from_record(row) for row in task["factor_scopes"])} if task.get("factor_scopes") else {
+        "target_operation_node_id": task["target_operation_node_id"],
+        "factor_subject_node_ids": (task["target_subject_node_id"],) if task.get("target_subject_node_id") else ()}
+    binding = bind_task_hypothesis(graph, query=policy["query"], policy_id=policy["policy_id"],
+        factor_feature_ids=tuple(factor["feature_id"] for factor in factors),
+        factor_operations=tuple(factor["operation"] for factor in factors), **coordinates)
+    if task.get("factor_scopes"):
+        compatibility = task.get("intervention_compatibility", task.get("pair_compatibility", {}))
+        if (compatibility.get("binding_id") != binding.binding_id
+            or compatibility.get("decision") != "compatible"
+            or compatibility.get("outcomes_used") is not False
+            or not compatibility.get("rationale")):
+            raise ValueError("scoped development needs source-reviewed intervention compatibility; Pair requires independent four-cell compatibility")
+    by_node = {node.node_id: node for node in graph.nodes}
+    task_start = len(task["prompt"]) - len(task["generation_input"]["request"]["task"])
+    scopes = binding.factor_scopes or (FeatureScope(binding.target_operation_node_id),)
+    if any(by_node[scope.operation_node_id].evidence_start < task_start for scope in scopes):
+        raise ValueError("development factors must bind operations in the user task")
+    controls = task["factor_control_texts"] if "factor_control_texts" in task else [task["control_texts"]]
+    if len(controls) != len(factors):
+        raise ValueError("development requires frozen controls for each scoped factor")
+    flags = {"A00": (False, False), "A10": (True, False), "A01": (False, True), "A11": (True, True)} if pair else {
+        "BASELINE": (False,), "NOOP": (False,), "STYLE": (False,), "GENERIC": (False,), "TARGET": (True,)}
+    prompts = {}
+    for arm in arms:
+        if arm == "BASELINE":
+            prompts[arm] = task["prompt"]
+            continue
+        inactive = {factor["feature_id"]: controls[index]["NOOP" if pair else arm]
+                    for index, factor in enumerate(factors) if not flags[arm][index]}
+        rendered = render_task_hypothesis(binding, graph, prompt=task["prompt"], catalog=catalog,
+            enabled=flags[arm], additions={factor["feature_id"]: factor["addition"]
+                for factor in factors if factor["operation"] == "add"},
+            inactive_texts=inactive, reviewed_variant=task.get("reviewed_variants", {}).get(arm))
+        prompts[arm] = rendered["prompt"]
+    if not pair:
+        factor = factors[0]
+        if factor["operation"] == "add":
+            target_words = len(factor["addition"].split())
+        else:
+            # The reviewed placebo matches the predeclared removed requirement,
+            # not a retrospectively chosen length of generated code.
+            from prompt_mechanism_study.prompt_tsg import scoped_feature_assessment
+            assessment = scoped_feature_assessment(graph, factor["feature_id"], binding.factor_scopes[0])
+            target_words = sum(len(task["prompt"][by_node[key].evidence_start:by_node[key].evidence_end].split())
+                               for key in assessment.requirement_node_ids)
+        if len(controls[0]["STYLE"].split()) != target_words:
+            raise ValueError("style control must match the frozen requirement whitespace-word length")
+    return binding, prompts
+
+
+def run_target_development(plan_path: Path, output: Path, *, complete=None) -> dict:
+    """Run one prospectively frozen development comparison through actual measurement.
+
+    Exact source/arm/seed assignments are saved before provider calls. Raw responses
+    and failures survive independently of final analysis. No task is replaced.
+    """
+    from prompt_mechanism_study.functional_judge import bailian_complete
+    from prompt_mechanism_study.inference import summarize_development_itt, summarize_development_sampling
+    from prompt_mechanism_study.measurement import MeasurementLedger
+
+    plan = read_json(plan_path)
+    assignments = prepare_development_assignments(plan)
+    provider = complete or bailian_complete
+    if output.exists():
+        raise FileExistsError(output)
+    output.mkdir(parents=True)
+    write_bundle(output / "preoutcome", {"plan.json": plan, "assignments.json": assignments,
+        "environment.json": {"python": sys.version, "platform": sys.platform,
+                             "security_producer_sha256": plan["security_producer_sha256"]}})
+    task_by_id = {task["task_id"]: task for task in plan["tasks"]}
+
+    def measure(row):
+        calls = []
+        def captured(request, evaluator, prompt):
+            attempt = {"request": request, "evaluator": dict(evaluator), "system_prompt": prompt}
+            calls.append(attempt)
+            try:
+                raw = provider(request, evaluator, prompt)
+                attempt["response"] = raw.decode("utf-8")
+                return raw
+            except Exception as error:
+                attempt["error"] = f"{type(error).__name__}: {error}"
+                raise
+        task = task_by_id[row["task_id"]]
+        result = dict(row, code=None, code_valid=None, security_status=None, functionality_status=None,
+                      secure_code_yield=None, oracle_evaluable=None, functionality=None, joint=None,
+                      measurement_evidence=None, error=None)
+        try:
+            generation_input = generation_input_for_prompt(task, row["prompt"])
+            measurement, evidence = measure_generated_code(
+                assignment_id=row["assignment_id"],
+                generation_request=generation_input["request"],
+                generation_evaluator={**plan["generator"], "seed": row["seed"]},
+                generation_prompt=generation_input["system_prompt"], source_task_prompt=task["prompt"],
+                functional_contract=task["functional_contract"],
+                functional_evaluator=plan["functional_evaluator"], functional_prompt=plan["functional_system_prompt"],
+                security_profile_id=row["security_profile_id"], complete=captured,
+                security_evaluate=evaluate_target_security_profile)
+            outcome = derive_outcomes(MeasurementLedger(plan["run_id"], content_hash(assignments),
+                                      "non_claim_development", (measurement,)))[0]
+            result.update(code=evidence["code"], code_valid=outcome.code_valid,
+                          security_status=measurement.oracle_status.value,
+                          functionality_status=measurement.functional_status.value,
+                          secure_code_yield=outcome.secure_yield, oracle_evaluable=outcome.oracle_evaluable,
+                          functionality=outcome.functionality, joint=outcome.joint,
+                          measurement_evidence=evidence, measurement=asdict(measurement), outcome=asdict(outcome))
+        except Exception as error:
+            result["error"] = f"{type(error).__name__}: {error}"
+            # Preserve a successful generation even when later measurement failed.
+            if calls and "response" in calls[0]:
+                try:
+                    result["code"] = json.loads(calls[0]["response"]).get("code")
+                except (ValueError, AttributeError):
+                    pass
+        result["provider_calls"] = len(calls)
+        result["provider_calls_by_kind"] = dict(Counter(call['evaluator'].get('provider', 'unspecified') for call in calls))
+        write_bundle(output / "cases" / row["assignment_id"], {"calls.json": calls, "result.json": result})
+        print(json.dumps({"assignment_id": row["assignment_id"], "status": "FAILED" if result["error"] else "MEASURED"}), flush=True)
+        return result
+
+    with ThreadPoolExecutor(max_workers=plan["workers"]) as pool:
+        rows = list(pool.map(measure, assignments))
+    effects = summarize_development_itt(rows, plan["analysis"])
+    provider_kinds = Counter()
+    for row in rows:
+        provider_kinds.update(row['provider_calls_by_kind'])
+    report = {"status": "NON_CLAIM_DEVELOPMENT_COMPLETE" if complete is None else "OFFLINE_REPLAY_NON_CLAIM_DEVELOPMENT_COMPLETE", "scientific_claim_allowed": False,
+              "evidence_level": "executed_development" if complete is None else "replayed_development", "run_id": plan["run_id"],
+              "plan_sha256": content_hash(plan), "preoutcome_bundle_sha256": bundle_digest(output / "preoutcome"),
+              "task_units": len(task_by_id), "assigned_rows": len(assignments),
+              "measured_rows": sum(row["error"] is None for row in rows),
+              "failed_rows": sum(row["error"] is not None for row in rows),
+              "provider_calls": sum(row["provider_calls"] for row in rows),
+              "external_provider_calls": sum(row["provider_calls"] for row in rows) if complete is None else 0,
+              "live_provider_calls_by_kind": dict(provider_kinds) if complete is None else {},
+              "response_source": "live_provider" if complete is None else "offline_supplied_responses",
+              "functional_evaluator_failures": sum(bool((row["measurement_evidence"] or {}).get("functional_failure")) for row in rows),
+              "denominator": "all assigned deduplicated task units; seeds averaged within each task",
+              "uncertainty": "Development paired sign-flip tests and task bootstrap intervals; no confirmatory claim or selector validation.",
+              "security_counts": dict(Counter(row["security_status"] or "infrastructure_failure" for row in rows)),
+              "functional_counts": dict(Counter(row["functionality_status"] or "infrastructure_failure" for row in rows)),
+              "pair_status": ("DEVELOPMENT_FOUR_CELL_EXECUTED" if complete is None else "DEVELOPMENT_FOUR_CELL_OFFLINE_REPLAY")
+                  if plan["arms"] == ["A00", "A10", "A01", "A11"] else "NOT_EXECUTED_NO_FROZEN_NATURAL_FOUR_CELL_SUPPORT",
+              "context_modifier_status": "BLOCKED_NO_FROZEN_CONTEXT_RULE"}
+    if plan["arms"] == ["A00", "A10", "A01", "A11"]:
+        report.update(pair_natural_support_status="NOT_ESTABLISHED_BY_INTERVENTION_CELLS",
+                      pair_response_pattern_status="BLOCKED_NO_FROZEN_JOINT_RULE",
+                      uncertainty="Descriptive four-cell task contrasts and marginal task bootstrap intervals; no Pair null test or response-pattern claim.")
+    write_bundle(output / "summary", {"report.json": report, "effects.json": effects, "assignments.json": rows,
+                                     "sampling.json": summarize_development_sampling(rows, plan['analysis'])})
+    return report
 
 
 def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
@@ -173,7 +337,8 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         raise TypeError("target reviewer smoke output must be a Path")
 
     # Stage 1: representation and the pre-discovery design boundary.
-    manifest = _smoke_role_manifest()
+    inputs = load_reviewer_smoke_fixture()
+    manifest = inputs.manifest
     firewall = validate_data_role_firewall(
         manifest,
         {
@@ -181,13 +346,8 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
             "CONFIRMATION-SMOKE": DataRole.CONFIRMATION,
         },
     )
-    budget = _smoke_budget(manifest)
-    inputs = _smoke_discovery_inputs(manifest.discovery_population_sha256)
-    population_lineage = _smoke_population_lineage(
-        manifest,
-        budget.qualification_bundle,
-        inputs,
-    )
+    budget = inputs.budget
+    population_lineage = inputs.population_lineage
     atomic_folds = freeze_atomic_candidate_folds(
         inputs.atomic_universe,
         atomic_preoutcome_observations(inputs.atomic_observations),
@@ -244,14 +404,8 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
     )
 
     # Stage 2: both sole-difference Core selector pairs consume the frozen folds.
-    atomic_fci_evidence = _smoke_atomic_fci_evidence(
-        inputs.atomic_universe,
-        inputs.atomic_policy,
-    )
-    pair_relation_evidence = _smoke_pair_relation_evidence(
-        inputs.pair_policy,
-        inputs.pair_observations,
-    )
+    atomic_fci_evidence = inputs.atomic_fci_evidence
+    pair_relation_evidence = inputs.pair_relation_evidence
     atomic = run_atomic_shadow_qualification(
         inputs.atomic_universe,
         inputs.atomic_observations,
@@ -314,7 +468,6 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
     dispatch = freeze_confirmation_dispatch(union, protocol_records)
 
     # Stage 4: model-bound complete blocks and the second, pre-outcome freeze.
-    task_bundles = _smoke_task_bundles(dispatch)
     randomization_plan = TargetRandomizationPlan(
         PROTOCOL_ID,
         SCHEMA_VERSION,
@@ -322,7 +475,12 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         2026083108,
         budget.dimensions.atomic_total_block_slots,
         budget.dimensions.pair_total_block_slots,
+        tuple(sorted((entry.candidate.policy_key, "reviewer-smoke-realization-1", 1.0)
+                     for entry in union.entries)),
+        tuple(sorted((entry.candidate.policy_key, f"{entry.track.value}-smoke-task-{index:02d}",
+                      "reviewer-smoke-stratum") for entry in union.entries for index in range(10))),
     )
+    task_bundles = inputs.task_bundles(dispatch, randomization_plan)
     assignments = randomize_target_confirmation(
         dispatch,
         randomization_plan,
@@ -360,10 +518,34 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         index=index,
     )
 
-    # Stage 5: deterministic local measurements; no provider is contacted.
+    # Stage 5: raw offline responses traverse the actual measurement sequence.
+    measurements = []
+    evaluator = {"model_id": SMOKE_MODEL_ID}
+    for assignment in assignments:
+        prompt = inputs.variant_prompt(assignment.policy_key, assignment.task_unit_id, assignment.arm.value)
+        if content_hash(prompt) != assignment.variant_sha256:
+            raise ValueError("smoke generation prompt drifted from its assignment")
+        request = {
+            "model_id": assignment.model_id, "arm": assignment.arm.value,
+            "task_unit_id": assignment.task_unit_id, "task_instance_id": assignment.task_instance_id,
+            "provider_seed": assignment.provider_seed, "prompt": prompt,
+        }
+        measured, _ = measure_generated_code(
+            assignment_id=assignment.assignment_id,
+            generation_request=request, generation_evaluator=evaluator, generation_prompt=prompt,
+            source_task_prompt=inputs.source_task_prompt,
+            functional_contract={
+                "requirements": [{"requirement_id": "fetch", "criterion": inputs.functional_requirement}],
+                "environment_dependencies": [], "language": "python",
+            },
+            functional_evaluator=evaluator, functional_prompt="Blinded functional review.",
+            security_profile_id=inputs.security_profile_id,
+            complete=inputs.complete, security_evaluate=evaluate_target_security_profile,
+        )
+        measurements.append(measured)
     measurement_ledger = close_target_measurements(
         assignments,
-        _smoke_measurements(assignments),
+        measurements,
         study_id=content_id("target_reviewer_smoke_study_", index),
         randomization_id=randomization_plan.target_randomization_plan_id,
         adapter_bundle_id=content_id("target_reviewer_smoke_adapters_", "local"),
@@ -401,10 +583,6 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         evidence=evidence,
         yields=yields,
     )
-    independently_verified = load_and_verify_target_result_bundle(output)
-    if independently_verified != written:
-        raise ValueError("target reviewer smoke changed under independent reload")
-
     return {
         "status": "TARGET_REVIEWER_SMOKE_VERIFIED",
         "protocol_status": "SPECIFIED_DRAFT",
@@ -430,699 +608,5 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
 
 def _artifact_reference(prefix: str, value: object) -> FreezeArtifactReference:
     return FreezeArtifactReference(content_id(prefix, value), content_hash(value))
-
-
-def _smoke_task_record(task_unit_id: str) -> TaskUnitDataRoleRecord:
-    return TaskUnitDataRoleRecord(
-        task_unit_id,
-        f"near-duplicate-{task_unit_id}",
-        f"lineage-{task_unit_id}",
-        (),
-        "reviewer-smoke-role-assignment-v1",
-    )
-
-
-def _atomic_discovery_task_ids() -> tuple[str, ...]:
-    return tuple(f"atomic-discovery-task-{index:02d}" for index in range(24))
-
-
-def _pair_discovery_task_ids() -> tuple[str, ...]:
-    return tuple(
-        f"pair-discovery-{cell}-{index:02d}"
-        for cell in ("00", "01", "10", "11")
-        for index in range(8)
-    )
-
-
-def _confirmation_task_ids() -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            (
-                *(f"atomic-smoke-task-{index:02d}" for index in range(10)),
-                *(f"pair-smoke-task-{index:02d}" for index in range(10)),
-            )
-        )
-    )
-
-
-def _smoke_role_manifest() -> DataRoleManifest:
-    discovery_ids = tuple(sorted((*_atomic_discovery_task_ids(), *_pair_discovery_task_ids())))
-    confirmation_ids = _confirmation_task_ids()
-    bindings = (
-        DataRoleBinding(
-            "CONFIRMATION-SMOKE",
-            DataRole.CONFIRMATION,
-            tuple(_smoke_task_record(item) for item in confirmation_ids),
-            content_hash(confirmation_ids),
-        ),
-        DataRoleBinding(
-            "DISCOVERY-SMOKE",
-            DataRole.DISCOVERY,
-            tuple(_smoke_task_record(item) for item in discovery_ids),
-            content_hash(discovery_ids),
-        ),
-        DataRoleBinding(
-            "LEGACY-SMOKE",
-            DataRole.LEGACY_ONLY,
-            (
-                replace(
-                    _smoke_task_record("legacy-smoke-task"),
-                    exposure_history=("reviewer_smoke_historical_only",),
-                ),
-            ),
-            content_hash("legacy-smoke-task"),
-        ),
-        DataRoleBinding(
-            "QUAL-ACCEPT-SMOKE",
-            DataRole.QUAL_ACCEPT,
-            (_smoke_task_record("qual-accept-smoke-task"),),
-            content_hash("qual-accept-smoke-task"),
-        ),
-        DataRoleBinding(
-            "QUAL-DEV-SMOKE",
-            DataRole.QUAL_DEV,
-            (_smoke_task_record("qual-dev-smoke-task"),),
-            content_hash("qual-dev-smoke-task"),
-        ),
-    )
-    return DataRoleManifest(
-        PROTOCOL_ID,
-        content_hash("reviewer-smoke-source-manifest"),
-        bindings,
-    )
-
-
-def _smoke_power_result(track: PolicyTrack) -> TargetPowerSimulationResult:
-    probabilities = (
-        tuple(zip(ATOMIC_POWER_ARMS, (0.79, 0.01, 0.10, 0.10), strict=True))
-        if track is PolicyTrack.ATOMIC
-        else tuple(zip(PAIR_POWER_ARMS, (0.01, 0.01, 0.01, 0.79), strict=True))
-    )
-    assumption = TargetPowerAssumption(
-        f"reviewer-smoke-{track.value}-power",
-        track,
-        probabilities,
-        0.0,
-        0.0,
-        0.01,
-        0.0,
-        0.1,
-        0.1,
-    )
-    return simulate_target_power(
-        TargetPowerSimulationPlan(
-            track,
-            0.05,
-            2,
-            10,
-            1,
-            2,
-            2,
-            4,
-            0.05,
-            0.8,
-            1000,
-            2026083104 + (0 if track is PolicyTrack.ATOMIC else 1),
-            (assumption,),
-        )
-    )
-
-
-def _smoke_power_memo(manifest: DataRoleManifest) -> PowerAndMarginMemo:
-    return freeze_power_and_margin_memo(
-        manifest,
-        code_commit=SMOKE_CODE_COMMIT,
-        atomic_power=_smoke_power_result(PolicyTrack.ATOMIC),
-        pair_power=_smoke_power_result(PolicyTrack.PAIR),
-        bootstrap_draws=100,
-        bootstrap_seed=2026083106,
-        minimum_valid_bootstrap_fraction=0.9,
-        maximum_unknown_fraction_among_valid=0.2,
-        independent_verifier_status="PASS",
-    )
-
-
-def _smoke_baseline_qualification(
-    manifest: DataRoleManifest,
-) -> RQ1BaselineQualification:
-    return qualify_rq1_baselines(
-        protocol_id=PROTOCOL_ID,
-        scenario=RQ1BudgetScenario.CORE,
-        model_ids=(SMOKE_MODEL_ID,),
-        qualification_accept_data_id=manifest.qualification_accept_data_id,
-        code_commit=SMOKE_CODE_COMMIT,
-        contract_references=(),
-        independent_verifier_status="PASS",
-    )
-
-
-def _smoke_qualification_bundle(
-    manifest: DataRoleManifest,
-    power_memo: PowerAndMarginMemo,
-    baseline: RQ1BaselineQualification,
-) -> QualificationBundle:
-    plans = []
-    for kind in QualificationProfileKind:
-        profile_id = (
-            baseline.selected_profile_id
-            if kind is QualificationProfileKind.RQ1_BASELINES
-            else f"reviewer-smoke-{kind.value}-profile"
-        )
-        plans.append(
-            QualificationPlan(
-                kind,
-                (profile_id,),
-                profile_id,
-                f"reviewer-smoke-{kind.value}-selection-rule-v1",
-                (f"reviewer-smoke-{kind.value}-acceptance-metric",),
-                content_hash(("reviewer-smoke-thresholds", kind.value)),
-                f"reviewer-smoke-{kind.value}-tie-break-v1",
-                SMOKE_CODE_COMMIT,
-            )
-        )
-    frozen_plans = tuple(plans)
-    plan_bundle = qualification_plan_bundle(manifest, frozen_plans)
-    results = tuple(
-        QualificationProfileResult(
-            plan.profile_kind,
-            plan.selected_profile_id,
-            (
-                FreezeArtifactReference(
-                    power_memo.power_and_margin_memo_id,
-                    content_hash(power_memo),
-                )
-                if plan.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
-                else FreezeArtifactReference(
-                    baseline.rq1_baseline_qualification_id,
-                    content_hash(baseline),
-                )
-                if plan.profile_kind is QualificationProfileKind.RQ1_BASELINES
-                else _artifact_reference(
-                    f"reviewer_smoke_{plan.profile_kind.value}_qualification_",
-                    plan.selected_profile_id,
-                )
-            ),
-            QualificationStatus.ACCEPTED,
-            manifest.qualification_accept_data_id,
-            SMOKE_CODE_COMMIT,
-            "PASS",
-        )
-        for plan in frozen_plans
-    )
-    return freeze_qualification_bundle(
-        manifest,
-        plan_bundle,
-        results,
-        verifier_status="PASS",
-    )
-
-
-def _smoke_provider_ceilings() -> ProviderBudgetCeilings:
-    rates = tuple(
-        ProviderRate(
-            kind,
-            f"reviewer-smoke-{kind.value}-provider",
-            index + 1,
-            _artifact_reference(
-                f"reviewer_smoke_{kind.value}_pricing_",
-                index + 1,
-            ),
-            ProviderTokenCostBasis(
-                "CNY",
-                "reviewer-smoke-local-region",
-                f"reviewer-smoke-tier-{index + 1}",
-                1,
-                1,
-                0,
-                (index + 1) * 1_000_000,
-                0,
-            ),
-        )
-        for index, kind in enumerate(ProviderCallKind)
-    )
-    return ProviderBudgetCeilings(rates, 1_000, 1_000, 1_000, 3_000, 100_000)
-
-
-def _smoke_budget(manifest: DataRoleManifest) -> RQ1BudgetQualification:
-    power_memo = _smoke_power_memo(manifest)
-    baseline = _smoke_baseline_qualification(manifest)
-    qualification = _smoke_qualification_bundle(manifest, power_memo, baseline)
-    return qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
-        dimensions=RQ1BudgetDimensions(
-            (SMOKE_MODEL_ID,),
-            atomic_top_k=1,
-            pair_top_k=1,
-            atomic_task_units_per_effect=10,
-            pair_task_units_per_effect=10,
-            atomic_global_realizations=1,
-            pair_global_realizations=1,
-            atomic_total_block_slots=4,
-            pair_total_block_slots=4,
-        ),
-        power_and_margin_memo=power_memo,
-        qualification_bundle=qualification,
-        baseline_qualification=baseline,
-        provider_ceilings=_smoke_provider_ceilings(),
-        independent_verifier_status="PASS",
-    )
-
-
-def _smoke_discovery_inputs(
-    discovery_population_sha256: str = content_hash(
-        "reviewer-smoke-discovery-population"
-    ),
-) -> _SmokeDiscoveryInputs:
-    outcome_id = "oracle_evaluable_secure_code_yield"
-    atomic_policy = AtomicPolicyKey(
-        AnalysisScope(
-            "security.reviewer-smoke.atomic",
-            "context.reviewer-smoke.atomic",
-            ("python",),
-            ("local-api",),
-            ("reviewer-smoke",),
-        ),
-        PolicyFactor("feature.reviewer-smoke.atomic", Operation.ADD),
-        outcome_id,
-    )
-    atomic_observations = tuple(
-        DiscoveryObservation(
-            task_unit_id,
-            SMOKE_MODEL_ID,
-            "atomic-smoke-family",
-            0,
-            ((atomic_policy.policy_key, index % 2),),
-            (("source_code", float((index // 2) % 2)),),
-            index % 2,
-        )
-        for index, task_unit_id in enumerate(_atomic_discovery_task_ids())
-    )
-    atomic_record = ModelBoundCandidateRecord(
-        atomic_policy.policy_key,
-        SMOKE_MODEL_ID,
-        PROTOCOL_ID,
-        SCHEMA_VERSION,
-    )
-    atomic_universe = freeze_atomic_candidate_universe(
-        (atomic_policy,),
-        (atomic_record,),
-        supported_policy_keys=(atomic_policy.policy_key,),
-        coverage_summaries={
-            atomic_policy.policy_key: CandidateCoverageSummary(
-                atomic_policy.policy_key,
-                CandidateKind.ATOMIC,
-                (("0", 12), ("1", 12)),
-                2,
-                24,
-                24,
-                24,
-                24,
-                12,
-            )
-        },
-        realization_policy_ids={
-            atomic_policy.policy_key: "reviewer-smoke-atomic-realization-policy"
-        },
-        candidate_family_ids={atomic_policy.policy_key: "atomic-smoke-family"},
-        discovery_data_sha256=discovery_data_sha256(atomic_observations),
-        discovery_population_sha256=discovery_population_sha256,
-        positivity_audit_sha256=content_hash("reviewer-smoke-atomic-positivity"),
-        information_budget_sha256=content_hash("reviewer-smoke-information-budget"),
-        top_k=1,
-        representation_adapter_id="reviewer-smoke-prompt-tsg-v3",
-    )
-    atomic_plan = AtomicShadowPlan(
-        SMOKE_MODEL_ID,
-        ("source_code",),
-        4,
-        0.05,
-        2026083101,
-        0.8,
-        0.5,
-    )
-    pair_policy = pair_policy_key(
-        AnalysisScope(
-            "security.reviewer-smoke.pair",
-            "context.reviewer-smoke.pair",
-            ("python",),
-            ("local-api",),
-            ("reviewer-smoke",),
-        ),
-        (
-            PolicyFactor("feature.reviewer-smoke.first", Operation.ADD),
-            PolicyFactor("feature.reviewer-smoke.second", Operation.ADD),
-        ),
-        outcome_id=outcome_id,
-    )
-    factors = tuple(item.actionable_feature_id for item in pair_policy.factors)
-    secure_counts = {"00": 1, "01": 2, "10": 2, "11": 7}
-    pair_rows = []
-    for x1, x2 in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        cell = f"{x1}{x2}"
-        for index in range(8):
-            pair_rows.append(
-                PairShadowObservation(
-                    pair_policy.policy_key,
-                    f"pair-discovery-{cell}-{index:02d}",
-                    SMOKE_MODEL_ID,
-                    f"pair-smoke-lineage-{index % 2}",
-                    "python",
-                    "reviewer-smoke",
-                    "local-api",
-                    pair_policy.analysis_scope.context_query_id,
-                    QueryState.PRESENT,
-                    (
-                        (factors[0], QueryState.PRESENT if x1 else QueryState.ABSENT),
-                        (factors[1], QueryState.PRESENT if x2 else QueryState.ABSENT),
-                    ),
-                    ((factors[0], 0.99), (factors[1], 0.99)),
-                    (("source_code", float(index % 2)),),
-                    int(index < secure_counts[cell]),
-                )
-            )
-    pair_observations = tuple(pair_rows)
-    pair_record = ModelBoundCandidateRecord(
-        pair_policy.policy_key,
-        SMOKE_MODEL_ID,
-        PROTOCOL_ID,
-        SCHEMA_VERSION,
-    )
-    compatibility = PairCompatibilityDecision(
-        pair_policy,
-        FactorialCompatibility.COMPATIBLE,
-        "reviewer-smoke-factorial-compatibility-v1",
-        ("surface.reviewer-smoke.first", "surface.reviewer-smoke.second"),
-        content_hash("reviewer-smoke-pair-compatibility"),
-    )
-    pair_universe = freeze_pair_candidate_universe(
-        (pair_policy,),
-        (compatibility,),
-        (pair_record,),
-        coverage_summaries={
-            pair_policy.policy_key: CandidateCoverageSummary(
-                pair_policy.policy_key,
-                CandidateKind.PAIR,
-                (("00", 8), ("01", 8), ("10", 8), ("11", 8)),
-                2,
-                32,
-                32,
-                32,
-                32,
-                8,
-            )
-        },
-        candidate_family_ids={pair_policy.policy_key: "pair-smoke-family"},
-        discovery_data_sha256=pair_shadow_data_sha256(pair_observations),
-        discovery_population_sha256=discovery_population_sha256,
-        information_budget_sha256=content_hash("reviewer-smoke-information-budget"),
-        top_k=1,
-    )
-    pair_plan = PairShadowPlan(
-        SMOKE_MODEL_ID,
-        ("source_code",),
-        4,
-        2,
-        0.9,
-        2,
-        2026083102,
-        0.05,
-        20,
-        2026083103,
-        8,
-        4,
-        0.5,
-        0.2,
-    )
-    return _SmokeDiscoveryInputs(
-        atomic_policy,
-        atomic_universe,
-        atomic_observations,
-        atomic_plan,
-        pair_policy,
-        pair_universe,
-        pair_observations,
-        pair_plan,
-    )
-
-
-def _smoke_population_lineage(
-    manifest: DataRoleManifest,
-    qualification: QualificationBundle,
-    inputs: _SmokeDiscoveryInputs,
-) -> DiscoveryPopulationLineage:
-    """Build a no-supplement D0 fixture without reading outcomes or selectors."""
-
-    targets = [
-        CoverageTarget(
-            inputs.atomic_policy.analysis_scope.context_query_id,
-            inputs.atomic_policy.factor.actionable_feature_id,
-            2,
-            2,
-            1,
-        )
-    ]
-    targets.extend(
-        CoverageTarget(
-            inputs.pair_policy.analysis_scope.context_query_id,
-            factor.actionable_feature_id,
-            2,
-            2,
-            1,
-        )
-        for factor in inputs.pair_policy.factors
-    )
-    frozen_targets = tuple(sorted(targets, key=lambda item: item.target_id))
-    pair_target = PairCoverageTarget(
-        inputs.pair_policy.policy_key,
-        inputs.pair_policy.analysis_scope.context_query_id,
-        tuple(
-            factor.actionable_feature_id for factor in inputs.pair_policy.factors
-        ),
-        2,
-        1,
-    )
-    qualification_sha256 = content_hash(qualification)
-    profile = CoverageTargetProfile(
-        protocol_id=PROTOCOL_ID,
-        schema_version=SCHEMA_VERSION,
-        representation_profile_id="reviewer-smoke-prompt-tsg-v3",
-        representation_qualification_sha256=qualification_sha256,
-        catalog_sha256=content_hash("reviewer-smoke-catalog"),
-        support_profile_sha256=content_hash("reviewer-smoke-support-profile"),
-        common_candidate_universe_sha256=content_hash(
-            (inputs.atomic_universe.universe_id, inputs.pair_universe.universe_id)
-        ),
-        targets=frozen_targets,
-        pair_targets=(pair_target,),
-        permitted_source_families=("reviewer-smoke-reserved",),
-        acquisition_mode=CoverageAcquisitionMode.CONTEXT_FIRST,
-        maximum_source_records=0,
-        maximum_new_task_units=0,
-        maximum_review_task_units=0,
-        maximum_task_units_per_lineage=1,
-        minimum_source_lineage_diversity=1,
-        minimum_fillable_atomic_slots=1,
-        minimum_fillable_pair_slots=1,
-    )
-    task_unit_ids = tuple(
-        sorted(
-            task.task_unit_id
-            for binding in manifest.bindings
-            if binding.role is DataRole.DISCOVERY
-            for task in binding.task_units
-        )
-    )
-    cells = tuple(
-        CoverageCellSupport(
-            target.target_id,
-            len(task_unit_ids),
-            2,
-            2,
-            ("reviewer-smoke-lineage",),
-            ("reviewer-smoke-lineage",),
-        )
-        for target in frozen_targets
-    )
-    pair_cells = (
-        PairCoverageCellSupport(
-            pair_target.target_id,
-            (("00", 2), ("01", 2), ("10", 2), ("11", 2)),
-            tuple(
-                (cell, ("reviewer-smoke-lineage",))
-                for cell in ("00", "01", "10", "11")
-            ),
-        ),
-    )
-    pre = DiscoveryCoverageCensus(
-        profile.profile_id,
-        manifest.data_role_manifest_id,
-        content_id("reviewer_smoke_discovery_population_", task_unit_ids),
-        profile.representation_profile_id,
-        profile.catalog_sha256,
-        CoverageCensusPhase.PRE_SUPPLEMENT,
-        manifest.discovery_population_sha256,
-        qualification_sha256,
-        task_unit_ids,
-        cells,
-        pair_cells,
-        1,
-        1,
-        1,
-        1,
-    )
-    plan = DiscoverySupplementationPlan(
-        profile.profile_id,
-        pre.census_id,
-        manifest.discovery_population_sha256,
-        SupplementationDecision.NOT_REQUESTED,
-        (),
-        (),
-        content_hash("future-evaluation-reservation-v1/reviewer-smoke"),
-        (),
-        (),
-        content_hash("reviewer-smoke-near-duplicate-rule"),
-        content_hash("reviewer-smoke-exposure-policy"),
-        content_hash("reviewer-smoke-role-allocation-rule"),
-        SMOKE_CODE_COMMIT,
-        False,
-        0,
-    )
-    post = DiscoveryCoverageCensus(
-        profile.profile_id,
-        manifest.data_role_manifest_id,
-        content_id("reviewer_smoke_discovery_population_", task_unit_ids),
-        profile.representation_profile_id,
-        profile.catalog_sha256,
-        CoverageCensusPhase.POST_SUPPLEMENT,
-        manifest.discovery_population_sha256,
-        qualification_sha256,
-        task_unit_ids,
-        cells,
-        pair_cells,
-        1,
-        1,
-        1,
-        1,
-    )
-    return DiscoveryPopulationLineage(
-        profile,
-        pre,
-        plan,
-        None,
-        post,
-        manifest.discovery_population_sha256,
-        DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION,
-    )
-
-
-def _smoke_atomic_fci_evidence(
-    universe: AtomicCandidateUniverseManifest,
-    policy: AtomicPolicyKey,
-) -> AtomicFCIBootstrapEvidence:
-    return AtomicFCIBootstrapEvidence(
-        universe.universe_id,
-        ((policy.policy_key, (True,) * 10),),
-        content_hash("reviewer-smoke-atomic-fci-bootstrap"),
-    )
-
-
-def _smoke_pair_relation_evidence(
-    policy: PairPolicyKey,
-    observations: Sequence[PairShadowObservation],
-) -> tuple[PairRelationEvidence, ...]:
-    return tuple(
-        PairRelationEvidence(
-            policy.policy_key,
-            "reviewer-smoke-relation-spec-v1",
-            "reviewer-smoke-relation-v1",
-            f"task-{row.task_unit_id}",
-            row.task_unit_id,
-            f"prompt-tsg-{row.task_unit_id}",
-            "reviewer-smoke-relation-contract-v1",
-            QueryState.PRESENT,
-            (f"node-{row.task_unit_id}",),
-            (),
-        )
-        for row in observations
-    )
-
-
-def _smoke_task_bundles(
-    dispatch: ConfirmationDispatchManifest,
-) -> tuple[TargetTaskBundle, ...]:
-    dispatch_by_candidate = {
-        item.candidate_record_id: item for item in dispatch.records
-    }
-    bundles = []
-    for entry in dispatch.union.entries:
-        record = dispatch_by_candidate[entry.candidate_record_id]
-        prefix = "atomic" if entry.track is PolicyTrack.ATOMIC else "pair"
-        arms = (
-            ATOMIC_CONFIRMATORY_ARMS
-            if entry.track is PolicyTrack.ATOMIC
-            else PAIR_CONFIRMATORY_ARMS
-        )
-        for index in range(10):
-            task_unit_id = f"{prefix}-smoke-task-{index:02d}"
-            bundles.append(
-                TargetTaskBundle(
-                    entry.candidate.policy_key,
-                    entry.track,
-                    task_unit_id,
-                    f"{task_unit_id}-instance",
-                    "reviewer-smoke-stratum",
-                    "reviewer-smoke-realization-1",
-                    content_id(
-                        "reviewer_smoke_task_bundle_",
-                        (entry.candidate.policy_key, task_unit_id),
-                    ),
-                    record.protocol_record_id,
-                    1.0,
-                    1.0,
-                    tuple(
-                        TargetTaskArmVariant(
-                            arm,
-                            content_hash(
-                                (entry.candidate.policy_key, task_unit_id, arm.value)
-                            ),
-                        )
-                        for arm in arms
-                    ),
-                )
-            )
-    return tuple(
-        sorted(
-            bundles,
-            key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
-        )
-    )
-
-
-def _smoke_measurements(
-    assignments: Sequence[AssignedArmITTRecord],
-) -> tuple[Measurement, ...]:
-    measurements = []
-    for assignment in assignments:
-        task_index = int(assignment.task_unit_id.rsplit("-", 1)[1])
-        secure = (
-            task_index
-            < (8 if assignment.arm.value == "atomic_target" else 2)
-            if assignment.track is PolicyTrack.ATOMIC
-            else task_index < (8 if assignment.arm.value == "pair_11" else 2)
-        )
-        measurements.append(
-            Measurement(
-                assignment.assignment_id,
-                CodeStatus.VALID,
-                OracleStatus.SECURE if secure else OracleStatus.INSECURE,
-                FunctionalStatus.PASS,
-                content_hash((assignment.assignment_id, "generator")),
-                content_hash((assignment.assignment_id, "code")),
-                content_hash((assignment.assignment_id, "oracle")),
-                content_hash((assignment.assignment_id, "functional")),
-            )
-        )
-    return tuple(sorted(measurements, key=lambda item: item.assignment_id))
-
 
 __all__ = ["SMOKE_STAGES", "run_target_reviewer_smoke"]

@@ -39,6 +39,10 @@ _OUTPUT_SCHEMA = {
 class JudgeGateError(RuntimeError):
     """A non-retryable gate, input, provider, or response failure."""
 
+    def __init__(self, message: str, *, provider_response: bytes | None = None):
+        super().__init__(message)
+        self.provider_response = provider_response
+
 
 @dataclass(frozen=True, slots=True)
 class GateInputs:
@@ -165,12 +169,13 @@ def build_review_request(
     requirements: Sequence[Mapping[str, Any]] = (),
     environment_dependencies: Sequence[str] = (),
     language: str = "python",
+    source_scope: str | None = None,
 ) -> dict[str, Any]:
     """Build the outcome-blind request used by formal measurement adapters."""
 
     if not code_text.strip() or not functional_task.strip() or not language.strip():
         raise JudgeGateError("functional review input is empty")
-    return {
+    request = {
         "schema_version": "1.0",
         "request_kind": "blind_functional_evaluation",
         "blindness": {
@@ -190,6 +195,14 @@ def build_review_request(
         "measurement_method": MEASUREMENT_METHOD,
         "output_schema": _OUTPUT_SCHEMA,
     }
+    if source_scope is not None:
+        if source_scope not in {"complete", "partial", "unresolved"}:
+            raise JudgeGateError("functional source scope is invalid")
+        request["source_context"] = {
+            "specification_scope": source_scope,
+            "scope_is_descriptive_not_a_verdict": True,
+        }
+    return request
 
 
 def validate_review_response(raw: bytes, code_text: str) -> dict[str, Any]:
@@ -247,6 +260,91 @@ def python_syntax_valid(code_text: str) -> bool:
     except (SyntaxError, TypeError, ValueError):
         return False
     return True
+
+
+_LANGUAGE_PARSERS = {
+    "c": ("tree_sitter_c", "tree-sitter-c", "0.24.1", "language"),
+    "cpp": ("tree_sitter_cpp", "tree-sitter-cpp", "0.23.4", "language"),
+    "csharp": ("tree_sitter_c_sharp", "tree-sitter-c-sharp", "0.23.1", "language"),
+    "go": ("tree_sitter_go", "tree-sitter-go", "0.25.0", "language"),
+    "java": ("tree_sitter_java", "tree-sitter-java", "0.23.5", "language"),
+    "javascript": ("tree_sitter_javascript", "tree-sitter-javascript", "0.25.0", "language"),
+    "php": ("tree_sitter_php", "tree-sitter-php", "0.24.1", "language_php_only"),
+    "rust": ("tree_sitter_rust", "tree-sitter-rust", "0.24.0", "language"),
+}
+SOURCE_LANGUAGES = ("python", *sorted(_LANGUAGE_PARSERS))
+
+
+def syntax_parser_identity(language: str) -> dict[str, Any]:
+    """Check the local parser before generation; this grants no Oracle qualification."""
+    import importlib
+    import importlib.metadata
+    import platform
+
+    if language == "python":
+        return {"language": language, "parser": "cpython_ast_compile",
+                "version": platform.python_version(), "code_execution": False}
+    if language not in _LANGUAGE_PARSERS:
+        raise JudgeGateError(f"syntax parser language is not supported: {language}")
+    module, package, expected, entrypoint = _LANGUAGE_PARSERS[language]
+    try:
+        versions = {name: importlib.metadata.version(name)
+                    for name in ("tree-sitter", package)}
+        if versions != {"tree-sitter": "0.25.2", package: expected}:
+            raise JudgeGateError("language parser versions differ from the pinned dependencies")
+        importlib.import_module("tree_sitter")
+        getattr(importlib.import_module(module), entrypoint)
+    except (ImportError, AttributeError) as exc:
+        raise JudgeGateError("language parser is unavailable; install the languages extra") from exc
+    return {"language": language, "parser": "tree_sitter", "packages": versions,
+            "grammar_entrypoint": entrypoint, "code_execution": False}
+
+
+def code_syntax_valid(code_text: str, language: str) -> bool:
+    """Parse the exact source, without executing, wrapping, translating, or repairing it.
+
+    Tree-sitter checks grammar only. Type checking, imports, linking, runtime
+    behavior, security and functionality are independent measurement questions.
+    Missing parsers are setup errors, never an INVALID label for generated code.
+    """
+    import importlib
+
+    syntax_parser_identity(language)
+    if language == "python":
+        return python_syntax_valid(code_text)
+    from tree_sitter import Language, Parser
+
+    module, _, _, entrypoint = _LANGUAGE_PARSERS[language]
+    grammar = Language(getattr(importlib.import_module(module), entrypoint)())
+    tree = Parser(grammar).parse(code_text.encode("utf-8"))
+    root = tree.root_node
+    return not root.has_error and any(
+        child.type not in {"comment", "line_comment", "block_comment", "php_tag"}
+        for child in root.named_children
+    )
+
+
+def functional_source_scope(contract: Mapping[str, Any]) -> str:
+    """Describe source completeness without predetermining functional judgment."""
+    scope = contract.get("measurement_scope", "complete")
+    if scope not in {"complete", "partial", "unresolved"}:
+        raise JudgeGateError("functional measurement scope is invalid")
+    review = contract.get("review", {})
+    if not isinstance(review, Mapping):
+        raise JudgeGateError("functional source review is invalid")
+    source = review.get("source_specification_disposition")
+    if source is not None and source not in {"sufficient", "insufficient", "defect"}:
+        raise JudgeGateError("functional source specification status is invalid")
+    inherited = contract.get("parent_contract_applies_to_current_input", True)
+    if type(inherited) is not bool:
+        raise JudgeGateError("functional parent contract applicability is invalid")
+    if not inherited:
+        return "unresolved"
+    if source == "defect" or scope == "unresolved" or not contract.get("requirements"):
+        return "unresolved"
+    if source == "insufficient" or scope == "partial":
+        return "partial"
+    return "complete"
 
 
 def preflight(
@@ -423,10 +521,26 @@ def bailian_complete(
     request_payload: dict[str, Any],
     evaluator: Mapping[str, Any],
     prompt: str,
+    *,
+    trace: Callable[[str, bytes], None] | None = None,
+    continuation: Sequence[Mapping[str, str]] = (),
+    source_first_delivery: bool = False,
 ) -> bytes:
-    key_name = evaluator["api_key_env"]
-    api_key = os.environ.get(key_name, "")
-    if not api_key.strip():
+    """Complete the declared chat request through the shared provider client.
+
+    The historical name is retained for frozen reproductions. A local_vllm
+    configuration uses the same messages, decoding and response validation,
+    without Bailian's thinking parameter or an invented cloud credential.
+    Optional tracing retains the credential-free wire body and response envelope
+    for development replay and usage accounting; it does not alter either body.
+    A continuation appends explicit chat turns after the unchanged source request.
+    Source-first development delivery changes JSON presentation order only;
+    artifact identities still use canonical JSON. Default delivery is unchanged.
+    """
+    local = evaluator.get("provider") == "local_vllm"
+    key_name = evaluator.get("api_key_env")
+    api_key = os.environ.get(key_name, "") if key_name else ""
+    if not local and not api_key.strip():
         raise JudgeGateError("provider credential is unavailable")
     endpoint = evaluator["base_url"].rstrip("/") + "/chat/completions"
     response_format = evaluator.get("response_format", {"type": "json_object"})
@@ -435,31 +549,77 @@ def bailian_complete(
         "json_schema",
     }:
         raise JudgeGateError("provider response format is invalid")
+    if source_first_delivery:
+        remaining = dict(request_payload)
+        ordered = {key: remaining.pop(key) for key in (
+            "request_kind", "annotation_phase", "source_prompt", "source_units", "source_tokens"
+        ) if key in remaining}
+        ordered.update(remaining)
+        tokens = ordered.get("source_tokens")
+        if isinstance(tokens, dict) and all(isinstance(key, str) and key.isdecimal() for key in tokens):
+            ordered["source_tokens"] = {key: tokens[key] for key in sorted(tokens, key=int)}
+        source_message = json.dumps(ordered, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    else:
+        source_message = canonical_json(request_payload)
     body = {
         "model": evaluator["model_id"],
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": canonical_json(request_payload)},
+            {"role": "user", "content": source_message},
         ],
         "temperature": evaluator["temperature"],
         "top_p": evaluator["top_p"],
         "seed": evaluator["seed"],
         "n": 1,
         "response_format": response_format,
-        "enable_thinking": evaluator["enable_thinking"],
     }
+    body["messages"].extend(dict(message) for message in continuation)
+    if evaluator.get("provider") == "deepseek":
+        # DeepSeek exposes thinking under its native key and no seeded decoding
+        # contract. Keep the provider difference explicit in the retained wire.
+        body.pop("seed")
+        body.pop("n")
+        body["stream"] = False
+        body["thinking"] = {"type": "enabled" if evaluator["enable_thinking"] else "disabled"}
+    elif not local:
+        body["enable_thinking"] = evaluator["enable_thinking"]
+        if "thinking_budget" in evaluator:
+            body["thinking_budget"] = evaluator["thinking_budget"]
     maximum_output_tokens = evaluator.get("maximum_output_tokens")
-    if maximum_output_tokens is not None:
+    if "maximum_completion_tokens" in evaluator:
+        # DeepSeek names its completion limit max_tokens; Bailian uses
+        # max_completion_tokens to include reasoning in the same budget.
+        limit_field = "max_tokens" if evaluator.get("provider") == "deepseek" else "max_completion_tokens"
+        body[limit_field] = evaluator["maximum_completion_tokens"]
+    elif maximum_output_tokens is not None:
         body["max_tokens"] = maximum_output_tokens
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    # Canonical sorting is for artifact identity. At delivery it would reorder
+    # response-schema properties, putting edges/nodes before the operation
+    # inventory and reversing start/end evidence coordinates. Preserve the
+    # declared schema sequence; source-message presentation is selected above.
+    encoded_request = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    maximum_input_bytes = evaluator.get("maximum_input_bytes")
+    if maximum_input_bytes is not None and (
+        type(maximum_input_bytes) is not int or maximum_input_bytes <= 0
+        or len(encoded_request) + 1024 > maximum_input_bytes
+    ):
+        raise JudgeGateError("provider request exceeds frozen input byte ceiling; not submitted")
     http_request = Request(
         endpoint,
-        data=canonical_json(body).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        data=encoded_request,
+        headers=headers,
         method="POST",
     )
+    if trace is not None:
+        trace("request", encoded_request)
     try:
         with urlopen(http_request, timeout=evaluator["timeout_seconds"]) as response:
             raw_outer = response.read(evaluator["max_response_bytes"] + 1)
+        if trace is not None:
+            trace("response", raw_outer)
         if len(raw_outer) > evaluator["max_response_bytes"]:
             raise ValueError
         outer = _object(json.loads(raw_outer), "provider response")
@@ -469,9 +629,13 @@ def bailian_complete(
         choice = _object(choices[0], "provider choice")
         message = _object(choice.get("message"), "provider message")
         content = message.get("content")
+        if choice.get("finish_reason") != "stop":
+            raise JudgeGateError(
+                f"provider completion did not finish with stop (finish_reason={choice.get('finish_reason')!r})",
+                provider_response=raw_outer,
+            )
         if (
-            choice.get("finish_reason") != "stop"
-            or not isinstance(content, str)
+            not isinstance(content, str)
             or not content.strip()
         ):
             raise ValueError
@@ -479,8 +643,21 @@ def bailian_complete(
         if len(encoded) > evaluator["max_response_bytes"]:
             raise ValueError
         return encoded
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-        raise JudgeGateError("provider request failed") from None
+    except HTTPError as error:
+        try:
+            with error:
+                raw_error = error.read(evaluator["max_response_bytes"] + 1)
+        except (OSError, ValueError):
+            raw_error = b""
+        if api_key:
+            raw_error = raw_error.replace(api_key.encode("utf-8"), b"[REDACTED]")
+        if trace is not None:
+            trace("response", raw_error)
+        raise JudgeGateError(f"provider HTTP error {error.code}", provider_response=raw_error) from None
+    except (URLError, TimeoutError) as error:
+        raise JudgeGateError(f"provider transport failed: {type(error).__name__}") from None
+    except (ValueError, json.JSONDecodeError):
+        raise JudgeGateError("provider response envelope is invalid") from None
     finally:
         api_key = ""
 

@@ -12,10 +12,17 @@ from typing import Any
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
+    FeatureScope,
+    PromptTSGError,
     QueryState,
     feature_state,
+    scoped_feature_assessment,
+    validate_feature_scope,
+    prompt_tsg_from_record,
     query_context,
     query_for_realization,
+    query_bindings,
+    validate_prompt_tsg,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text
 from prompt_mechanism_study.representation import PairPolicyKey
@@ -23,6 +30,302 @@ from prompt_mechanism_study.representation import PairPolicyKey
 
 class MechanismRegistryError(ValueError):
     """Raised when a mechanism registry or task binding is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class TaskHypothesisBinding:
+    """One local subgraph follows the policy from candidate support to prompt editing."""
+
+    task_id: str
+    source_tsg_id: str
+    policy_id: str
+    context_query_id: str
+    target_operation_node_id: str | None
+    factor_feature_ids: tuple[str, ...]
+    factor_operations: tuple[str, ...]
+    feature_states: tuple[str, ...]
+    target_subgraph_node_ids: tuple[str, ...]
+    target_subgraph_edge_ids: tuple[str, ...]
+    non_target_requirement_node_ids: tuple[str, ...]
+    # A factor can address one data object at the operation, or the operation
+    # itself. Task-local subject identities never become global factor IDs.
+    factor_subject_node_ids: tuple[str | None, ...] = ()
+    factor_scopes: tuple[FeatureScope, ...] = ()
+
+    @property
+    def binding_id(self) -> str:
+        from dataclasses import asdict
+        value = asdict(self)
+        if not self.factor_subject_node_ids:
+            value.pop("factor_subject_node_ids")  # Preserve frozen operation-only identities.
+        if not self.factor_scopes:
+            value.pop("factor_scopes")
+        return content_id("task_hypothesis_binding_", value)
+
+
+def bind_task_hypothesis(
+    graph: PromptTSG, *, query: Mapping[str, Any], policy_id: str,
+    target_operation_node_id: str | None = None, factor_feature_ids: tuple[str, ...],
+    factor_operations: tuple[str, ...],
+    factor_subject_node_ids: tuple[str | None, ...] = (),
+    factor_scopes: tuple[FeatureScope, ...] = (),
+) -> TaskHypothesisBinding:
+    """Bind Atomic or Pair directly to an operation, with no Atomic-parent requirement."""
+    if graph.schema_version != "3.0":
+        raise MechanismRegistryError("instance hypotheses require the active open graph schema")
+    if (len(factor_feature_ids) not in {1, 2} or len(set(factor_feature_ids)) != len(factor_feature_ids)
+        or len(factor_operations) != len(factor_feature_ids) or any(op not in {"add", "remove"} for op in factor_operations)):
+        raise MechanismRegistryError("a local hypothesis needs one or two explicit factors and edit operations")
+    context_semantics = set(query["required_semantics"]) | set(query["forbidden_semantics"])
+    context_semantics |= {semantic for source, _, target in query["required_relations"] for semantic in (source, target)}
+    if context_semantics & set(factor_feature_ids):
+        raise MechanismRegistryError("hypothesis context must be invariant to its target features")
+    if factor_scopes:
+        if len(factor_scopes) != len(factor_feature_ids) or factor_subject_node_ids:
+            raise MechanismRegistryError("each factor needs one exact scope, without legacy subject coordinates")
+        if target_operation_node_id is not None and any(scope.operation_node_id != target_operation_node_id for scope in factor_scopes):
+            raise MechanismRegistryError("factor scopes conflict with the shared operation coordinate")
+        try:
+            for scope in factor_scopes:
+                validate_feature_scope(graph, scope)
+        except PromptTSGError as error:
+            raise MechanismRegistryError(str(error)) from error
+        operations = {scope.operation_node_id for scope in factor_scopes}
+        target_operation_node_id = next(iter(operations)) if len(operations) == 1 else None
+    else:
+        target = next((node for node in graph.nodes if node.node_id == target_operation_node_id), None)
+        if target is None or target.node_type != "task_operation":
+            raise MechanismRegistryError("hypothesis target must identify one operation instance")
+        operations = {target_operation_node_id}
+    context = query_context(graph, query=query, cwe="", task_family="")
+    matches = [(nodes, edges) for nodes, edges in query_bindings(graph, query=query)
+               if operations & set(nodes)]
+    if context.state is not QueryState.PRESENT or not operations <= {node for nodes, _ in matches for node in nodes}:
+        raise MechanismRegistryError("hypothesis has no source-supported coherent context at this operation")
+    nodes = {node for binding, _ in matches for node in binding}
+    edges = {edge for _, binding in matches for edge in binding}
+    by_id = {node.node_id: node for node in graph.nodes}
+    if factor_subject_node_ids and len(factor_subject_node_ids) != len(factor_feature_ids):
+        raise MechanismRegistryError("each factor needs exactly one subject coordinate")
+    for subject, edit in zip(factor_subject_node_ids, factor_operations):
+        if subject is None:
+            continue
+        subject_edges = [edge for edge in graph.edges if edge.source_id == subject
+                         and edge.target_id == target_operation_node_id and edge.edge_type == "used_by"]
+        if subject not in by_id or by_id[subject].node_type != "data_object" or not subject_edges:
+            raise MechanismRegistryError("factor subject must be a source-bound input of this operation")
+        if edit != "add":
+            raise MechanismRegistryError("subject-specific REMOVE needs a separately qualified source-scope rule")
+        nodes.add(subject)
+        edges.update(edge.edge_id for edge in subject_edges)
+    requirements = {edge.source_id for edge in graph.edges if edge.target_id in operations
+                    and edge.edge_type == "constrains"}
+    if factor_scopes:
+        assessments = [scoped_feature_assessment(graph, feature, scope)
+                       for feature, scope in zip(factor_feature_ids, factor_scopes, strict=True)]
+        target_requirements = {key for item in assessments if item for key in item.requirement_node_ids}
+        for scope in factor_scopes:
+            nodes.update((scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids))
+        states = tuple(item.state if item else "unresolved" for item in assessments)
+    else:
+        target_requirements = {node for node in requirements if by_id[node].semantic_id in factor_feature_ids}
+        states = tuple(feature_state(graph, feature, target_operation_node_id).value for feature in factor_feature_ids)
+    nodes |= target_requirements
+    if factor_scopes:
+        edges |= {edge.edge_id for edge in graph.edges if edge.source_id in nodes and edge.target_id in nodes}
+    else:
+        edges |= {edge.edge_id for edge in graph.edges if edge.source_id in target_requirements
+                  and edge.target_id == target_operation_node_id and edge.edge_type == "constrains"}
+    return TaskHypothesisBinding(graph.task_id, graph.tsg_id, policy_id, query["query_id"],
+        target_operation_node_id, factor_feature_ids, factor_operations,
+        states,
+        tuple(sorted(nodes)), tuple(sorted(edges)), tuple(sorted(node.node_id for node in graph.nodes
+            if node.node_type in {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
+            and node.node_id not in target_requirements)), factor_subject_node_ids, factor_scopes)
+
+
+def render_task_hypothesis(
+    binding: TaskHypothesisBinding, graph: PromptTSG, *, prompt: str,
+    catalog: Mapping[str, Any], enabled: tuple[bool, ...], additions: Mapping[str, str],
+    reviewed_variant: Mapping[str, Any] | None = None,
+    inactive_texts: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Render the same operation-bound factors; unresolved source states never become absence."""
+    validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
+    if graph.tsg_id != binding.source_tsg_id or graph.task_id != binding.task_id:
+        raise MechanismRegistryError("hypothesis binding does not match the exact source graph")
+    subjects = binding.factor_subject_node_ids or (None,) * len(binding.factor_feature_ids)
+    factor_scopes = binding.factor_scopes or tuple(FeatureScope(binding.target_operation_node_id,
+        (subject,) if subject else ()) for subject in subjects)
+    states = tuple(feature_state(graph, feature, scope=scope).value if binding.factor_scopes
+                   else feature_state(graph, feature, binding.target_operation_node_id).value
+                   for feature, scope in zip(binding.factor_feature_ids, factor_scopes, strict=True))
+    if binding.feature_states != states:
+        raise MechanismRegistryError("binding feature states differ from the explicit source graph assessments")
+    if len(enabled) != len(binding.factor_feature_ids) or any(type(flag) is not bool for flag in enabled):
+        raise MechanismRegistryError("arm must specify every frozen factor")
+    if reviewed_variant is not None:
+        return _render_reviewed_variant(binding, graph, prompt=prompt, catalog=catalog,
+                                        enabled=enabled, variant=reviewed_variant, inactive_texts=inactive_texts or {})
+    by_id = {node.node_id: node for node in graph.nodes}
+    scopes = []
+    for scope in factor_scopes:
+        validate_feature_scope(graph, scope)
+        if not {scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids} <= set(binding.target_subgraph_node_ids):
+            raise MechanismRegistryError("factor scope binding changed before rendering")
+        quote = lambda key: json.dumps(prompt[by_id[key].evidence_start:by_id[key].evidence_end], ensure_ascii=False)
+        text = ""
+        if scope.subject_node_ids:
+            text += ("For the input described by " if len(scope.subject_node_ids) == 1 else "For the inputs described by ")
+            text += ", ".join(quote(key) for key in scope.subject_node_ids) + ": "
+        if scope.condition_node_ids:
+            text += "Under the unchanged source conditions " + ", ".join(quote(key) for key in scope.condition_node_ids) + ": "
+        scopes.append(text)
+    removals, instructions, expected = [], [], []
+    for feature, edit, state, active, subject_scope, scope in zip(binding.factor_feature_ids, binding.factor_operations,
+                                            binding.feature_states, enabled, scopes, factor_scopes, strict=True):
+        operation = by_id[scope.operation_node_id]
+        required = "absent" if edit == "add" else "present"
+        if state != required:
+            raise MechanismRegistryError(f"{edit} requires explicit {required} at the exact target scope; got {state}")
+        expected.append((feature, ("present" if edit == "add" else "absent") if active else state))
+        if not active:
+            if inactive_texts is not None and feature in inactive_texts:
+                text = inactive_texts[feature]
+                require_text(text, "frozen inactive factor text")
+                instructions.append((operation.node_id, subject_scope + text))
+            continue
+        if edit == "add":
+            text = additions.get(feature)
+            require_text(text, "frozen addition text")
+            instructions.append((operation.node_id, subject_scope + text))
+        else:
+            if binding.factor_scopes:
+                assessment = scoped_feature_assessment(graph, feature, scope)
+                requirements = [by_id[key] for key in assessment.requirement_node_ids]
+            else:
+                requirements = [by_id[edge.source_id] for edge in graph.edges
+                                if edge.target_id == operation.node_id and edge.edge_type == "constrains"
+                                and by_id[edge.source_id].semantic_id == feature]
+            if len(requirements) != 1:
+                raise MechanismRegistryError("removal needs one identifiable source requirement")
+            node = requirements[0]
+            allowed_targets = {operation.node_id, *scope.subject_node_ids}
+            if any(edge.source_id == node.node_id and edge.target_id not in allowed_targets for edge in graph.edges):
+                raise MechanismRegistryError("removal would change a requirement on another object")
+            if binding.factor_scopes and any(item.feature_id == feature and item.scope != scope
+                    and node.node_id in item.requirement_node_ids for item in graph.scoped_feature_assessments):
+                raise MechanismRegistryError("removal would change a requirement assessed at another scope; needs a reviewed neutral rewrite")
+            if any(other.node_id not in {node.node_id} and other.semantic_id != "task.root"
+                   and max(node.evidence_start, other.evidence_start) < min(node.evidence_end, other.evidence_end)
+                   for other in graph.nodes):
+                raise MechanismRegistryError("removal overlaps non-target source evidence")
+            removals.append((node.evidence_start, node.evidence_end))
+    variant = prompt
+    for start, end in sorted(set(removals), reverse=True):
+        variant = variant[:start] + variant[end:]
+    if instructions:
+        for operation_id in dict.fromkeys(key for key, _ in instructions):
+            operation = by_id[operation_id]
+            operation_text = prompt[operation.evidence_start:operation.evidence_end]
+            variant += "\n\nFor the operation described by " + json.dumps(operation_text, ensure_ascii=False) + ":\n"
+            variant += "\n".join("- " + text for key, text in instructions if key == operation_id)
+    result = {"binding_id": binding.binding_id, "task_id": binding.task_id, "policy_id": binding.policy_id,
+            "source_tsg_id": binding.source_tsg_id, "target_operation_node_id": binding.target_operation_node_id,
+            "enabled": list(enabled), "expected_feature_states": dict(expected), "prompt": variant,
+            "prompt_sha256": content_hash(variant), "removed_source_spans": [list(span) for span in removals],
+            "factor_subject_node_ids": list(subjects), "factor_scope_texts": scopes,
+            "non_target_source_bytes_preserved": True}
+    if binding.factor_scopes:
+        from dataclasses import asdict
+        result["factor_scopes"] = [asdict(scope) for scope in factor_scopes]
+        result["expected_scoped_feature_states"] = [dict(scope=asdict(scope), feature_id=feature, state=state)
+            for scope, (feature, state) in zip(factor_scopes, expected, strict=True)]
+    return result
+
+
+def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, variant, inactive_texts):
+    """Check a source-reviewed full realization, including shared-clause neutral rewrites.
+
+    Projection and four-state checks constrain the review; they do not establish
+    semantic accuracy. A frozen review record and later independent qualification
+    are still needed. Full joint realizations avoid order-dependent Pair edits.
+    """
+    from dataclasses import asdict
+    if (not binding.factor_scopes or variant.get("binding_id") != binding.binding_id
+        or variant.get("source_prompt_sha256") != content_hash(prompt)
+        or variant.get("enabled") != list(enabled)):
+        raise MechanismRegistryError("reviewed variant must bind the exact source, scopes and full arm")
+    review = variant.get("source_review", {})
+    if review.get("outcomes_used") is not False:
+        raise MechanismRegistryError("neutral rewrite requires an outcome-blind source review")
+    for field in ("reviewer_id", "rationale"):
+        require_text(review.get(field), "neutral rewrite source review " + field)
+    for edit, state in zip(binding.factor_operations, binding.feature_states, strict=True):
+        if state != ("absent" if edit == "add" else "present"):
+            raise MechanismRegistryError("reviewed edits cannot bypass the explicit source-state gate")
+    target_prompt = variant["prompt"]
+    require_text(target_prompt, "reviewed variant prompt")
+    target = prompt_tsg_from_record(variant["graph"])
+    validate_prompt_tsg(target, prompt=target_prompt, catalog=catalog)
+    if target.task_id != graph.task_id:
+        raise MechanismRegistryError("reviewed variant changes task identity")
+    node_map = variant["source_to_variant_nodes"]
+    old = {node.node_id: node for node in graph.nodes if node.node_type != "task"}
+    new = {node.node_id: node for node in target.nodes if node.node_type != "task"}
+    neutral_nodes = variant.get("neutral_control_nodes", {})
+    if set(neutral_nodes) != set(inactive_texts):
+        raise MechanismRegistryError("reviewed joint realization must identify every frozen neutral control")
+    for feature, key in neutral_nodes.items():
+        if (key not in new or new[key].node_type != "presentation_control"
+            or target_prompt[new[key].evidence_start:new[key].evidence_end] != inactive_texts[feature]):
+            raise MechanismRegistryError("reviewed neutral control differs from its frozen source-bound text")
+    targeted_requirements = {key for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)
+        for key in scoped_feature_assessment(graph, feature, scope).requirement_node_ids}
+    preserved = set(old) - targeted_requirements
+    if (not preserved <= set(node_map) or set(node_map) - set(old)
+        or len(set(node_map.values())) != len(node_map) or set(node_map.values()) - set(new)):
+        raise MechanismRegistryError("neutral rewrite needs a one-to-one map of all non-target source nodes")
+    for key in preserved:
+        before, after = old[key], new[node_map[key]]
+        if (before.node_type != after.node_type or before.semantic_id != after.semantic_id
+            or prompt[before.evidence_start:before.evidence_end] != target_prompt[after.evidence_start:after.evidence_end]):
+            raise MechanismRegistryError("neutral rewrite changed non-target source evidence")
+    source_edges = {(node_map[edge.source_id], edge.edge_type, node_map[edge.target_id])
+                    for edge in graph.edges if edge.source_id in preserved and edge.target_id in preserved}
+    retained = {node_map[key] for key in preserved}
+    target_edges = {(edge.source_id, edge.edge_type, edge.target_id)
+                    for edge in target.edges if edge.source_id in retained and edge.target_id in retained}
+    if source_edges != target_edges:
+        raise MechanismRegistryError("neutral rewrite changed non-target relation structure")
+    def mapped_scope(scope):
+        return FeatureScope(node_map[scope.operation_node_id],
+            tuple(sorted(node_map[key] for key in scope.subject_node_ids)),
+            tuple(sorted(node_map[key] for key in scope.condition_node_ids)))
+    changes = {(scope, feature): ("present" if edit == "add" else "absent") if flag else state
+               for scope, feature, edit, state, flag in zip(binding.factor_scopes, binding.factor_feature_ids,
+                   binding.factor_operations, binding.feature_states, enabled, strict=True)}
+    expected = {(mapped_scope(item.scope), item.feature_id): changes.get((item.scope, item.feature_id), item.state)
+                for item in graph.scoped_feature_assessments}
+    actual = {(item.scope, item.feature_id): item.state for item in target.scoped_feature_assessments}
+    if actual != expected:
+        raise MechanismRegistryError("neutral rewrite changed another scope or did not realize its assigned factors")
+    # New source objects or requirements outside the declared factor-state table
+    # cannot hide behind a correct target-state label.
+    covered = retained | set(neutral_nodes.values()) | {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids}
+    if set(new) - covered:
+        raise MechanismRegistryError("neutral rewrite introduces an unaccounted source node")
+    expected_rows = [dict(scope=asdict(scope), feature_id=feature, state=changes[scope, feature])
+                     for scope, feature in zip(binding.factor_scopes, binding.factor_feature_ids, strict=True)]
+    return {"binding_id": binding.binding_id, "task_id": binding.task_id, "policy_id": binding.policy_id,
+            "source_tsg_id": binding.source_tsg_id, "target_operation_node_id": binding.target_operation_node_id,
+            "enabled": list(enabled), "prompt": target_prompt, "prompt_sha256": content_hash(target_prompt),
+            "expected_feature_states": {row["feature_id"]: row["state"] for row in expected_rows},
+            "factor_scopes": [asdict(scope) for scope in binding.factor_scopes],
+            "expected_scoped_feature_states": expected_rows,
+            "rendering": "SOURCE_REVIEWED_JOINT_REALIZATION", "reviewed_variant_sha256": content_hash(variant),
+            "non_target_source_bytes_preserved": False, "non_target_graph_projection_preserved": True,
+            "semantic_fidelity_status": "SOURCE_REVIEWED_PENDING_INDEPENDENT_QUALIFICATION"}
 
 
 class PairRelation(StrEnum):

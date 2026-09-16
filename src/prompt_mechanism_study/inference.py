@@ -6,16 +6,17 @@ import math
 import random
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import lru_cache
 
-from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.measurement import InfrastructureFailure
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.prioritization import (
     BridgeStatus,
     ConfirmationDispatchManifest,
+    ConfirmationDispatchRecord,
     PolicyTrack,
     SlotStatus,
 )
@@ -63,127 +64,49 @@ class EvidenceLevel(StrEnum):
 
 class ContextAnalysisStatus(StrEnum):
     BLOCKED_NO_FROZEN_CONTEXT_RULE = "BLOCKED_NO_FROZEN_CONTEXT_RULE"
-    FROZEN = "FROZEN"
-
-
-@dataclass(frozen=True, slots=True)
-class ContextModifierSpec:
-    """One prospectively assigned Stage-III heterogeneity coordinate."""
-
-    modifier_id: str
-    source_field: str
-    levels: tuple[str, ...]
-    stratum_assignment_rule_id: str
-    missing_value_policy: str
-    task_assignment_sha256: str
-    context_contrast_family_id: str
-    policy_semantics_sha256: str
-    realization_family_sha256: str
-    eligible_tracks: tuple[PolicyTrack, ...]
-    estimand_ids: tuple[str, ...]
-    minimum_task_units_per_level: int
-
-    def __post_init__(self) -> None:
-        require_text(self.modifier_id, "context modifier_id")
-        require_text(self.source_field, "context modifier source_field")
-        require_text(
-            self.stratum_assignment_rule_id,
-            "context stratum_assignment_rule_id",
-        )
-        require_text(
-            self.context_contrast_family_id,
-            "context contrast family_id",
-        )
-        if self.levels != tuple(sorted(set(self.levels))) or len(self.levels) < 2:
-            raise ValueError("context modifier requires at least two canonical levels")
-        if self.missing_value_policy not in {"EXPLICIT_MISSING_LEVEL", "FAIL_CLOSED"}:
-            raise ValueError("context modifier missing-value policy is not frozen")
-        _require_digest(self.task_assignment_sha256, "context task assignment")
-        _require_digest(self.policy_semantics_sha256, "context policy semantics")
-        _require_digest(self.realization_family_sha256, "context realization family")
-        if (
-            not self.eligible_tracks
-            or len(set(self.eligible_tracks)) != len(self.eligible_tracks)
-            or any(type(item) is not PolicyTrack for item in self.eligible_tracks)
-            or tuple(sorted(self.eligible_tracks, key=lambda item: item.value))
-            != self.eligible_tracks
-        ):
-            raise ValueError("context modifier tracks must be typed and canonical")
-        if self.estimand_ids != tuple(sorted(set(self.estimand_ids))) or not self.estimand_ids:
-            raise ValueError("context modifier estimands must be non-empty and canonical")
-        if type(self.minimum_task_units_per_level) is not int or self.minimum_task_units_per_level < 2:
-            raise ValueError("context modifier minimum support must be at least two")
 
 
 @dataclass(frozen=True, slots=True)
 class ContextAnalysisPlan:
+    """Inactive analysis; empty wire fields preserve existing tested artifacts."""
+
     status: ContextAnalysisStatus
-    modifiers: tuple[ContextModifierSpec, ...]
-    joint_bootstrap_rule_sha256: str | None
-    multiplicity_family_sha256: str | None
+    modifiers: tuple[()]
+    joint_bootstrap_rule_sha256: None
+    multiplicity_family_sha256: None
 
     def __post_init__(self) -> None:
-        if type(self.status) is not ContextAnalysisStatus:
-            raise TypeError("context analysis status must be typed")
-        modifier_ids = tuple(item.modifier_id for item in self.modifiers)
-        if any(type(item) is not ContextModifierSpec for item in self.modifiers) or modifier_ids != tuple(
-            sorted(set(modifier_ids))
-        ):
-            raise ValueError("context modifiers must be typed, unique, and canonical")
-        if self.status is ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
-            if self.modifiers or self.joint_bootstrap_rule_sha256 is not None or self.multiplicity_family_sha256 is not None:
-                raise ValueError("blocked context analysis cannot carry partial rules")
-        else:
-            if not self.modifiers or self.joint_bootstrap_rule_sha256 is None or self.multiplicity_family_sha256 is None:
-                raise ValueError("frozen context analysis requires complete rules")
-            _require_digest(self.joint_bootstrap_rule_sha256, "context bootstrap rule")
-            _require_digest(self.multiplicity_family_sha256, "context multiplicity family")
+        if (self.status is not ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE
+            or self.modifiers != () or self.joint_bootstrap_rule_sha256 is not None
+            or self.multiplicity_family_sha256 is not None):
+            raise ValueError("context analysis is blocked; active or partial rules are unsupported")
 
 
 def blocked_context_analysis_plan() -> ContextAnalysisPlan:
-    return ContextAnalysisPlan(
-        ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE,
-        (),
-        None,
-        None,
-    )
+    return ContextAnalysisPlan(ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE, (), None, None)
 
 
 class PairResponsePatternPlanStatus(StrEnum):
     BLOCKED_NO_FROZEN_PREDICATE = "BLOCKED_NO_FROZEN_PREDICATE"
-    FROZEN = "FROZEN"
 
 
 @dataclass(frozen=True, slots=True)
 class PairResponsePatternPlan:
+    """Inactive classifier; no future label/predicate interface is exposed."""
+
     status: PairResponsePatternPlanStatus
-    predicate_sha256: str | None
-    labels: tuple[str, ...]
-    precedence: tuple[str, ...]
+    predicate_sha256: None
+    labels: tuple[()]
+    precedence: tuple[()]
 
     def __post_init__(self) -> None:
-        if type(self.status) is not PairResponsePatternPlanStatus:
-            raise TypeError("Pair response-pattern plan status must be typed")
-        if self.status is PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
-            if self.predicate_sha256 is not None or self.labels or self.precedence:
-                raise ValueError("blocked Pair response-pattern plan cannot contain guessed rules")
-        else:
-            if self.predicate_sha256 is None or not self.labels or self.precedence != self.labels:
-                raise ValueError("frozen Pair response-pattern plan requires ordered exact predicates")
-            _require_digest(self.predicate_sha256, "Pair response-pattern predicates")
-            if len(set(self.labels)) != len(self.labels) or any(
-                not isinstance(item, str) or not item.strip() for item in self.labels
-            ):
-                raise ValueError("Pair response-pattern labels must be unique non-empty strings")
+        if (self.status is not PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE
+            or self.predicate_sha256 is not None or self.labels != () or self.precedence != ()):
+            raise ValueError("Pair response-pattern classification is blocked; predicates are unsupported")
 
 
 def blocked_pair_response_pattern_plan() -> PairResponsePatternPlan:
-    return PairResponsePatternPlan(
-        PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE,
-        None,
-        (),
-        (),
-    )
+    return PairResponsePatternPlan(PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE, None, (), ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,20 +156,21 @@ class ResponsePatternStatus(StrEnum):
     NOT_APPLICABLE = "NOT_APPLICABLE"
     BLOCKED_NO_FROZEN_PREDICATE = "BLOCKED_NO_FROZEN_PREDICATE"
     NON_EVALUABLE = "NON_EVALUABLE"
-    CLASSIFIED = "CLASSIFIED"
 
 
 @dataclass(frozen=True, slots=True)
 class ResponsePatternAssessment:
     status: ResponsePatternStatus
     surface: PairResponseSurface | None
-    label: str | None
-    predicate_sha256: str | None
+    label: None
+    predicate_sha256: None
     reasons: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if type(self.status) is not ResponsePatternStatus:
             raise TypeError("response-pattern status must be typed")
+        if self.label is not None or self.predicate_sha256 is not None:
+            raise ValueError("Pair response-pattern classification is blocked")
         if self.reasons != tuple(sorted(set(self.reasons))):
             raise ValueError("response-pattern reasons must be canonical")
         if self.status is ResponsePatternStatus.NOT_APPLICABLE:
@@ -258,10 +182,6 @@ class ResponsePatternAssessment:
         elif self.status is ResponsePatternStatus.NON_EVALUABLE:
             if self.label is not None or self.predicate_sha256 is not None or not self.reasons:
                 raise ValueError("non-evaluable Pair classification requires reasons and no label")
-        else:
-            if type(self.surface) is not PairResponseSurface or not self.label or self.predicate_sha256 is None or self.reasons:
-                raise ValueError("classified Pair response requires surface, label, and predicate")
-            _require_digest(self.predicate_sha256, "Pair response-pattern predicate")
 
 
 TARGET_ENDPOINT_ORDER = (
@@ -293,10 +213,16 @@ class TargetITTPlan:
     pair_response_patterns: PairResponsePatternPlan = field(
         default_factory=blocked_pair_response_pattern_plan
     )
+    atomic_minimum_task_units_per_realization: int = 2
+    pair_minimum_task_units_per_realization: int = 2
 
     def __post_init__(self) -> None:
         if type(self.bootstrap_seed) is not int:
             raise TypeError("target ITT bootstrap seed must be an integer")
+        for minimum in (self.atomic_minimum_task_units_per_realization,
+                        self.pair_minimum_task_units_per_realization):
+            if type(minimum) is not int or minimum < 2:
+                raise ValueError("target ITT needs at least two task units per realization")
         if type(self.bootstrap_draws) is not int or self.bootstrap_draws < 100:
             raise ValueError("target ITT bootstrap_draws must be at least 100")
         if type(self.alpha) is not float or not 0 < self.alpha < 1:
@@ -507,10 +433,15 @@ class TargetTaskUnitContribution:
     point: float
     latent_lower: float
     latent_upper: float
+    realization_id: str
+    realization_weight: float
 
     def __post_init__(self) -> None:
         require_text(self.task_unit_id, "target contribution task_unit_id")
         require_text(self.stratum_id, "target contribution stratum_id")
+        require_text(self.realization_id, "target contribution realization_id")
+        if not 0 < self.realization_weight <= 1:
+            raise ValueError("target contribution realization weight must be in (0, 1]")
         for value in (self.point, self.latent_lower, self.latent_upper):
             if type(value) not in {int, float} or not math.isfinite(float(value)):
                 raise ValueError("target task-unit contributions must be finite")
@@ -784,7 +715,7 @@ class _TargetEffectWork:
     latent_upper: float | None
     arm_summaries: tuple[TargetArmEndpointSummary, ...]
     contributions: tuple[TargetTaskUnitContribution, ...]
-    stratum_weights: tuple[tuple[str, float], ...]
+    stratum_weights: tuple[tuple[str, str, float], ...]
     assignments: int
     reasons: tuple[str, ...]
 
@@ -793,7 +724,7 @@ def estimate_target_itt(
     ledger: AssignedArmEvidenceLedger,
     plan: TargetITTPlan,
     *,
-    evidence_level: EvidenceLevel = EvidenceLevel.EXECUTED,
+    evidence_level: EvidenceLevel = EvidenceLevel.TESTED,
 ) -> SharedEvidenceRecord:
     """Estimate one shared, direction-free Atomic and Pair confirmation record."""
 
@@ -801,11 +732,11 @@ def estimate_target_itt(
         raise TypeError("target ITT requires a frozen assigned-arm ledger and plan")
     if type(evidence_level) is not EvidenceLevel:
         raise TypeError("target ITT evidence level must be typed")
-    if plan.context_analysis.status is ContextAnalysisStatus.FROZEN:
+    if plan.context_analysis.status is not ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
         raise ValueError(
             "context analysis is blocked until its frozen joint estimator is implemented"
         )
-    if plan.pair_response_patterns.status is PairResponsePatternPlanStatus.FROZEN:
+    if plan.pair_response_patterns.status is not PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
         raise ValueError(
             "Pair response-pattern classification is blocked until its predicates are implemented"
         )
@@ -971,16 +902,6 @@ def _target_effect_work(
         if track is PolicyTrack.ATOMIC
         else PAIR_CONFIRMATORY_ARMS
     )
-    for arm in expected_arms:
-        arm_outcomes = tuple(
-            local_outcomes[item.assignment_id]
-            for item in assignments
-            if item.arm is arm
-        )
-        valid = sum(item.code_valid for item in arm_outcomes)
-        unknown = sum(item.code_valid - item.oracle_evaluable for item in arm_outcomes)
-        if valid and unknown / valid > plan.maximum_unknown_fraction_among_valid:
-            reasons.add("maximum_unknown_fraction_exceeded")
     point_values = _target_unit_arm_values(
         assignments,
         local_outcomes,
@@ -993,6 +914,7 @@ def _target_effect_work(
         lambda item: float(item.latent_secure_upper),
     )
     stratum_by_unit = _target_strata(assignments)
+    realization_by_unit = _target_realizations(assignments)
     contributions = tuple(
         TargetTaskUnitContribution(
             task_unit_id,
@@ -1000,21 +922,34 @@ def _target_effect_work(
             _target_contrast(track, arms, arms),
             _target_contrast_lower(track, lower_values[task_unit_id], upper_values[task_unit_id]),
             _target_contrast_upper(track, lower_values[task_unit_id], upper_values[task_unit_id]),
+            *realization_by_unit[task_unit_id],
         )
         for task_unit_id, arms in sorted(point_values.items())
     )
-    counts = Counter(item.stratum_id for item in contributions)
-    if any(
-        count < plan.minimum_task_units_per_stratum
-        for count in counts.values()
-    ):
+    counts = Counter((item.realization_id, item.stratum_id) for item in contributions)
+    if any(count < plan.minimum_task_units_per_stratum for count in counts.values()):
         reasons.add("insufficient_task_units_per_stratum")
+    realization_counts = Counter(item.realization_id for item in contributions)
+    if any(count < _target_realization_minimum(track, plan) for count in realization_counts.values()):
+        reasons.add("insufficient_task_units_per_realization")
+    q = {item.realization_id: item.realization_weight for item in contributions}
+    if not math.isclose(sum(q.values()), 1.0, abs_tol=1e-12):
+        # Never renormalize surviving realizations into a different policy.
+        return _TargetEffectWork(dispatch, track, None, None, None, None, (), contributions,
+                                 (), len(assignments), ("incomplete_realization_support",))
     point, standard_error, stratum_weights = _target_point_standard_error(contributions)
     if standard_error == 0:
         reasons.add("zero_standard_error")
-    latent_lower = sum(item.latent_lower for item in contributions) / len(contributions)
-    latent_upper = sum(item.latent_upper for item in contributions) / len(contributions)
+    unit_weights = _target_unit_mixture_weights(assignments)
+    latent_lower = sum(unit_weights[item.task_unit_id] * item.latent_lower for item in contributions)
+    latent_upper = sum(unit_weights[item.task_unit_id] * item.latent_upper for item in contributions)
     summaries = _target_arm_summaries(assignments, local_outcomes, expected_arms)
+    for arm in summaries:
+        if arm.code_validity and (
+            (arm.code_validity - arm.oracle_evaluability) / arm.code_validity
+            > plan.maximum_unknown_fraction_among_valid
+        ):
+            reasons.add("maximum_unknown_fraction_exceeded")
     return _TargetEffectWork(
         dispatch,
         track,
@@ -1056,6 +991,8 @@ def _target_family(
         )
     if all_reasons & {
         "insufficient_task_units_per_stratum",
+        "insufficient_task_units_per_realization",
+        "incomplete_realization_support",
         "maximum_unknown_fraction_exceeded",
     }:
         return _target_failed_family(
@@ -1264,72 +1201,79 @@ def _target_margin(track: PolicyTrack, plan: TargetITTPlan) -> float:
     )
 
 
+def _target_realizations(assignments: Sequence[AssignedArmITTRecord]) -> dict[str, tuple[str, float]]:
+    by_unit: dict[str, set[tuple[str, float]]] = defaultdict(set)
+    by_realization: dict[str, set[float]] = defaultdict(set)
+    for item in assignments:
+        by_unit[item.task_unit_id].add((item.realization_id, float(item.realization_weight)))
+        by_realization[item.realization_id].add(float(item.realization_weight))
+    if any(len(values) != 1 for values in by_unit.values()):
+        raise ValueError("one task-policy coordinate must retain exactly one realization")
+    if any(len(values) != 1 for values in by_realization.values()):
+        raise ValueError("realization policy weights drift across task units")
+    if any(not 0 < next(iter(values)) <= 1 for values in by_realization.values()):
+        raise ValueError("realization policy weights must be in (0, 1]")
+    return {unit: next(iter(values)) for unit, values in by_unit.items()}
+
+
+def _target_unit_mixture_weights(assignments: Sequence[AssignedArmITTRecord]) -> dict[str, float]:
+    realizations = _target_realizations(assignments)
+    counts = Counter(realization for realization, _ in realizations.values())
+    return {unit: q / counts[realization] for unit, (realization, q) in realizations.items()}
+
+
+def _target_realization_minimum(track: PolicyTrack, plan: TargetITTPlan) -> int:
+    return (plan.atomic_minimum_task_units_per_realization if track is PolicyTrack.ATOMIC
+            else plan.pair_minimum_task_units_per_realization)
+
+
+@lru_cache(maxsize=128)
+def _target_assignment_cells(assignments: tuple[AssignedArmITTRecord, ...]):
+    """Validate and index immutable descendants once, independently of outcomes."""
+    _target_realizations(assignments)
+    grouped = defaultdict(list)
+    task_weights: dict[tuple[str, str], set[float]] = defaultdict(set)
+    arms_by_unit: dict[str, set[ConfirmatoryArm]] = defaultdict(set)
+    instances_by_unit = defaultdict(set)
+    for item in assignments:
+        grouped[(item.task_unit_id, item.task_instance_id, item.arm)].append(item.assignment_id)
+        task_weights[(item.task_unit_id, item.task_instance_id)].add(float(item.task_instance_weight))
+        arms_by_unit[item.task_unit_id].add(item.arm)
+        instances_by_unit[item.task_unit_id].add(item.task_instance_id)
+    if any(len(values) != 1 for values in task_weights.values()):
+        raise ValueError("task-instance weights drift inside descendants")
+    cells = []
+    for unit, arms in sorted(arms_by_unit.items()):
+        instances = sorted(instances_by_unit[unit])
+        total_weight = sum(next(iter(task_weights[(unit, instance)])) for instance in instances)
+        arm_cells = []
+        for arm in sorted(arms, key=lambda item: item.value):
+            descendants = []
+            for instance in instances:
+                ids = grouped.get((unit, instance, arm))
+                if not ids:
+                    raise ValueError("assigned-arm hierarchy lacks complete task support")
+                descendants.append((next(iter(task_weights[(unit, instance)])) / total_weight, tuple(ids)))
+            arm_cells.append((arm, tuple(descendants)))
+        cells.append((unit, tuple(arm_cells)))
+    return tuple(cells)
+
+
 def _target_unit_arm_values(
     assignments: tuple[AssignedArmITTRecord, ...],
     outcomes: Mapping[str, Outcome],
-    value: callable,
+    getter: Callable[[Outcome], float],
 ) -> dict[str, dict[ConfirmatoryArm, float]]:
-    grouped: dict[
-        tuple[str, str, str, ConfirmatoryArm],
-        list[float],
-    ] = defaultdict(list)
-    task_weights: dict[tuple[str, str], set[float]] = defaultdict(set)
-    realization_weights: dict[tuple[str, str], set[float]] = defaultdict(set)
-    arms_by_unit: dict[str, set[ConfirmatoryArm]] = defaultdict(set)
-    for assignment in assignments:
-        grouped[
-            (
-                assignment.task_unit_id,
-                assignment.task_instance_id,
-                assignment.realization_id,
-                assignment.arm,
-            )
-        ].append(value(outcomes[assignment.assignment_id]))
-        task_weights[(assignment.task_unit_id, assignment.task_instance_id)].add(
-            float(assignment.task_instance_weight)
-        )
-        realization_weights[(assignment.task_unit_id, assignment.realization_id)].add(
-            float(assignment.realization_weight)
-        )
-        arms_by_unit[assignment.task_unit_id].add(assignment.arm)
-    if any(len(values) != 1 for values in task_weights.values()) or any(
-        len(values) != 1 for values in realization_weights.values()
-    ):
-        raise ValueError("task-instance or realization weights drift inside descendants")
     result = {}
-    for task_unit_id in sorted(arms_by_unit):
-        instances = tuple(
-            sorted(instance for unit, instance in task_weights if unit == task_unit_id)
-        )
-        realizations = tuple(
-            sorted(realization for unit, realization in realization_weights if unit == task_unit_id)
-        )
-        arms = tuple(sorted(arms_by_unit[task_unit_id], key=lambda item: item.value))
-        task_total = sum(next(iter(task_weights[(task_unit_id, item)])) for item in instances)
-        realization_total = sum(
-            next(iter(realization_weights[(task_unit_id, item)]))
-            for item in realizations
-        )
-        unit_values = {}
-        for arm in arms:
+    for unit, arms in _target_assignment_cells(assignments):
+        result[unit] = {}
+        for arm, descendants in arms:
             total = 0.0
-            for instance in instances:
-                task_weight = next(iter(task_weights[(task_unit_id, instance)])) / task_total
-                for realization in realizations:
-                    realization_weight = (
-                        next(iter(realization_weights[(task_unit_id, realization)]))
-                        / realization_total
-                    )
-                    values = grouped.get(
-                        (task_unit_id, instance, realization, arm)
-                    )
-                    if not values:
-                        raise ValueError("assigned-arm hierarchy lacks complete task/realization support")
-                    total += task_weight * realization_weight * (
-                        sum(values) / len(values)
-                    )
-            unit_values[arm] = total
-        result[task_unit_id] = unit_values
+            for weight, ids in descendants:
+                # These endpoint getters return binary values, so the sum is an
+                # exact count; constructing Fraction objects adds no precision.
+                total += weight * (sum(getter(outcomes[key]) for key in ids) / len(ids))
+            result[unit][arm] = total
     return result
 
 
@@ -1384,29 +1328,18 @@ def _target_contrast_upper(
 
 def _target_point_standard_error(
     contributions: tuple[TargetTaskUnitContribution, ...],
-) -> tuple[float, float, tuple[tuple[str, float], ...]]:
-    by_stratum: dict[str, list[float]] = defaultdict(list)
+) -> tuple[float, float, tuple[tuple[str, str, float], ...]]:
+    cells: dict[tuple[str, str], list[float]] = defaultdict(list)
+    counts = Counter(item.realization_id for item in contributions)
+    q = {item.realization_id: item.realization_weight for item in contributions}
     for item in contributions:
-        by_stratum[item.stratum_id].append(item.point)
-    total = len(contributions)
-    weights = tuple(
-        (stratum, len(values) / total)
-        for stratum, values in sorted(by_stratum.items())
-    )
-    means = {
-        stratum: sum(values) / len(values)
-        for stratum, values in by_stratum.items()
-    }
-    point = sum(weight * means[stratum] for stratum, weight in weights)
-    variance = 0.0
-    for stratum, weight in weights:
-        values = by_stratum[stratum]
-        if len(values) < 2:
-            return point, 0.0, weights
-        mean = means[stratum]
-        variance += weight**2 * sum((item - mean) ** 2 for item in values) / (
-            len(values) * (len(values) - 1)
-        )
+        cells[(item.realization_id, item.stratum_id)].append(item.point)
+    weights = tuple((r, s, q[r] * len(values) / counts[r]) for (r, s), values in sorted(cells.items()))
+    point = sum(weight * statistics.mean(cells[(r, s)]) for r, s, weight in weights)
+    if any(len(values) < 2 for values in cells.values()):
+        return point, 0.0, weights
+    variance = sum(weight ** 2 * statistics.variance(cells[(r, s)]) / len(cells[(r, s)])
+                   for r, s, weight in weights)
     return point, math.sqrt(max(variance, 0.0)), weights
 
 
@@ -1426,6 +1359,7 @@ def _target_arm_summaries(
         metric: _target_unit_arm_values(assignments, outcomes, getter)
         for metric, getter in metrics.items()
     }
+    weights = _target_unit_mixture_weights(assignments)
     summaries = []
     for arm in arms:
         arm_assignments = tuple(item for item in assignments if item.arm is arm)
@@ -1434,21 +1368,11 @@ def _target_arm_summaries(
             TargetArmEndpointSummary(
                 arm,
                 len(arm_assignments),
-                statistics.mean(
-                    item[arm] for item in values[Metric.SECURE_YIELD].values()
-                ),
-                statistics.mean(
-                    item[arm] for item in values[Metric.CODE_VALID].values()
-                ),
-                statistics.mean(
-                    item[arm] for item in values[Metric.ORACLE_EVALUABLE].values()
-                ),
-                statistics.mean(
-                    item[arm] for item in values[Metric.FUNCTIONALITY].values()
-                ),
-                statistics.mean(
-                    item[arm] for item in values[Metric.JOINT].values()
-                ),
+                sum(weights[unit] * item[arm] for unit, item in values[Metric.SECURE_YIELD].items()),
+                sum(weights[unit] * item[arm] for unit, item in values[Metric.CODE_VALID].items()),
+                sum(weights[unit] * item[arm] for unit, item in values[Metric.ORACLE_EVALUABLE].items()),
+                sum(weights[unit] * item[arm] for unit, item in values[Metric.FUNCTIONALITY].items()),
+                sum(weights[unit] * item[arm] for unit, item in values[Metric.JOINT].items()),
                 sum(item.code_valid - item.oracle_evaluable for item in arm_outcomes),
                 sum(item.code_valid == 0 for item in arm_outcomes),
             )
@@ -1465,33 +1389,25 @@ def _target_family_bootstrap(
     for work in works:
         for item in work.contributions:
             global_units[item.stratum_id].add(item.task_unit_id)
-    rng = random.Random(
-        int(
-            content_hash(
-                {
-                    "domain": "target_max_t_task_unit_bootstrap_v1",
-                    "seed": plan.bootstrap_seed,
-                    "track": track,
-                    "plan_id": plan.target_itt_plan_id,
-                }
-            )[-16:],
-            16,
-        )
-    )
+    seed = int(content_hash({
+        "domain": "target_max_t_task_unit_bootstrap_v1",
+        "seed": plan.bootstrap_seed,
+        "track": track,
+        "plan_id": plan.target_itt_plan_id,
+    })[-16:], 16)
+    populations = tuple((stratum, tuple(sorted(units))) for stratum, units in sorted(global_units.items()))
+    cells = []
+    for work in works:
+        by_cell = defaultdict(dict)
+        for item in work.contributions:
+            by_cell[(item.realization_id, item.stratum_id)][item.task_unit_id] = item.point
+        cells.append(by_cell)
     maxima = []
     invalid = 0
-    for _ in range(plan.bootstrap_draws):
-        sampled = {
-            stratum: tuple(
-                population[rng.randrange(len(population))]
-                for _ in population
-            )
-            for stratum, values in sorted(global_units.items())
-            for population in (tuple(sorted(values)),)
-        }
+    for sampled in _target_bootstrap_draws(populations, seed, plan.bootstrap_draws):
         statistics_by_effect = []
-        for work in works:
-            draw = _target_resampled_point_standard_error(work, sampled)
+        for work, by_cell in zip(works, cells):
+            draw = _target_resampled_point_standard_error(work, sampled, plan, by_cell=by_cell)
             if draw is None or work.point is None:
                 statistics_by_effect = []
                 break
@@ -1507,33 +1423,39 @@ def _target_family_bootstrap(
     return maxima, invalid
 
 
+@lru_cache(maxsize=16)
+def _target_bootstrap_draws(populations, seed, draws):
+    """The frozen plan and task support determine draws, never outcomes."""
+    rng = random.Random(seed)
+    return tuple({stratum: tuple(population[rng.randrange(len(population))] for _ in population)
+                  for stratum, population in populations} for _ in range(draws))
+
+
 def _target_resampled_point_standard_error(
     work: _TargetEffectWork,
     sampled: Mapping[str, tuple[str, ...]],
+    plan: TargetITTPlan,
+    *, by_cell=None,
 ) -> tuple[float, float] | None:
-    contribution_by_unit = {
-        item.task_unit_id: item.point for item in work.contributions
-    }
-    weights = dict(work.stratum_weights)
-    means = {}
-    values_by_stratum = {}
-    for stratum, weight in work.stratum_weights:
-        values = [
-            contribution_by_unit[task_unit_id]
-            for task_unit_id in sampled[stratum]
-            if task_unit_id in contribution_by_unit
-        ]
-        if len(values) < 2:
+    if by_cell is None:
+        by_cell = defaultdict(dict)
+        for item in work.contributions:
+            by_cell[(item.realization_id, item.stratum_id)][item.task_unit_id] = item.point
+    means, variances = {}, {}
+    realization_counts = Counter()
+    for r, stratum, _ in work.stratum_weights:
+        eligible = by_cell[(r, stratum)]
+        values = [eligible[unit] for unit in sampled[stratum] if unit in eligible]
+        if len(values) < plan.minimum_task_units_per_stratum:
             return None
-        values_by_stratum[stratum] = values
-        means[stratum] = sum(values) / len(values)
-    point = sum(weights[stratum] * means[stratum] for stratum in means)
-    variance = sum(
-        weights[stratum] ** 2
-        * sum((item - means[stratum]) ** 2 for item in values)
-        / (len(values) * (len(values) - 1))
-        for stratum, values in values_by_stratum.items()
-    )
+        realization_counts[r] += len(values)
+        mean = sum(values) / len(values)
+        means[(r, stratum)] = mean
+        variances[(r, stratum)] = sum((value - mean) ** 2 for value in values) / (len(values) * (len(values) - 1))
+    if any(count < _target_realization_minimum(work.track, plan) for count in realization_counts.values()):
+        return None
+    point = sum(weight * means[(r, s)] for r, s, weight in work.stratum_weights)
+    variance = sum(weight ** 2 * variances[(r, s)] for r, s, weight in work.stratum_weights)
     return point, math.sqrt(max(variance, 0.0))
 
 
@@ -1543,3 +1465,207 @@ def _higher_quantile(values: Sequence[float], probability: float) -> float:
     ordered = sorted(values)
     index = max(0, min(len(ordered) - 1, math.ceil(probability * len(ordered)) - 1))
     return ordered[index]
+
+
+def summarize_development_itt(rows: Sequence[Mapping], plan: Mapping) -> list[dict]:
+    """Bounded exploratory contrasts; never assign a confirmatory effect status.
+
+    Average seeds inside each task before estimating differences. The exact two-sided
+    task-block sign-flip null is computed by integer dynamic programming, including
+    zero differences. Holm adjusts the complete prospectively listed family. Bootstrap
+    CIs are marginal descriptive task-resampling intervals, explicitly not simultaneous.
+    An infrastructure failure blocks its contrast instead of changing its denominator.
+    """
+    if (plan["method"] != "paired_task_signflip_holm_bootstrap_v1"
+            or plan["scientific_claim_allowed"] is not False):
+        raise ValueError("development analysis contract is invalid")
+    ids = [row["assignment_id"] for row in rows]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate assigned development outcome")
+    effects = []
+    for contrast in plan["contrasts"]:
+        policy = contrast["policy_id"]
+        interaction = contrast.get("kind") == "pair_interaction"
+        if interaction:
+            weights = {"A11": 1, "A10": -1, "A01": -1, "A00": 1}
+            label = "A11 - A10 - A01 + A00"
+        else:
+            treatment, control = (contrast[key] for key in ("treatment", "control"))
+            weights = {treatment: 1, control: -1}
+            label = treatment + " - " + control
+        local = [row for row in rows if row["policy_id"] == policy]
+        units = sorted({row["task_unit_id"] for row in local})
+        base = {"policy_id": policy, "comparison": label,
+                "task_units": len(units), "effect": None, "ci_low": None, "ci_high": None,
+                "p_value": None, "adjusted_p_value": None, "scientific_claim_allowed": False,
+                "ci_type": "marginal_95_percent_task_bootstrap_descriptive"}
+        differences, arm_rates, blocked = [], [], False
+        expected_seeds = set(plan["generation_seeds"])
+        for unit in units:
+            cell = [row for row in local if row["task_unit_id"] == unit and row["arm"] in weights]
+            arms = {arm: [row for row in cell if row["arm"] == arm] for arm in weights}
+            if any(len(values) != len(expected_seeds) or {row["seed"] for row in values} != expected_seeds
+                   or any(row.get("secure_code_yield") not in (0, 1) or row.get("error") for row in values)
+                   for values in arms.values()):
+                blocked = True
+                continue
+            rates = [sum(row["secure_code_yield"] for row in arms[arm]) / len(expected_seeds)
+                     for arm in weights]
+            arm_rates.append(rates)
+            differences.append(sum(rate * weight for rate, weight in zip(rates, weights.values(), strict=True)))
+        if blocked or len(differences) != len(units) or not units:
+            effects.append({**base, "status": "BLOCKED_MISSING_ASSIGNED_OUTCOME"})
+            continue
+        denominator = len(expected_seeds)
+        magnitudes = [abs(round(value * denominator)) for value in differences]
+        counts = {0: 1}
+        for value in magnitudes:
+            new = defaultdict(int)
+            for total, count in counts.items():
+                new[total + value] += count
+                new[total - value] += count
+            counts = new
+        observed = abs(round(sum(differences) * denominator))
+        probability = sum(count for value, count in counts.items() if abs(value) >= observed) / (2 ** len(units))
+        rng = random.Random(plan["bootstrap_seed"])
+        draws = [sum(differences[rng.randrange(len(units))] for _ in units) / len(units)
+                 for _ in range(plan["bootstrap_draws"])]
+        summary = {**base, "status": "DEVELOPMENT_ESTIMATE", "effect": sum(differences) / len(units),
+                        "ci_low": _higher_quantile(draws, 0.025), "ci_high": _higher_quantile(draws, 0.975),
+                        "p_value": None if interaction else probability,
+                        "task_differences": dict(zip(units, differences, strict=True)),
+                        "zero_empirical_variation": len(set(differences)) == 1}
+        if interaction:
+            summary.update(cell_secure_yields={arm: sum(r[index] for r in arm_rates) / len(units)
+                                               for index, arm in enumerate(weights)},
+                           inference_status="DESCRIPTIVE_ONLY_NO_PAIR_NULL_TEST",
+                           response_pattern_status="BLOCKED_NO_FROZEN_JOINT_RULE")
+        else:
+            summary.update(treatment_secure_yield=sum(r[0] for r in arm_rates) / len(units),
+                           control_secure_yield=sum(r[1] for r in arm_rates) / len(units))
+        effects.append(summary)
+    # Missing tests remain in the family as p=1; they are not silently removed.
+    ordered = sorted(range(len(effects)), key=lambda i: effects[i]["p_value"] if effects[i]["p_value"] is not None else 1.0)
+    previous = 0.0
+    for rank, index in enumerate(ordered):
+        effect = effects[index]
+        raw = effect["p_value"] if effect["p_value"] is not None else 1.0
+        previous = max(previous, min(1.0, (len(effects) - rank) * raw))
+        if effect["p_value"] is not None:
+            effect["adjusted_p_value"] = previous
+            effect["development_signal"] = previous <= plan["alpha"] and abs(effect["effect"]) >= plan["minimum_effect"]
+        else:
+            effect["development_signal"] = False
+    return effects
+
+
+def summarize_development_models(rows_by_model: Mapping[str, Sequence[Mapping]], plan: Mapping) -> dict:
+    """Keep models separate and adjust their complete shared development family.
+
+    Model is an effect coordinate, not an independent task. Assignment identifiers
+    can repeat between model-specific runs; their full coordinates must agree.
+    This descriptive table does not change either run's frozen analysis.
+    """
+    if not rows_by_model:
+        raise ValueError('model comparison requires assigned development outcomes')
+    coordinates = None
+    effects, sampling, counts = [], {}, {}
+    all_units = set()
+    for model, rows in sorted(rows_by_model.items()):
+        local_coordinates = [(r['policy_id'], r['task_unit_id'], r['arm'], r['seed']) for r in rows]
+        if len(local_coordinates) != len(set(local_coordinates)):
+            raise ValueError('duplicate task-policy-arm-seed coordinate within model')
+        if coordinates is not None and set(local_coordinates) != coordinates:
+            raise ValueError('model comparison requires the same assigned task and seed coordinates')
+        coordinates = set(local_coordinates)
+        all_units.update(r['task_unit_id'] for r in rows)
+        counts[model] = {'assigned_rows': len(rows),
+                         'independent_task_units': len({r['task_unit_id'] for r in rows})}
+        sampling[model] = summarize_development_sampling(rows, plan)
+        for row in summarize_development_itt(rows, plan):
+            effects.append({**row, 'model_id': model,
+                            'per_model_adjusted_p_value': row['adjusted_p_value']})
+    previous = 0.0
+    order = sorted(range(len(effects)), key=lambda i: effects[i]['p_value'] if effects[i]['p_value'] is not None else 1.0)
+    for rank, index in enumerate(order):
+        row = effects[index]
+        raw = row['p_value'] if row['p_value'] is not None else 1.0
+        previous = max(previous, min(1.0, (len(effects) - rank) * raw))
+        row['adjusted_p_value'] = previous if row['p_value'] is not None else None
+        row['development_signal'] = (row['p_value'] is not None and previous <= plan['alpha']
+                                     and abs(row['effect']) >= plan['minimum_effect'])
+    return {'status': 'DEVELOPMENT_MODEL_COMPARISON', 'scientific_claim_allowed': False,
+            'independent_task_units': len(all_units), 'models': counts,
+            'assigned_rows': sum(len(rows) for rows in rows_by_model.values()),
+            'family_size': len(effects), 'multiplicity': 'Holm across every listed model-policy-contrast',
+            'effects': effects, 'sampling': sampling}
+
+
+def summarize_development_sampling(rows: Sequence[Mapping], plan: Mapping) -> dict:
+    """Describe finite-generation noise without treating seeds as new tasks.
+
+    Wilson intervals describe a single task/arm's secure-yield probability under
+    independent requested samples. Contrast MC errors resample no tasks: they
+    describe the fixed task set across its shared seed labels. Neither is a
+    population-effect confidence interval or a confirmatory decision.
+    """
+    seeds = tuple(plan['generation_seeds'])
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError('sampling diagnostics require unique declared seeds')
+    groups = defaultdict(list)
+    for row in rows:
+        groups[(row['policy_id'], row['task_unit_id'], row['arm'])].append(row)
+    cells, indexed = [], {}
+    for (policy, task, arm), members in sorted(groups.items()):
+        complete = (len(members) == len(seeds) and {row['seed'] for row in members} == set(seeds)
+                    and all(row.get('secure_code_yield') in (0, 1) and not row.get('error') for row in members))
+        values = [row['secure_code_yield'] for row in members] if complete else []
+        rate = statistics.mean(values) if values else None
+        variance = statistics.variance(values) if len(values) > 1 else None
+        interval = None
+        if values:
+            z, n = 1.959963984540054, len(values)
+            scale = 1 + z * z / n
+            center = (rate + z * z / (2 * n)) / scale
+            half = z * math.sqrt(rate * (1 - rate) / n + z * z / (4 * n * n)) / scale
+            interval = [max(0.0, center - half), min(1.0, center + half)]
+        codes = [row['code'] for row in members if isinstance(row.get('code'), str)]
+        cell = {'policy_id': policy, 'task_unit_id': task, 'arm': arm,
+                'status': 'COMPLETE' if complete else 'INCOMPLETE_ASSIGNED_CELL',
+                'assigned_samples': len(members), 'expected_samples': len(seeds),
+                'failed_samples': sum(bool(row.get('error')) for row in members),
+                'secure_samples': sum(row.get('secure_code_yield') == 1 for row in members),
+                'security_counts': dict(Counter(row.get('security_status') or 'unavailable' for row in members)),
+                'functionality_counts': dict(Counter(row.get('functionality_status') or 'unavailable' for row in members)),
+                'code_samples': len(codes), 'distinct_code_samples': len(set(codes)),
+                'secure_yield': rate, 'sample_variance': variance,
+                'mc_standard_error': math.sqrt(variance / len(seeds)) if variance is not None else None,
+                'wilson95_secure_yield_probability': interval,
+                'mixed_secure_yield_across_seeds': 0 < rate < 1 if rate is not None else None}
+        cells.append(cell)
+        indexed[(policy, task, arm)] = ({row['seed']: row['secure_code_yield'] for row in members}
+                                       if complete else None)
+    contrasts = []
+    for comparison in plan['contrasts']:
+        policy = comparison['policy_id']
+        units = sorted({task for p, task, _ in groups if p == policy})
+        weights = {"A11": 1, "A10": -1, "A01": -1, "A00": 1} if comparison.get("kind") == "pair_interaction" else {
+            comparison["treatment"]: 1, comparison["control"]: -1}
+        blocks = [{arm: indexed.get((policy, task, arm)) for arm in weights} for task in units]
+        complete = bool(blocks) and all(cell is not None for block in blocks for cell in block.values())
+        values = ([statistics.mean(sum(block[arm][seed] * weight for arm, weight in weights.items())
+                                   for block in blocks) for seed in seeds]
+                  if complete else [])
+        contrasts.append({**comparison, 'task_units': len(units), 'requested_seeds': len(seeds),
+                          'status': 'COMPLETE' if complete else 'INCOMPLETE_ASSIGNED_CONTRAST',
+                          'effect_by_seed': dict(zip(map(str, seeds), values)) if complete else None,
+                          'fixed_tasks_effect_mean': statistics.mean(values) if values else None,
+                          'fixed_tasks_mc_standard_error': math.sqrt(statistics.variance(values) / len(seeds))
+                          if len(values) > 1 else None})
+    return {'status': 'DESCRIPTIVE_GENERATION_SAMPLING', 'scientific_claim_allowed': False,
+            'independent_unit': 'deduplicated_task_unit', 'requested_seeds': list(seeds),
+            'assumption': 'MC errors and Wilson intervals assume independent requested seed replicates; '
+                          'they do not establish backend determinism or independence of shared-service errors.',
+            'interpretation': 'All assigned samples remain counted, including identical code. '
+                              'No outcome-driven filtering. Finite-seed uncertainty is distinct from task-population uncertainty.',
+            'cells': cells, 'contrasts': contrasts}

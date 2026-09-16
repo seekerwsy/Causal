@@ -102,6 +102,190 @@ class ContractCleaningError(RuntimeError):
     """The frozen cleaning input, model response, or final decision is invalid."""
 
 
+def _prepared_source_review_population(
+    base_bundle: Path, source_use_bundle: Path, reservation_bundle: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Read the prepared inputs while independently preserving protected groups."""
+    from prompt_mechanism_study.qualification_data import _source_role_inputs
+    from prompt_mechanism_study.verification.qualification import _verify_restored_source_input
+
+    tasks, quality, contracts, roles, _, available = _source_role_inputs(
+        base_bundle, reservation_bundle
+    )
+    verify_bundle(source_use_bundle)
+    report = read_json(source_use_bundle / "report.json")
+    if (report.get("source_manifest_sha256") != _manifest_digest(base_bundle)
+            or report.get("reservation_manifest_sha256") != _manifest_digest(reservation_bundle)
+            or report.get("formal_use_authorized") is not False):
+        raise ContractCleaningError("prepared review source or reservation identity differs")
+    uses = _unique_by(read_json(source_use_bundle / "task-uses.json"), "task_unit_id", "source uses")
+    prepared = _unique_by(read_json(source_use_bundle / "prepared-tasks.json"), "task_unit_id", "prepared tasks")
+    if set(uses) != set(tasks) or set(prepared) != set(tasks):
+        raise ContractCleaningError("prepared review population differs from its frozen parent")
+    result = {}
+    for task_id, task in tasks.items():
+        use, item = uses[task_id], prepared[task_id]
+        if (use["available_for_source_review"] != (task_id in available)
+                or use["source_task_sha256"] != task["task_unit_record_sha256"]
+                or use["source_contract_sha256"] != contracts[task_id]["functional_contract_record_sha256"]
+                or use["source_quality_sha256"] != quality[task_id]["task_quality_record_sha256"]
+                or use["source_role_sha256"] != roles[task_id]["task_role_record_sha256"]):
+            raise ContractCleaningError("prepared review violates a frozen source or role boundary")
+        restoration = use["source_material"]["input_restoration"]
+        visible = task["model_visible_input"]
+        record_id = task["representative_record_id"]
+        if restoration is not None:
+            _verify_restored_source_input(task, restoration, None)
+            if task_id in available:
+                visible = restoration["model_visible_input"]
+                record_id = restoration["normalized_record_id"]
+        if (item["prompt"] != visible["natural_prompt"]
+                or item["prompt_sha256"] != content_hash(item["prompt"])
+                or item["model_visible_input_sha256"] != visible["model_visible_input_identity_sha256"]
+                or item["formal_use_authorized"] is not False):
+            raise ContractCleaningError("prepared review prompt identity differs")
+        if task_id in available:
+            result[task_id] = {**task, "model_visible_input": visible,
+                               "representative_record_id": record_id}
+    return result, contracts, uses
+
+
+def prepare_restored_contract_proposals(
+    base_bundle: Path, source_use_bundle: Path, reservation_bundle: Path,
+    source_root: Path, output: Path, *, producer_commit: str,
+) -> dict[str, Any]:
+    """Propose source-backed corrections for every available restored SeCodePLT input.
+
+    Old semantic values are proposals only. Newly restored fields are copied
+    from the pinned source; independent reviewers must decide their sufficiency.
+    """
+    from prompt_mechanism_study.artifact_io import confined_path, file_sha256
+    from prompt_mechanism_study.datasets import _marker_text, _secode_functional_prompt, _secode_metadata
+    import platform
+    import sys
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    tasks, contracts, uses = _prepared_source_review_population(
+        base_bundle.resolve(), source_use_bundle.resolve(), reservation_bundle.resolve()
+    )
+    selected = {key: task for key, task in tasks.items()
+                if uses[key]["source_material"]["input_restoration"] is not None}
+    if not selected:
+        raise ContractCleaningError("prepared source has no available restored inputs")
+    proposed, ledger = [], []
+    field_additions: Counter[str] = Counter()
+    fallback_values = 0
+    for task_id, task in sorted(selected.items()):
+        restoration = uses[task_id]["source_material"]["input_restoration"]
+        if task["source_lineage_id"] != "secodeplt":
+            raise ContractCleaningError("restored contract source has no supported field mapping")
+        relative, index = restoration["source_locator"].rsplit("#item:", 1)
+        source_path = confined_path(source_root.resolve(), relative)
+        if file_sha256(source_path) != restoration["source_file_sha256"]:
+            raise ContractCleaningError("restored contract raw source file identity differs")
+        raw = json.loads(source_path.read_text(encoding="utf-8-sig"))[int(index) - 1]
+        if content_hash({"task": raw}) != restoration["source_record_sha256"]:
+            raise ContractCleaningError("restored contract raw source record identity differs")
+        metadata = _secode_metadata(raw)["task_description"]
+        setup = _marker_text(raw, "SETUP") if "## START SETUP ##" in raw else ""
+        prompt = task["model_visible_input"]["natural_prompt"]
+        if _secode_functional_prompt(metadata, setup) != prompt:
+            raise ContractCleaningError("restored contract prompt differs from the upstream source input")
+        old = contracts[task_id]
+        values = {**_contract_payload(old)}
+        for field in _CONTENT_FIELDS:
+            values[field] = list(values[field])
+        values["entrypoint"] = metadata["function_name"]
+        additions = {
+            "requirements": [metadata.get("security_policy", "")],
+            "outputs": [metadata.get("return", "")],
+            "environment_dependencies": ["Source-provided setup:\n" + setup if setup else ""],
+        }
+        literal_by_target = {"entrypoint": metadata["function_name"]}
+        for field, new_values in additions.items():
+            for value in new_values:
+                if value.strip() and value not in values[field]:
+                    values[field].append(value)
+                    field_additions[field] += 1
+                    literal_by_target[f"{field}:{len(values[field])}"] = setup if field == "environment_dependencies" else value
+        values = _validate_contract_values(values)
+        bindings = []
+        task_fallbacks = 0
+        for target in _evidence_targets(values):
+            target_id = target["target_id"]
+            if target_id in literal_by_target:
+                quotes = [literal_by_target[target_id]]
+            else:
+                field, offset = target_id.split(":")
+                old_spans = old["content_evidence"][field][int(offset) - 1]
+                quotes = [span["quoted_text"] for span in old_spans]
+                if any(quote not in prompt for quote in quotes):
+                    quotes = [prompt]
+                    task_fallbacks += 1
+            bindings.append({"target_id": target_id, "spans": [
+                {"evidence_text": quote, "evidence_occurrence": 1} for quote in quotes
+            ]})
+        prompt_sha256 = content_hash(prompt)
+        evidence = _normalize_evidence_bindings(bindings, values, prompt, prompt_sha256)
+        core = {
+            "schema_version": "functional-contract-cleaning-proposal-1.0",
+            "task_unit_id": task_id, "record_id": task["representative_record_id"],
+            "source_prompt_sha256": prompt_sha256, **values, "content_evidence": evidence,
+            "proposal_mode": "SEMANTIC_REPAIR", "producer_source_assessment": "uncertain",
+            "producer_reason": "Retain prior semantic proposals and bind the original function name, return, security policy and setup. All source sufficiency decisions require fresh independent review.",
+            "arms_or_outcomes_used": False,
+        }
+        proposal = {**core, "contract_id": content_id("functional_contract_", core)}
+        _validate_frozen_evidence(task, proposal)
+        proposed.append(proposal)
+        ledger_core = {
+            "schema_version": "contract-repair-ledger-1.0", "task_unit_id": task_id,
+            "old_contract_id": old["contract_id"], "new_contract_id": proposal["contract_id"],
+            "repair_category": "OMITTED_EXPLICIT_REQUIREMENT",
+            "repair_status": "PROPOSED_PENDING_INDEPENDENT_REVIEW",
+            "source_specification_disposition": "uncertain",
+            "evidence_span_count": _evidence_span_count(evidence),
+            "evidence_binding_status": "full_prompt_pending_review" if task_fallbacks else "bound",
+            "evidence_adjudication": "PENDING_INDEPENDENT_SEMANTIC_SUPPORT_REVIEW",
+            "review_status": "PENDING", "review_issue_codes": [],
+            "input_sha256": content_hash({"task_unit_id": task_id, "source_prompt_sha256": prompt_sha256,
+                                          "old_contract_id": old["contract_id"]}),
+            "output_sha256": content_hash(proposal), "producer_commit": producer_commit,
+        }
+        ledger.append({**ledger_core, "repair_ledger_record_sha256": content_hash(ledger_core)})
+        fallback_values += task_fallbacks
+    report = {
+        "schema_version": "1.0", "status": "CONTRACT_CONTENT_PROPOSALS_FROZEN",
+        "base_bundle_sha256": _manifest_digest(base_bundle),
+        "source_use_bundle_sha256": bundle_digest(source_use_bundle),
+        "reservation_bundle_sha256": _manifest_digest(reservation_bundle),
+        "selection": "ALL_AVAILABLE_RESTORED_SOURCE_INPUTS",
+        "task_unit_count": len(proposed), "new_terminal_quality_decisions": 0,
+        "source_field_addition_counts": dict(sorted(field_additions.items())),
+        "whole_prompt_fallback_value_count": fallback_values,
+        "full_prompt_pending_review_count": sum(row["evidence_binding_status"] == "full_prompt_pending_review" for row in ledger),
+        "source_sufficiency_status": "PENDING_INDEPENDENT_REVIEW",
+        "producer_commit": producer_commit,
+        "producer_implementation_sha256": file_sha256(Path(__file__)),
+        "source_root": str(source_root.resolve()),
+        "reproduction": {
+            "command": ["prompt-mechanism-study", "curate", "prepare", "restored-contracts",
+                        str(base_bundle.resolve()), str(source_use_bundle.resolve()),
+                        str(reservation_bundle.resolve()), str(source_root.resolve()),
+                        str(output.resolve()), "--producer-commit", producer_commit],
+            "python_version": sys.version, "platform": platform.platform(),
+        },
+        "all_selected_task_units_accounted_for": len(proposed) == len(selected),
+        "reference_code_executed": False, "provider_calls": 0,
+        "new_independent_units": 0, "arms_or_outcomes_used": False,
+        "formal_roles_used": False, "scientific_claim_allowed": False,
+    }
+    write_bundle(output.resolve(), {"proposed-contracts.json": proposed,
+                                   "contract-repair-ledger.json": ledger, "report.json": report})
+    return report
+
+
 def freeze_future_evaluation_reservation(
     base_bundle: Path, output: Path, *, producer_commit: str
 ) -> dict[str, Any]:
@@ -2860,6 +3044,7 @@ __all__ = [
     "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
     "materialize_full_prompt_evidence_for_review",
+    "prepare_restored_contract_proposals",
     "run_contract_content_proposals",
     "run_contract_content_review",
     "run_repaired_contract_evidence",

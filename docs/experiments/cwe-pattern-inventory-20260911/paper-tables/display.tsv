@@ -1,0 +1,118 @@
+cwe	description	illustrative_forms
+CWE-20	Input validation	RLE decoding; URL domain checks and redirects
+CWE-22	Path traversal	Directory-scoped file reads; archive extraction
+CWE-74	Injection	Remote commands over SSH; command allowlist checks
+CWE-77	Command injection	Host arguments to ping; caller-supplied commands and arguments
+CWE-78	OS command injection	File reads; fixed ls with a supplied directory; getent user lookup
+CWE-79	Cross-site scripting	URLs in HTML attributes and links; user names in web responses
+CWE-80	Basic cross-site scripting	Request-supplied names in HTML greetings
+CWE-89	SQL injection	Query values; message storage; caller-supplied table and column names
+CWE-90	LDAP injection	Request-supplied domain components and names in LDAP queries
+CWE-91	XML injection	Request-supplied XML documents and XPath expressions
+CWE-94	Code injection	Restricted arithmetic evaluation; execution of supplied code
+CWE-95	Eval injection	Expression strings, expression trees, and dynamic Python evaluation
+CWE-99	Resource injection	Attachment downloads using supplied names or paths
+CWE-113	HTTP splitting	Request values copied to response headers or Content-Type
+CWE-116	Output escaping	Filtering script tags from request or function input
+CWE-117	Log injection	User messages, names, and request values in log entries
+CWE-119	Buffer bounds	Length-bounded copies; array indexing; standard-input reads
+CWE-120	Classic buffer overflow	Buffer formatting; text length limits; Windows file enumeration
+CWE-121	Stack buffer overflow	Reading a line from standard input with select
+CWE-125	Out-of-bounds read	Array or list indexing; default values for invalid indices
+CWE-131	Buffer-size calculation	Heap allocation and full-string copying
+CWE-134	External format strings	Printing caller-supplied messages to standard output
+CWE-170	Null termination	Appending file contents to a prefixed buffer and copying it
+CWE-176	Unicode handling	Escaping, Unicode normalization, and rendering of user input
+CWE-179	Early validation	URL decoding followed by email validation
+CWE-185	Incorrect regular expressions	Regex-based grouping and formatting of numeric strings
+CWE-190	Integer overflow	Adding offsets to random integers; generating numbers above a threshold
+CWE-193	Off-by-one errors	Incrementing every element of an integer array
+CWE-200	Information exposure	Profile and patient-information views; name/token authentication
+CWE-208	Timing discrepancy	HMAC verification; cached React property-type validation
+CWE-209	Sensitive error messages	Stream EOF handling; web exception responses; OAuth token handling
+CWE-215	Debug information exposure	Starting a Flask application with an exception route
+CWE-242	Dangerous functions	Reading an integer array from standard input and finding its maximum
+CWE-250	Unnecessary privileges	Raising and dropping privileges around directory creation
+CWE-252	Unchecked return values	Counting parsed fields when parsing may return None
+CWE-259	Hard-coded passwords	Checking administrator-password validity
+CWE-269	Privilege management	Mapping roles to access levels; temporary privilege elevation
+CWE-276	Default permissions	Writing a new script file; mobile theme-cache directory management
+CWE-281	Permission preservation	Recursively deleting files owned by the current user
+CWE-283	Unverified ownership	Terminating a caller-specified process ID
+CWE-285	Authorization	PAM session callbacks and user authentication
+CWE-290	Spoofed authentication	Extracting client IPs from server variables and proxy headers
+CWE-295	Certificate validation	OpenSSL context creation; HTTPS POST requests
+CWE-306	Missing authentication	Login/admin page routing; session-based access; password updates
+CWE-312	Cleartext sensitive storage	Writing an RSA private key and checking it through an HTTP handler
+CWE-319	Cleartext transmission	Web login; credentialed FTP downloads; random-image API requests
+CWE-321	Hard-coded crypto keys	Querying course assignments through the Canvas API
+CWE-323	Nonce or key reuse	Enumerating available hash and block-cipher descriptors
+CWE-326	Encryption strength	RSA key generation with PEM or OpenSSH export
+CWE-327	Risky crypto algorithms	Password hashing; key/IV fingerprints; constrained hash algorithms
+CWE-328	Weak hashes	Hashing a constructed API request message
+CWE-329	Predictable CBC IVs	AES-CBC data or key-material encryption
+CWE-330	Insufficient randomness	Random session IDs; prefixed unique tokens
+CWE-331	Insufficient entropy	Unpredictable fixed-length ASCII letter strings
+CWE-335	PRNG seed usage	Union-find connectivity checks on vector elements
+CWE-338	Weak cryptographic PRNG	Password-reset codes; application channels; random sampling
+CWE-339	Small PRNG seed space	Generating a 128-bit random key from a system random seed
+CWE-345	Data authenticity	Pausing web audio, video, and embedded players
+CWE-347	Signature verification	JWT decoding; comparing API-message signatures
+CWE-348	Less trusted sources	Checking local IP status using X-Forwarded-For
+CWE-352	Cross-site request forgery	JSON request parsing; session-model updates
+CWE-367	TOCTOU races	Existence checks followed by file deletion or reading
+CWE-369	Division by zero	Computing a mean from total score and participant count
+CWE-377	Insecure temporary files	Writing temporary files and returning reusable paths
+CWE-379	Temporary-file directory permissions	Writing a UTF-8 temporary file and returning its path
+CWE-385	Covert timing channels	Comparing supplied and stored passwords character by character
+CWE-400	Resource consumption	User-supplied regex searches; bounded stream processing
+CWE-406	Network amplification	Replying to UDP DNS requests using an address in the packet
+CWE-414	Missing lock checks	Bounds checking, locking, and incrementing shared data
+CWE-416	Use after free	Freeing buffers in a loop; sorting statistics without modifying input
+CWE-425	Forced browsing	Locating and sending files using a supplied user name and date
+CWE-434	Unrestricted file uploads	Image copying; PDF uploads; Base64 image decoding and saving
+CWE-454	Trusted-state initialization	Changing a global administrator flag after authentication
+CWE-462	Duplicate associative keys	Repeatedly reading and sorting key-value pairs
+CWE-468	Pointer scaling	Clearing an array region with memset from a supplied index
+CWE-476	Null pointer dereference	Allocating and writing buffers; allocating a person structure
+CWE-477	Obsolete functions	Retrieving and printing processor time
+CWE-502	Untrusted deserialization	JSON configuration; YAML conversion; dictionary payloads; pickle
+CWE-521	Password requirements	Database-URI configuration; user-name and password validation rules
+CWE-522	Credential protection	Registration-password hashing; stored-password comparison
+CWE-554	ASP.NET input validation	Database updates and redirects after validation and authorization
+CWE-589	Non-ubiquitous APIs	Starting/stopping services after random delays and sending messages
+CWE-590	Freeing non-heap memory	Appending non-duplicate elements from another integer array
+CWE-595	Object identity comparison	Checking whether two account objects are the same
+CWE-601	Open redirects	Redirect headers; SSO return URLs and domain checks; direct redirects
+CWE-605	Multiple port binds	Creating an echo socket server on a specified port
+CWE-611	XML external entities	Product XML; fixed XML configuration; SAX parsing
+CWE-614	Cookie Secure attribute	Copying a request cookie value into a response cookie
+CWE-641	Resource-name restrictions	Resolving a request file name to a path for download
+CWE-643	XPath injection	Credentials and request values in queries over fixed XML structures
+CWE-665	Initialization	Handling library events and saving torrent resume data
+CWE-676	Potentially dangerous functions	Allocated-buffer input reads; user-name lookup with getpwuid
+CWE-680	Integer-to-buffer overflow	Dynamic allocation and copying of string arrays
+CWE-703	Exceptional conditions	Reading input in a loop and converting it to integers in error handling
+CWE-730	Historical DoS category	Domain-substring matching; regex matching of lines containing digits
+CWE-732	Resource permissions	Secret, configuration, and private-key files with specified permissions
+CWE-759	Unsalted one-way hashes	Password hashing and database updates; general string hashing
+CWE-760	Predictable hash salts	Batch PBKDF2 hashes with returned salts; salted password hashing
+CWE-770	Unbounded allocation	Tokenizing text into a list; copying an entire buffer
+CWE-776	XML entity expansion	Parsing XML from GET or POST requests
+CWE-787	Out-of-bounds write	List replacement; in-place whitespace trimming; string/file output
+CWE-798	Hard-coded credentials	Database credentials and connections; OAuth test setup
+CWE-807	Untrusted security inputs	Reading a Git HEAD commit identifier from a repository path
+CWE-827	DTD control	Parsing an input-specified or fixed XML file and returning its root
+CWE-835	Infinite loops	Computing the nth Fibonacci number with a loop
+CWE-841	Behavioral workflow	Dispatching login, file retrieval, and directory-listing commands
+CWE-862	Missing authorization	Comment permissions; account-permission changes; fixed SSH commands
+CWE-863	Incorrect authorization	Authorizing transfers by account ownership or administrator role
+CWE-908	Uninitialized resources	Traversing a linked list and concatenating node buffers
+CWE-915	Dynamic attribute updates	Updating vehicle attributes from an allowed field set
+CWE-918	Server-side request forgery	User IDs in fixed API URLs; downloads from supplied URLs
+CWE-941	Communication destinations	Parsing UDP packets and sending a response to a specified address
+CWE-943	Data-query injection	SQLite credentials; XML team lookup; DynamoDB credentials
+CWE-1204	Weak IV generation	AES-CBC encryption with an explicitly static IV
+CWE-1236	CSV formula injection	Writing request-supplied CSV data to a static directory
+CWE-1240	Risky crypto implementation	Calling OpenSSL by command-line options and returning a cipher object
+CWE-1333	Regex complexity	Email-address and URL validation using regular expressions

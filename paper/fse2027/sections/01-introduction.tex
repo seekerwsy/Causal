@@ -1,14 +1,66 @@
 \section{Introduction}
 
-We introduce \model (\modelfull), which follows this path in three stages. \textbf{Typed Prompt Representation} maps a programming request into a \prompttsg and derives context-conditioned requirement templates. \textbf{Requirement Hypothesis Discovery and Selection} uses TSG-derived constraints, FCI evidence, and stability under semantic-cluster resampling to freeze a budgeted hypothesis set. \textbf{Evaluation of Requirement Effects} constructs matched prompt policies and estimates their assigned-arm effects on cluster-disjoint held-out tasks. The boundary is deliberate: the Prompt TSG represents candidate requirements; observational discovery determines which hypotheses to test; randomized assignment determines the effect of the frozen prompt policy.
+Developers using large language models for code generation face a prompt-level
+security decision: which requirements should they make explicit, where should
+those requirements apply, and what evidence justifies the change? Vulnerabilities
+have been documented in generated code~\cite{pearce2022copilot}, and security
+prompting and prompt optimization provide ways to influence the
+output~\cite{tony2025prompting,nazzal2024promsec}. For a developer considering a
+particular modification, a useful explanation must connect the requirement to
+the task, describe the proposed change, and make its evidence and limitations
+understandable.
 
-We use \emph{matter} as a staged, evidence-bound conclusion rather than a loose synonym for importance. A requirement is \emph{effect-relevant} when the multiplicity-adjusted target-versus-no-op assigned-arm interval excludes zero within its frozen scope. It is \emph{beneficial} when that supported effect has the security-improving direction---for example, ADD improves secure-code yield or REMOVE reduces it. It is \emph{practically actionable} only when the beneficial effect is also target-specific and functionality-preserving under the frozen decision rules. Inconclusive evidence is not evidence of no effect, and none of these labels generalizes beyond the evaluated context, operation, realization distribution, generator model, and outcome.
+The first difficulty is giving a security requirement its task-local meaning.
+A request to parameterize a database value must identify the operation and
+input it governs. The same prompt may contain several operations, only some
+of which are covered by an explicit requirement. A concept label alone cannot
+locate the proposed modification or identify the functional behavior that must
+remain unchanged. Structured task representation must therefore connect
+requirements to operations, objects, and conditions. Those connections give
+both the intervention and its explanation a concrete scope.
 
-This paper makes four contributions:
+The second difficulty is establishing evidence for a modification, rather than
+an association with an outcome. Natural prompts with and without a requirement
+can differ in task content and other instructions. Their outcome differences
+alone do not identify what would change under an explicit requirement edit.
+Prior work uses human-understandable concepts and causal analysis to explain
+code generation and support prompt adjustment~\cite{ji2025causality,velasco2026smells}.
+For task-bound security guidance, the comparison must specify exactly which
+requirement expression changes and which non-target requirements remain fixed.
+Evidence that prioritizes this question must remain distinct from independent
+randomized evidence about the resulting prompt policy.
 
-\begin{itemize}
-  \item \textbf{A requirement-centered prompt representation.} A typed Prompt TSG separates immutable task-security context from editable safety factors and derives applicability-aware ADD and REMOVE templates from a finite  catalog.
-  \item \textbf{A budgeted discovery-to-freeze procedure.} Typed constraints, FCI uncertainty, and semantic-cluster stability prioritize requirement  hypotheses while keeping observational selection evidence distinct from randomized effect evidence.
-  \item \textbf{A requirement-level randomized evaluation.} Matched prompt policies, blocked assignment, and semantic-task-clustered ITT expose effect, specificity, and functionality as separate axes, retaining null-compatible, opposite, failed, unknown, and non-evaluable outcomes required by the frozen protocol.
-  \item \textbf{A usable evidence interface.} A standardized requirement  evidence record joins context, operation, selection trace, randomized effect, uncertainty, and scope; a separately governed study evaluates experts' perceived utility without treating those ratings as effect validation.
-\end{itemize}
+The third difficulty is translating effect evidence into guidance. An estimate
+does not by itself state where the edit applies, what it was compared with,
+or whether its security benefit is accompanied by preserved functionality.
+Measurement coverage and uncertainty can further limit the supported
+conclusion~\cite{dai2026rethinking}. An explanation must connect the task and
+the concrete modification to these qualifications, then distinguish a supported
+action from an unconfirmed option or an unresolved decision. Finding an effect
+and having enough evidence to recommend adopting a change are different outcomes.
+
+We introduce \model, a method for requirement-level causal analysis and
+evidence-grounded security guidance. Structured Graph Representation binds
+requirements to their task context. Requirement-Level Causal Analysis uses
+observational evidence to prioritize questions within a fixed budget, then
+estimates single-requirement policy effects and two-requirement interactions
+through held-out randomized comparisons. Evidence-Grounded Explanations and
+Guidance organizes the linked task semantics, prompt edits, and measured effects
+into a fixed-content explanation with explicit limits on the advice it can give.
+
+Our methodological contributions are twofold.
+\textbf{Task-grounded requirement-level causal analysis} connects a security
+requirement's operation, object, and conditions to an explicit intervention
+comparison. Structured task semantics support hypothesis construction and
+task-preserving prompt edits, while independent measurements and randomized
+inference establish the intended source of policy-effect evidence. The semantic
+graph is not itself a causal graph.
+
+\textbf{Evidence-grounded explanations and security guidance} links applicable
+task scope, concrete modifications, effect evidence, functionality, and
+uncertainty to the action that can be supported. We specify how to present
+these elements and when to withhold adoption advice, including for unconfirmed
+or insufficiently supported changes. The computational evaluation examines
+the hypotheses and prompt policies underlying this guidance. We plan a separate
+expert study to assess the perceived clarity, credibility, and utility of the
+complete explanation products; its design will be preregistered before recruitment.

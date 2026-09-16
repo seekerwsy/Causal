@@ -10,7 +10,7 @@ from prompt_mechanism_study.measurement import (
     MeasurementLedger,
     OracleStatus,
 )
-from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.records import content_id, require_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,39 @@ class Outcome:
     joint: int | None
     latent_joint_upper: int
     terminal_status: str | None
+
+    def __post_init__(self) -> None:
+        require_text(self.assignment_id, "outcome assignment_id")
+        for name in (
+            "code_valid", "oracle_evaluable", "secure_yield", "latent_secure_upper",
+            "latent_joint_upper", "functionality", "joint",
+        ):
+            value = getattr(self, name)
+            if value is None and name in {"functionality", "joint"}:
+                continue
+            if type(value) is not int or value not in {0, 1}:
+                raise ValueError(f"outcome {name} must be a binary integer")
+        if not self.secure_yield <= self.oracle_evaluable <= self.code_valid:
+            raise ValueError("outcome secure yield/evaluability/validity are inconsistent")
+        if not self.code_valid:
+            if (
+                self.latent_secure_upper or self.functionality != 0 or self.joint != 0
+                or self.latent_joint_upper or self.terminal_status not in {"no_code", "invalid"}
+            ):
+                raise ValueError("terminal outcome must retain zero yields and its code status")
+            return
+        if self.terminal_status is not None:
+            raise ValueError("valid outcome cannot have a terminal status")
+        upper = self.secure_yield if self.oracle_evaluable else 1
+        joint = (
+            0 if self.functionality == 0 or (self.oracle_evaluable and not self.secure_yield)
+            else None if not self.oracle_evaluable or self.functionality is None else 1
+        )
+        if (
+            self.latent_secure_upper != upper or self.joint != joint
+            or self.latent_joint_upper != int(upper == 1 and self.functionality != 0)
+        ):
+            raise ValueError("outcome unknown bounds or joint success are inconsistent")
 
     @property
     def outcome_id(self) -> str:

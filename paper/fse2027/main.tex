@@ -15,8 +15,7 @@
 \usepackage{xspace}
 \usetikzlibrary{arrows.meta,fit,positioning}
 
-\newcommand{\model}{\textsc{Phase}\xspace}
-\newcommand{\modelfull}{Prompt-side Hypothesis Analysis and Security Evaluation\xspace}
+\newcommand{\model}{\textsc{CausalGuide}\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
 
 \acmConference[FSE 2027]{The ACM International Conference on the Foundations
@@ -26,8 +25,8 @@ of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
 
 \begin{document}
 
-\title{\model: Which Prompt-Side Security Requirements Matter in LLM Code
-Generation?}
+\title{\model: Causal Analysis for Explainable Security Guidance in LLM Code
+Generation}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -36,7 +35,7 @@ Generation?}
 }
 
 \begin{abstract}
-Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit. 
+% Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit. 
 \end{abstract}
 
 \begin{CCSXML}
@@ -56,7 +55,7 @@ Natural-language programming prompts often specify functionality while leaving c
 
 \ccsdesc[500]{Software and its engineering~Software safety}
 \ccsdesc[500]{Security and privacy~Software security engineering}
-\keywords{large language models, code generation, software security, causal discovery, prompt analysis}
+\keywords{large language models, code generation, software security, causal analysis, explainable security guidance}
 
 \maketitle
 \raggedbottom
@@ -72,6 +71,8 @@ Natural-language programming prompts often specify functionality while leaving c
 \input{sections/05-related-work}
 
 \input{sections/06-conclusion}
+
+\input{sections/08-data-availability}
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}

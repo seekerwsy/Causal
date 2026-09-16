@@ -31,10 +31,17 @@ def write_bundle(root: Path, artifacts: Mapping[str, Any]) -> Path:
 
 def verify_bundle(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    manifest_path = root / MANIFEST
-    if not manifest_path.is_file():
+    return verify_bundle_contents({
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    })
+
+
+def verify_bundle_contents(contents: Mapping[str, bytes]) -> dict[str, Any]:
+    """Verify the same bundle bytes when embedded as reproducibility evidence."""
+    if MANIFEST not in contents:
         raise ValueError("bundle manifest is missing")
-    manifest_payload = manifest_path.read_bytes()
+    manifest_payload = contents[MANIFEST]
     manifest = json.loads(manifest_payload)
     if manifest_payload != (canonical_json(manifest) + "\n").encode("utf-8"):
         raise ValueError("bundle manifest is not canonical")
@@ -46,15 +53,11 @@ def verify_bundle(root: Path) -> dict[str, Any]:
     for name, digest in expected.items():
         _valid_name(name)
         _digest(digest)
-    actual = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.name != MANIFEST
-    }
+    actual = set(contents) - {MANIFEST}
     if actual != set(expected):
         raise ValueError("bundle file set is not exact")
     for name, digest in expected.items():
-        payload = (root / name).read_bytes()
+        payload = contents[name]
         if hashlib.sha256(payload).hexdigest() != digest:
             raise ValueError(f"artifact digest mismatch: {name}")
         value = json.loads(payload)

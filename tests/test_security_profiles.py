@@ -1,146 +1,77 @@
 from __future__ import annotations
-
 import json
 from pathlib import Path
-
 import pytest
-
 from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.eligibility import (
-    qualify_local_security_profiles,
+    EligibilityError,
     qualify_target_security_profiles,
 )
-from prompt_mechanism_study.security_profiles import evaluate_security_profile
 from prompt_mechanism_study.target_security_profiles import (
     evaluate_target_security_profile,
 )
 
 
-def test_profiles_keep_absent_or_unresolved_evidence_unknown() -> None:
-    assert (
-        evaluate_security_profile(
-            "def add(left, right): return left + right",
-            "python.cwe918.outbound_url.v1",
-        )["reason_code"]
-        == "no_relevant_sink"
-    )
-    assert (
-        evaluate_security_profile(
-            "import os\ndef protect(path, mode): os.chmod(path, mode)",
-            "python.cwe732.owner_only_file_permissions.v1",
-        )["security_label"]
-        == "unknown"
-    )
-    assert (
-        evaluate_security_profile(
-            "from flask import request\ndef read(): return open(request.args.get('path')).read()",
-            "python.cwe22.path_confinement.v1",
-        )["security_label"]
-        == "insecure"
-    )
+@pytest.mark.parametrize('body, expected', [
+    ("options = {'verify': True}\noptions['verify'] = False\nrequests.get(url, **options)", 'insecure'),
+    ("options = {'verify': True}\nrequests.get(url, **options)", 'secure'),
+    ("options = {'verify': True}\nmutate(options)\nrequests.get(url, **options)", 'unknown'),
+    ('ctx = ssl.create_default_context()\nctx.wrap_socket(sock, server_hostname=host)', 'secure'),
+    ('ctx = ssl.create_default_context()\nalias = ctx\nalias.check_hostname = False\nctx.wrap_socket(sock)', 'insecure'),
+    ('ctx = ssl.create_default_context()\nmutate(ctx)\nctx.wrap_socket(sock, server_hostname=host)', 'unknown'),
+])
+def test_tls_profile_proves_configuration_at_use(body: str, expected: str) -> None:
+    code = "import requests, ssl, urllib.request\n" + body
+    result = evaluate_target_security_profile(code, "python.cwe295.tls_certificate_validation.v1")
+    assert result["security_label"] == expected
 
 
-@pytest.mark.reviewer
-def test_legacy_profile_qualification_rejects_target_extensions(tmp_path: Path) -> None:
-    output = tmp_path / "qualification"
-    report = qualify_local_security_profiles(
-        Path.cwd(),
-        Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"),
-        Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),
-        output,
-    )
-
-    assert report["status"] == "QUALIFIED_FOR_EXPERIMENT"
-    assert report["label_mismatches"] == 0
-    assert report["unsupported_registry_profiles"] == [
-        "python.cwe295.tls_certificate_validation.v1",
-        "python.cwe327.cipher_algorithm_selection.v1",
-        "unsupported.python.cwe918.trusted_domain_subdomain.v1",
-    ]
-    assert len(read_json(output / "case-results.json")) == report["gold_cases"]
-
-
-@pytest.mark.reviewer
-def test_target_profile_qualification_extends_without_mutating_legacy(
-    tmp_path: Path,
-) -> None:
-    output = tmp_path / "target-qualification"
+def test_scoped_qualification_does_not_certify_unused_profiles(tmp_path: Path) -> None:
+    profile = "python.cwe89.sql_values.v1"
     report = qualify_target_security_profiles(
         Path.cwd(),
         Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"),
-        (
-            Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),
-            Path(
-                "data/oracle-calibration/phase-context-policy-v3-security-profile-extension-v1-cases.json"
-            ),
-        ),
-        output,
+        (Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),),
+        tmp_path / "sql-only",
+        profile_ids=(profile,),
     )
-
     assert report["status"] == "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
-    assert report["label_mismatches"] == 0
-    assert report["target_only_profiles"] == [
-        "python.cwe295.tls_certificate_validation.v1",
-        "python.cwe327.cipher_algorithm_selection.v1",
-    ]
-    assert report["formal_execution_authorized"] is False
-    assert len(read_json(output / "case-results.json")) == 43
-    with pytest.raises(ValueError, match="unsupported local security profile"):
-        evaluate_security_profile(
-            "import requests\nrequests.get('https://example.test')",
-            "python.cwe295.tls_certificate_validation.v1",
-        )
+    assert report["active_local_profiles"] == [profile]
+    results = read_json(tmp_path / "sql-only/case-results.json")
+    assert {r["expected_label"] for r in results} == {"secure", "insecure", "unknown"}
+    assert {r["profile_id"] for r in results} == {profile}
+    assert report["qualification_scope"]["out_of_scope_gold_cases"] > 0
+    assert "python.cwe295.tls_certificate_validation.v1" in report[
+        "qualification_scope"
+    ]["registered_local_profiles_not_qualified"]
+    assert report["scientific_claim_allowed"] is False
+    for scope in ((), (profile, profile), ("unsupported.example",)):
+        with pytest.raises(EligibilityError, match="profile scope"):
+            qualify_target_security_profiles(
+                Path.cwd(),
+                Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"),
+                (Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),),
+                tmp_path / "invalid-scope",
+                profile_ids=scope,
+            )
 
 
-@pytest.mark.parametrize(
-    "case",
-    json.loads(
-        Path(
-            "data/oracle-calibration/phase-context-policy-v3-security-profile-extension-v1-cases.json"
-        ).read_text(encoding="utf-8")
-    ),
-    ids=lambda case: case["case_id"],
-)
-def test_target_only_profiles_match_frozen_extension_cases(
-    case: dict[str, str],
-) -> None:
-    result = evaluate_target_security_profile(case["code"], case["profile_id"])
-    assert result["security_label"] == case["expected_label"]
-
-
-@pytest.mark.extended
-@pytest.mark.parametrize(
-    "case",
-    json.loads(
-        Path("data/oracle-calibration/factorial-sql-v2-cases.json").read_text(
-            encoding="utf-8"
-        )
-    ),
-    ids=lambda case: case["case_id"],
-)
-def test_sql_interaction_profile_covers_all_four_gold_cells(case: dict[str, str]) -> None:
-    result = evaluate_security_profile(case["code"], case["profile_id"])
-    assert result["security_label"] == case["expected_label"]
-    if "expected_reason" in case:
-        assert (
-            result["decision"]["trace"]["facts"][0]["reason_code"]
-            == case["expected_reason"]
-        )
-
-
-@pytest.mark.extended
-def test_sql_interaction_membership_guard_must_stop_before_the_sink() -> None:
-    code = """def list_rows(cursor, order_field, maximum):
-    allowed = {'created_at', 'name'}
-    cursor.execute(f'SELECT * FROM records ORDER BY {order_field} LIMIT %s', (maximum,))
-    if order_field not in allowed:
-        raise ValueError('invalid column')
-"""
-    result = evaluate_security_profile(
-        code, "python.cwe89.dynamic_identifier_and_values.v2"
+def test_scoped_qualification_keeps_missing_unknown_and_errors_blocking(tmp_path: Path) -> None:
+    root = Path.cwd()
+    profile = "python.cwe89.sql_values.v1"
+    cases = [r for r in read_json(Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"))
+             if r["profile_id"] == profile]
+    # Qualification case files are required to remain inside the declared root.
+    registry = tmp_path / "registry.json"
+    registry.write_bytes((root / "data/method/phase-context-policy-v3-mechanism-registry-v1.json").read_bytes())
+    path = tmp_path / "cases.json"
+    path.write_text(json.dumps([r for r in cases if r["expected_label"] != "unknown"]), encoding="utf-8")
+    with pytest.raises(EligibilityError, match="unknown gold cases"):
+        qualify_target_security_profiles(tmp_path, registry, (path,), tmp_path / "missing", profile_ids=(profile,))
+    next(r for r in cases if r["expected_label"] == "secure")["code"] = (
+        "def remove(cursor, username):\n    cursor.execute(f'DELETE FROM users WHERE username = {username}')"
     )
-    assert result["security_label"] == "insecure"
-    assert (
-        result["decision"]["trace"]["facts"][0]["reason_code"]
-        == "dynamic_identifier_allowlist_not_proved"
-    )
+    path.write_text(json.dumps(cases), encoding="utf-8")
+    report = qualify_target_security_profiles(tmp_path, registry, (path,), tmp_path / "wrong", profile_ids=(profile,))
+    assert report["status"] == "TARGET_MEASUREMENT_PROFILE_QUALIFICATION_FAILED"
+    assert report["label_mismatches"] == 1

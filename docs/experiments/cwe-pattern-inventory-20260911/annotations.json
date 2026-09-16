@@ -1,0 +1,1794 @@
+{
+  "CWE-20": {
+    "name_zh": "输入验证",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_b35fb01b09e09d885f91af797a2106ac5cbe0247928951a0b20268dbdfd39e30",
+        "form_zh": "RLE 编码字符串解码与错误处理"
+      },
+      {
+        "task_id": "semantic_cluster_f0f13e7891ded89ab64a1c8444c55c36a98bbfe1163ad4f28c11699e84f35a0d",
+        "form_zh": "目标 URL 的域名与子域归属判定"
+      },
+      {
+        "task_id": "semantic_cluster_273f67f1aca7bb9c0805533005443817dc4528f72bd52110bae86ce5bc58277d",
+        "form_zh": "目标 URL 的域名判定与重定向"
+      }
+    ],
+    "name_en": "Improper Input Validation",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-22": {
+    "name_zh": "路径遍历",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_0a71bd4ba7dd18fc191ed35ee0e0905402f94e49d030f9fcdb348f10253ba04c",
+        "form_zh": "指定目录内按文件名读取配置"
+      },
+      {
+        "task_id": "semantic_cluster_b95672c69949857e106578792ba16282f3344c96f74a8fa758ffcb2d8544cc4b",
+        "form_zh": "指定目录内按用户文件名读取内容"
+      },
+      {
+        "task_id": "semantic_cluster_7cef200d0a917161552042057d67acf482e6f99502db61c216ee7f2898c41f68",
+        "form_zh": "指定安全目录内读取文件"
+      },
+      {
+        "task_id": "semantic_cluster_0e82189b1a4c9dcbd31386b3100ce15384124dbe6fa4d0b60da544ed7a7d8195",
+        "form_zh": "归档成员解压到指定目标目录"
+      }
+    ],
+    "name_en": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-74": {
+    "name_zh": "注入（上位类型）",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d2908fa3c136d749a9c9a9ca6cb3112bf0d1d5454f2e1fea592caf1f27bd1993",
+        "form_zh": "请求中的命令经 SSH 远程执行"
+      },
+      {
+        "task_id": "semantic_cluster_0d6983033ccaca18b32545ff933b0b515beeb4e92b7eed2153ab8f6c4efe315b",
+        "form_zh": "用户命令与允许命令集合比对"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements in Output Used by a Downstream Component ('Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-77": {
+    "name_zh": "命令注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f0624e2e5f56ddea94568bd095ac4c115681a3db2d4b5f58f810012304f99e49",
+        "form_zh": "固定 ping 程序接收主机参数"
+      },
+      {
+        "task_id": "semantic_cluster_c9794fd0e654328e5afffa06e1d8441a518c8a14b488f91a1266eedae697aa50",
+        "form_zh": "调用者提供基础命令及参数列表"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements used in a Command ('Command Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-78": {
+    "name_zh": "操作系统命令注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_c8885b7ae141b2fe84fa9aa135d67eb4e9b61fa9bafeb0a100b685fdcf07a4e2",
+        "form_zh": "按输入路径读取文本文件，未要求进程执行"
+      },
+      {
+        "task_id": "semantic_cluster_626fa59354d18fc5ef079c64b70ad1d3e0f30297caa6c036f029ee03ccbded1a",
+        "form_zh": "在用户指定工作目录执行固定 ls 命令"
+      },
+      {
+        "task_id": "semantic_cluster_455a520bba45381ac0212d353c8d9e6757979d02f843eedfd1f9474955d8fcfc",
+        "form_zh": "用户名进入 getent passwd 系统命令"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-79": {
+    "name_zh": "跨站脚本",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_bfc4c20ff14759d015e175820d53259d6cbbb1d937d8fe230a13791d0f8430d6",
+        "form_zh": "目标 URL 嵌入 HTML 属性及可见链接文本"
+      },
+      {
+        "task_id": "semantic_cluster_51d9095b6d8af378a87b212bb2169e7850ed73b282810fc45cae0e44d6f1734f",
+        "form_zh": "用户名进入后续 HTML 渲染的欢迎文本"
+      },
+      {
+        "task_id": "semantic_cluster_3f3ec8f3124be557f16fa9492b3ddb477091fb6b8fd7c5ecee3e092eb76c4f12",
+        "form_zh": "请求用户名进入 HTTP 响应文本"
+      }
+    ],
+    "name_en": "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-80": {
+    "name_zh": "基本跨站脚本",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a33c835c456ba22da590499a4fad1f6a250cbe10ce5f29ecc36ebe5ce658a990",
+        "form_zh": "请求名称嵌入 HTML 问候响应"
+      }
+    ],
+    "name_en": "Improper Neutralization of Script-Related HTML Tags in a Web Page (Basic XSS)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-89": {
+    "name_zh": "SQL 注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_4927a6a6d23bb1e9104f8a130a916317cf5913e3f2d57b9e486c93daa9a8d6e3",
+        "form_zh": "输入用户名作为固定 users 表的查询值"
+      },
+      {
+        "task_id": "semantic_cluster_9b0501e0b1a21bfcf6b6d07d95b38c8ea5e7c1920d667727fd3e507f56a099a1",
+        "form_zh": "用户名和消息写入数据库并展示"
+      },
+      {
+        "task_id": "semantic_cluster_785af209054d73879fe2e0822f0dc6a74ff1c1454e80cb00a6574480c0a37116",
+        "form_zh": "请求标题用于查询数据库中的帖子"
+      },
+      {
+        "task_id": "semantic_cluster_3ecfd27c73e52f62aa5ad65807e4fe270d54e73783e581d54e3447fcf5bbd41f",
+        "form_zh": "调用者提供表名、列名进行结构修改"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-90": {
+    "name_zh": "LDAP 注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f75d39f14a040f418be3695e5750f3620743d71783f213a534fbc407e6c42b31",
+        "form_zh": "请求中的域组件与用户名构造 LDAP 查询"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements used in an LDAP Query ('LDAP Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-91": {
+    "name_zh": "XML 注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_ee074f778dd6134b5f650296b3c86d6d3e5c6a662a6f1c39da6d8cc0da735482",
+        "form_zh": "请求同时提供 XML 文档及 XPath 查询表达式"
+      }
+    ],
+    "name_en": "XML Injection (aka Blind XPath Injection)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-94": {
+    "name_zh": "代码注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_b96681edb2db393c63ad2482b933fb5126ced63479996527fa0b2cda0b3b66ea",
+        "form_zh": "有限运算符的算术表达式求值"
+      },
+      {
+        "task_id": "semantic_cluster_d31e92d4744485cbcb5a5025c925efb5745c5170a1101296c2b59e03a28d0ac1",
+        "form_zh": "请求中的代码直接作为执行对象"
+      },
+      {
+        "task_id": "semantic_cluster_602c9b739cd4f94050d7d3d4ca9362544f47a7b91808290d16d05e3d8331faf4",
+        "form_zh": "仅数字与四则运算的表达式求值"
+      }
+    ],
+    "name_en": "Improper Control of Generation of Code ('Code Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-95": {
+    "name_zh": "动态求值注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_68d095fb755ab4c45ab430cd140122edde9b4c3c01df3aea13183aa4182b2dd3",
+        "form_zh": "用户算术表达式字符串求值"
+      },
+      {
+        "task_id": "semantic_cluster_68322a106681569b49fe0aaacffd00fff9213763ac18eec80e5e497a1786bd15",
+        "form_zh": "表达式树遍历与数学求值"
+      },
+      {
+        "task_id": "semantic_cluster_e9a4fa379891bed7656e83c7689bb5c761ee0971ec63f279052e598b4d1690c6",
+        "form_zh": "动态 Python 表达式查询求值"
+      }
+    ],
+    "name_en": "Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-99": {
+    "name_zh": "资源标识符控制",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_7a4ac79352483269ded073f12da937498bcb846ef16a53567d6ffeb47416b996",
+        "form_zh": "静态目录内按请求文件名下载附件"
+      },
+      {
+        "task_id": "semantic_cluster_8de31cc161279c65ef019a7bdee67be1953937de6d347e6a60007d9b80178125",
+        "form_zh": "按请求中的文件路径下载附件"
+      }
+    ],
+    "name_en": "Improper Control of Resource Identifiers ('Resource Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-113": {
+    "name_zh": "HTTP 头换行注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_ce82fedac7a867e801f48ef3134062f84d56e0a57cbf4e963ae62487fb7cff89",
+        "form_zh": "请求内容写入有限类型的响应头"
+      },
+      {
+        "task_id": "semantic_cluster_b24894db91afd0a6b8723e028a615452de117d30b99921374f09a4b409e9da16",
+        "form_zh": "请求 Content-Type 头复制到响应头"
+      },
+      {
+        "task_id": "semantic_cluster_5425c4a3a03fcd0c50f16270c9738588738aafdde010730e37705f226eba10fa",
+        "form_zh": "请求参数指定响应 Content-Type"
+      }
+    ],
+    "name_en": "Improper Neutralization of CRLF Sequences in HTTP Headers ('HTTP Request/Response Splitting')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-116": {
+    "name_zh": "输出编码或转义",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_e45107ba44425f9c9d859e4536bd030233ce5f9d134919e3ddb5dbac6f9a5f22",
+        "form_zh": "请求文本中的 script 标签过滤"
+      },
+      {
+        "task_id": "semantic_cluster_b3d06b752a57aa1cbe5db2405fa8335f127efab7f8b3225c94c15bcd07f0fb03",
+        "form_zh": "函数输入文本中的 script 标签过滤"
+      }
+    ],
+    "name_en": "Improper Encoding or Escaping of Output",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-117": {
+    "name_zh": "日志注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_75b50470e4abed631ed76f44c67c4aec27ad99bf5cf648136ed58b4130431b79",
+        "form_zh": "用户消息拼入带时间戳的日志条目"
+      },
+      {
+        "task_id": "semantic_cluster_9e7471684fc387424272a31ea72004222eb32b569e233400fb63fe6cd297f364",
+        "form_zh": "用户名写入警告日志"
+      },
+      {
+        "task_id": "semantic_cluster_58eb4770b272a1d0d2667028cd138f83b3ba7a73f346750255f9d7d2c53618de",
+        "form_zh": "请求参数写入错误日志"
+      }
+    ],
+    "name_en": "Improper Output Neutralization for Logs",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-119": {
+    "name_zh": "内存缓冲区边界",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_7f89107a41ecf12ed3b12b4f4fc344802d4e63ebf1eadc155acb1a6fa6813375",
+        "form_zh": "源与目标长度约束下的缓冲区复制"
+      },
+      {
+        "task_id": "semantic_cluster_45b2de235423032320d71b2f4c6800a291f529db78ea8ff20f423a8041fa1343",
+        "form_zh": "命令行字符串转索引后读取数组"
+      },
+      {
+        "task_id": "semantic_cluster_cd3c5aa285842c513f5b2d360b20078ded0e759d8156a23102dabe4671fcec0a",
+        "form_zh": "标准输入读取及单字符判定"
+      }
+    ],
+    "name_en": "Improper Restriction of Operations within the Bounds of a Memory Buffer",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-120": {
+    "name_zh": "缓冲区复制长度检查",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_57382202e632b0d453bebb636ff8ad1d78957766929637c79b11a30eb8427135",
+        "form_zh": "用户名格式化写入固定容量缓冲区"
+      },
+      {
+        "task_id": "semantic_cluster_0ec65e60bca33bd9ba455ca59eef5cab68ef4ae35a880b713d9c6814f1df5aee",
+        "form_zh": "表单文本去 HTML 标签并限制长度"
+      },
+      {
+        "task_id": "semantic_cluster_d2a18b5d22140da2458e542038a3f8d76d4862554479218a5fcffbbdb4a7a7ca",
+        "form_zh": "使用 Windows API 枚举及排序目录文件"
+      }
+    ],
+    "name_en": "Buffer Copy without Checking Size of Input ('Classic Buffer Overflow')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-121": {
+    "name_zh": "栈缓冲区溢出",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_16477b71836743b03153f053157cb733d911dcbbe3d0bab6620e11307a7c338b",
+        "form_zh": "使用 select 从标准输入读取一行"
+      }
+    ],
+    "name_en": "Stack-based Buffer Overflow",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-125": {
+    "name_zh": "越界读取",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_bbbc30ba57f327292e685ff6553a47baa566a1b88f45f0c9a4b71c8fc074f564",
+        "form_zh": "列表索引读取与越界默认值"
+      },
+      {
+        "task_id": "semantic_cluster_65d2415da221fbd7267a91cfb10da9e1f6ebabc1a375e7e8fa2109dddd2c1fca",
+        "form_zh": "用户字符串转索引后读取价格数组"
+      },
+      {
+        "task_id": "semantic_cluster_635b6245ee4ea98ad60b30bda0e1a65a386fca3ed73e040b6a03ebdaec5b5541",
+        "form_zh": "整数索引读取数组元素"
+      }
+    ],
+    "name_en": "Out-of-bounds Read",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-131": {
+    "name_zh": "缓冲区大小计算",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_4a69a457adada9831e9306a5cc6cc2893ef6272dede1bc2405ff3adb28beac21",
+        "form_zh": "堆分配并复制完整字符串"
+      }
+    ],
+    "name_en": "Incorrect Calculation of Buffer Size",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-134": {
+    "name_zh": "外部格式字符串",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_c8a6a9812e1c62ca9bc30b1d4081ac5b95fbc7f3078b86b2d814be6470c804b3",
+        "form_zh": "将调用者消息原样打印到标准输出"
+      }
+    ],
+    "name_en": "Use of Externally-Controlled Format String",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-170": {
+    "name_zh": "字符串终止符",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_541067563ffcf649cd016b6d4b9d303e42ca56f1936897121ef541a775df61b5",
+        "form_zh": "文件内容追加到带前缀缓冲区后整体复制"
+      }
+    ],
+    "name_en": "Improper Null Termination",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-176": {
+    "name_zh": "Unicode 编码处理",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a32638c2d1b4beb4b485567f28bc4010d595fec156bc64152bc4b1dc65cd41f7",
+        "form_zh": "用户输入先转义再 Unicode 规范化并渲染"
+      }
+    ],
+    "name_en": "Improper Handling of Unicode Encoding",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-179": {
+    "name_zh": "行为顺序导致的输入验证问题",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_c9eba353c8a5d49265510709e540782abe3854e9cc9e11e3646c741108985c36",
+        "form_zh": "URL 解码后按正则表达式验证邮件地址"
+      }
+    ],
+    "name_en": "Incorrect Behavior Order: Early Validation",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-185": {
+    "name_zh": "正则表达式正确性",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_50f78a4d2781b831b52729513acfd6208d829ead482e4d266f99d3ca0c6e9b35",
+        "form_zh": "使用正则表达式对数字字符串分组格式化"
+      }
+    ],
+    "name_en": "Incorrect Regular Expression",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-190": {
+    "name_zh": "整数溢出",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_1affa7ce33b14b4dc2f04afd1167c753464ef1b44510a7b1e2e5c2f8ab417c9d",
+        "form_zh": "随机正整数与偏移量相加后输出"
+      },
+      {
+        "task_id": "semantic_cluster_883afaac01b652e817c7582dee230b25727dce8b0aa4e9120cbbe83e18b1bf86",
+        "form_zh": "生成并打印大于阈值的随机数"
+      }
+    ],
+    "name_en": "Integer Overflow or Wraparound",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-193": {
+    "name_zh": "差一错误",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_443065fa93d955e70935f62d2cd38398a6e2b8e9bf37726465c8596d4d26488d",
+        "form_zh": "遍历整数数组并逐项加一"
+      }
+    ],
+    "name_en": "Off-by-one Error",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-200": {
+    "name_zh": "敏感信息暴露",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_50665e20f2b687d49439725feb5be30778edd451716422d6fb6bb998e302f862",
+        "form_zh": "用户资料页面展示部分身份信息"
+      },
+      {
+        "task_id": "semantic_cluster_b72759b6d0101a1a16b8b6228fc589d61a12eb17e887394e6a2e7efb4d6c6b7c",
+        "form_zh": "用户名与令牌匹配后返回认证结果"
+      },
+      {
+        "task_id": "semantic_cluster_e3672a50702f03d9e4fcf18aa977ccc68438c252c2a622c2ab69cd1b082dffa4",
+        "form_zh": "按模板输出患者基本信息并限制敏感字段"
+      }
+    ],
+    "name_en": "Exposure of Sensitive Information to an Unauthorized Actor",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-208": {
+    "name_zh": "可观察计时差异",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_29fc820949ef6366a122528eade286051ee750a630c91e22c6559563ca08e6b8",
+        "form_zh": "HMAC 消息签名验证"
+      },
+      {
+        "task_id": "semantic_cluster_bcad360fc00fd51670dab2a1007ab04b48f80b2ae94fb8105eaf35f4707bbb78",
+        "form_zh": "带缓存的 React 属性类型校验"
+      }
+    ],
+    "name_en": "Observable Timing Discrepancy",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-209": {
+    "name_zh": "错误消息泄露",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d626ecfd0b01bf484adb5d9c951a25eb597559f1e4f2b123716886fe89e3bad6",
+        "form_zh": "固定字节数的流读取及 EOF 异常"
+      },
+      {
+        "task_id": "semantic_cluster_c2a1b2c5565f4b1caf3ac72bc0e82cb622d5d259519dcfd1724832727836439d",
+        "form_zh": "捕获计算异常并构造 Web 响应"
+      },
+      {
+        "task_id": "semantic_cluster_d77c8301c58710166c44cf85fa597111902d1dfede13a2e8235210fde714490b",
+        "form_zh": "OAuth 登录后保存令牌并获取用户信息"
+      }
+    ],
+    "name_en": "Generation of Error Message Containing Sensitive Information",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-215": {
+    "name_zh": "调试信息泄露",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_8e25231cdb310e0ff8bd21f22540b42d401128fc51bef1f30c63506ec1c206f3",
+        "form_zh": "启动含异常路由的 Flask 应用"
+      }
+    ],
+    "name_en": "Insertion of Sensitive Information Into Debugging Code",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-242": {
+    "name_zh": "固有危险函数",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a65da132c4334d1c8cbb2cadf23fa4776b2d14d6ca0b7cae8fe80f8ea796c154",
+        "form_zh": "标准输入读取整数数组并求最大值"
+      }
+    ],
+    "name_en": "Use of Inherently Dangerous Function",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-250": {
+    "name_zh": "不必要的高权限执行",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_e658de8720b29bdbeed9dc1dc3cd92545dfe3bbc3d0f1cec1404d62b99fa896d",
+        "form_zh": "创建用户目录前提权、创建后降权"
+      }
+    ],
+    "name_en": "Execution with Unnecessary Privileges",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-252": {
+    "name_zh": "未检查返回值",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f420ee1146e33fbb37c583bed1e9553464f77352f7cc40673e6092027cc96c2a",
+        "form_zh": "JSON 字段经可返回 None 的解析函数后计数"
+      },
+      {
+        "task_id": "semantic_cluster_8ffcc126b3666ef2f8e8a5cad07977e5e8d9688e4e20dc3ee327b02c3839ef78",
+        "form_zh": "请求数据经可返回 None 的解析函数后计数"
+      }
+    ],
+    "name_en": "Unchecked Return Value",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-259": {
+    "name_zh": "硬编码密码",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_7c7d9e964b46754e7a36cfe5719c93faa08d92eb6c0e0370b9dab675f6a7439a",
+        "form_zh": "管理员密码有效性判定"
+      }
+    ],
+    "name_en": "Use of Hard-coded Password",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-269": {
+    "name_zh": "权限管理",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_3dd51b533612664af25ad9d559f25762aeecfdf1e45805bf02e6e44843a40ce2",
+        "form_zh": "角色字符串映射到访问级别"
+      },
+      {
+        "task_id": "semantic_cluster_a03b2a6b168df1a23d2f3a5dc5c676ba538e1bad609ca6a13f946a375b3af703",
+        "form_zh": "校验用户名后临时提权创建目录"
+      }
+    ],
+    "name_en": "Improper Privilege Management",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-276": {
+    "name_zh": "默认权限",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_892ca24b186040612d8905cfbe2b8ba3e2b80500dbbc9dab750e61f5529d585e",
+        "form_zh": "把输入代码写入新建脚本文件"
+      },
+      {
+        "task_id": "semantic_cluster_cb9b74636b6d8d8fa9f82e6f36c2f2c703b69c121cdafa082987583582f23643",
+        "form_zh": "移动应用主题缓存与目录管理"
+      }
+    ],
+    "name_en": "Incorrect Default Permissions",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-281": {
+    "name_zh": "权限保持",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_201bb60109ba1898bac30f08c4a37746612e02220d7c324d809dbb7cee78917a",
+        "form_zh": "递归删除当前用户拥有的文件"
+      }
+    ],
+    "name_en": "Improper Preservation of Permissions",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-283": {
+    "name_zh": "未验证所有权",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d7163d76479166e5f10a57d38998f3a0e2457111f1e6c3baee2358dff639aa1b",
+        "form_zh": "按调用者提供的进程 ID 终止进程"
+      }
+    ],
+    "name_en": "Unverified Ownership",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-285": {
+    "name_zh": "授权处理",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_e7d02cdc183c1d5f51c7baf71ea9837898e9f51d6bdbb68da342b1739b812f64",
+        "form_zh": "PAM 会话回调及用户认证"
+      }
+    ],
+    "name_en": "Improper Authorization",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-290": {
+    "name_zh": "伪造导致的认证绕过",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_56be043ff3164fd8d65532046b304ef9ae5690c057ba24ecef932e2d6695429c",
+        "form_zh": "从服务器变量与代理头提取客户端 IP"
+      }
+    ],
+    "name_en": "Authentication Bypass by Spoofing",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-295": {
+    "name_zh": "证书验证",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d1d0ccd5c4622942f54405db76ad164dfaa0a5d52458cbe7c9467e2e9ca23f1b",
+        "form_zh": "创建并返回 OpenSSL 上下文"
+      },
+      {
+        "task_id": "semantic_cluster_650d53b432819ed0877cbe690465e3e70dfffc818fea2da2f0d5c4467c789dae",
+        "form_zh": "HTTPS POST 请求发送 JSON 并检查响应码"
+      }
+    ],
+    "name_en": "Improper Certificate Validation",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-306": {
+    "name_zh": "关键功能缺少认证",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f4b3daeba7530ba84df4004a096f50657535cc0fa93673bdd2f6d2064d646afd",
+        "form_zh": "按登录状态与管理员角色进行页面分流"
+      },
+      {
+        "task_id": "semantic_cluster_18e95d74e349d8e2598b3c0d0a416791aa9ea45e48e3e7840457169d40ddc364",
+        "form_zh": "基于会话状态访问机密设置页"
+      },
+      {
+        "task_id": "semantic_cluster_7bc678cb1e8c08189149dfda8fe24fd7d7593d34d012cbfc0fafc40e8b029726",
+        "form_zh": "更新数据库密码并检查密码强度"
+      }
+    ],
+    "name_en": "Missing Authentication for Critical Function",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-312": {
+    "name_zh": "敏感信息明文存储",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_b9c9fcbcd7f63ad57481ca7e6a95634fd9de3c699abb02a7daf1829a420c91cb",
+        "form_zh": "RSA 私钥写入文件后通过 HTTPHandler 读取校验"
+      }
+    ],
+    "name_en": "Cleartext Storage of Sensitive Information",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-319": {
+    "name_zh": "敏感信息明文传输",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_61bb760d627d951d10d5be13999e02dc8b2313a7f9e14a9f70b5ed04677c8793",
+        "form_zh": "Web 登录读取用户名和密码并验证"
+      },
+      {
+        "task_id": "semantic_cluster_4377fa9da11873974ce74c60e5fc57535f0ee791f5af29e6a304c8c7f36afc2c",
+        "form_zh": "带用户名和密码的 FTP 文件下载"
+      },
+      {
+        "task_id": "semantic_cluster_6f0bebe7d544349357921c6cd0ab82d9a6286fbb0bb1d3576061a2fa2865c88d",
+        "form_zh": "通过 API 获取随机图片并更新组件状态"
+      }
+    ],
+    "name_en": "Cleartext Transmission of Sensitive Information",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-321": {
+    "name_zh": "硬编码加密密钥",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_419b15a1f18a746265553e555b87089e713405dac3d306a23d0bd6a9b61fb9c5",
+        "form_zh": "调用 Canvas API 查询课程作业"
+      }
+    ],
+    "name_en": "Use of Hard-coded Cryptographic Key",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-323": {
+    "name_zh": "重用 nonce 或密钥对",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_3a1f8e25ab0f93d28e4e333c6dc23a5ea3ec0084cd0f78d05ceff5b489aad47e",
+        "form_zh": "枚举可用哈希函数及分组密码的描述对象"
+      }
+    ],
+    "name_en": "Reusing a Nonce, Key Pair in Encryption",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-326": {
+    "name_zh": "加密强度不足",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_c676c60d24b06a05a200851cdec01337d25bc21084a2a0de673d9a0f52ef2d45",
+        "form_zh": "生成 RSA 私钥并导出 PEM"
+      },
+      {
+        "task_id": "semantic_cluster_558bafa84f5b6c397ce194a2fb0a356f87ad468d6de2a03cec5ad3a8a4af1fd8",
+        "form_zh": "生成 RSA 私钥并导出 OpenSSH 格式"
+      }
+    ],
+    "name_en": "Inadequate Encryption Strength",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-327": {
+    "name_zh": "风险加密算法",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_b5f898faa331c7ce85a7c80eb6c4f0542f2a2f2e6c9d9f9d542831af1bcf8e11",
+        "form_zh": "口令安全哈希"
+      },
+      {
+        "task_id": "semantic_cluster_c5f476c1a543c51709598955531bd06391c83a6f32a6885ed478e371ba72805a",
+        "form_zh": "为密钥和 IV 生成指纹"
+      },
+      {
+        "task_id": "semantic_cluster_95f7efccc519dd0b6111e6b19fa17ce909adc6426385509bba5827bb881f41a2",
+        "form_zh": "按指定且受限制的算法计算口令哈希"
+      }
+    ],
+    "name_en": "Use of a Broken or Risky Cryptographic Algorithm",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-328": {
+    "name_zh": "弱哈希",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_6316bd12e0ad5856ed4677c87d41d460136a963c93d3e1a68b9417bc42dde133",
+        "form_zh": "拼接 API 请求消息后计算哈希"
+      }
+    ],
+    "name_en": "Use of Weak Hash",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-329": {
+    "name_zh": "CBC 中可预测的 IV",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a0156c25ec3927cb0667be9213b2ad2c3114607b0f6eddd503c77adb818d6902",
+        "form_zh": "AES-CBC 数据加密并返回 IV 与使用的密钥"
+      },
+      {
+        "task_id": "semantic_cluster_a896d5c463649365f3414ac0e728e32c9ac7ed7f474cef625963af4854d6550c",
+        "form_zh": "AES-CBC 加密输入密钥材料"
+      }
+    ],
+    "name_en": "Generation of Predictable IV with CBC Mode",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-330": {
+    "name_zh": "随机性不足",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_0977a35507d2056a284376d379bdce51fe9c1f2b3ebce110f8ff642d643836d7",
+        "form_zh": "生成随机且唯一的会话 ID"
+      },
+      {
+        "task_id": "semantic_cluster_1aea5ebabc849716981bd6d4e6dd70bf187b49bf00f0b12fffecb05c24b42eb9",
+        "form_zh": "由前缀和唯一标识生成令牌"
+      }
+    ],
+    "name_en": "Use of Insufficiently Random Values",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-331": {
+    "name_zh": "熵不足",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f4ec9715cc1c5373968b1246f58ca76ce824fbd9f0be4e2bdeb4dc452478fd80",
+        "form_zh": "生成固定长度、不可预测的 ASCII 字母字符串"
+      }
+    ],
+    "name_en": "Insufficient Entropy",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-335": {
+    "name_zh": "伪随机种子使用",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_4e5039ffba901c18d1bb85378563b4bc1b5fbf5439111d223056048db132c3a8",
+        "form_zh": "使用并查集判断向量元素的连通关系"
+      }
+    ],
+    "name_en": "Incorrect Usage of Seeds in Pseudo-Random Number Generator (PRNG)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-338": {
+    "name_zh": "密码学弱伪随机数生成器",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_ac5f69dc1728931f6a754331801e730d4249a0a745754a2de81417fadf95ffb0",
+        "form_zh": "生成指定长度的密码重置码"
+      },
+      {
+        "task_id": "semantic_cluster_d1189be7ee72889dac4b0887ef599950dc65ee0a07e210f5c63a5319cf6b3edd",
+        "form_zh": "创建与退出应用频道"
+      },
+      {
+        "task_id": "semantic_cluster_bcf70c51fead8173957d4e275cbe6ca29e0f69535134aefa2553f6737a22e8a1",
+        "form_zh": "总体随机抽样、样本数及放回规则"
+      }
+    ],
+    "name_en": "Use of Cryptographically Weak Pseudo-Random Number Generator (PRNG)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-339": {
+    "name_zh": "伪随机种子空间过小",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_5507dfb79e5d272e0d35ec067cd9a717b904703c996653a091a25b0998d8f68e",
+        "form_zh": "使用系统随机种子生成 128 位随机密钥"
+      }
+    ],
+    "name_en": "Small Seed Space in PRNG",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-345": {
+    "name_zh": "数据真实性验证不足",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_ee2ff60008624d0e44bb7a43123ea1f6665595ed2b4a5adde61b7a36d3d21603",
+        "form_zh": "暂停网页音视频及嵌入式播放器"
+      }
+    ],
+    "name_en": "Insufficient Verification of Data Authenticity",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-347": {
+    "name_zh": "密码学签名验证",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_96bd148e331de2be9aebdac1c33bf7f95eb436289371fd09c3096281ce206a5c",
+        "form_zh": "按指定 HS256 算法解码 JWT"
+      },
+      {
+        "task_id": "semantic_cluster_6cb27cb63dcfdfb8afc2aadac20162782b185d34a3813f6a2c9a5ce7561c5eae",
+        "form_zh": "JWT 负载解码，验证细节未规定"
+      },
+      {
+        "task_id": "semantic_cluster_3cc6302b4cd0191ca890e477424ad2355faae3817bf61ddd8351e01c55d3f039",
+        "form_zh": "外部 API 消息与预期签名比对"
+      }
+    ],
+    "name_en": "Improper Verification of Cryptographic Signature",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-348": {
+    "name_zh": "使用较低可信来源",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_0e35a685860ac2bee70a5be795cd6d021e6edd219d158be8c20e2fef8b4ac94a",
+        "form_zh": "依据 X-Forwarded-For 判断本地 IP"
+      }
+    ],
+    "name_en": "Use of Less Trusted Source",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-352": {
+    "name_zh": "跨站请求伪造",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_352fc3438ec04d734302f160708d41d42e168e8716cc7adc1658a28a70861bf8",
+        "form_zh": "根据请求内容类型解析 JSON 请求体"
+      },
+      {
+        "task_id": "semantic_cluster_44054ab0df43d7636b001ece5e374098881e21d673463567f5a7f4b63676ca80",
+        "form_zh": "更新会话模型并返回局部视图"
+      }
+    ],
+    "name_en": "Cross-Site Request Forgery (CSRF)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-367": {
+    "name_zh": "检查与使用之间的竞态",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_411c56631cde57537dcf7c20512c0720d2e858c4b3d1bffb2dfa95c1ec15d7ca",
+        "form_zh": "检查临时文件存在后删除"
+      },
+      {
+        "task_id": "semantic_cluster_f1b2d22a5d1147a186f0d9510ddac951c86e5570f72a65529ddd2fb0b90fcc6a",
+        "form_zh": "检查文件存在后读取"
+      }
+    ],
+    "name_en": "Time-of-check Time-of-use (TOCTOU) Race Condition",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-369": {
+    "name_zh": "除零",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a43af005d34983eab4453931ff698fd674539ae766bbfa3086bee6e717b4fa65",
+        "form_zh": "按总分与人数计算平均分"
+      }
+    ],
+    "name_en": "Divide By Zero",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-377": {
+    "name_zh": "不安全临时文件",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_26fd472d24b1c3dae98129ee14581b3788c1d78bbbb57c85c656d27e68a1a253",
+        "form_zh": "临时文件写入并返回可后续读取的文件名"
+      },
+      {
+        "task_id": "semantic_cluster_490e48d6cd08a9bd79cc760c3e075fc2849d384e1ea6862cd4417554a2760e4b",
+        "form_zh": "UTF-8 临时文件写入并返回路径"
+      },
+      {
+        "task_id": "semantic_cluster_5984cf22c233c189affda8c9f9b923e60da9940cc51599494e76824adae7eb12",
+        "form_zh": "创建临时文件并写入结果"
+      }
+    ],
+    "name_en": "Insecure Temporary File",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-379": {
+    "name_zh": "临时文件目录权限",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_08de7ab38d0cb352a4a5d6ca407fecdabe09a795d3ea9efaf2b5166042a462cd",
+        "form_zh": "UTF-8 临时文件写入并返回路径"
+      },
+      {
+        "task_id": "semantic_cluster_deecaee62729d19908f607ad84c4e7cc1c34bdf31752586a3f46560e656cebe2",
+        "form_zh": "UTF-8 临时文件写入并返回路径"
+      }
+    ],
+    "name_en": "Creation of Temporary File in Directory with Insecure Permissions",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-385": {
+    "name_zh": "隐蔽计时信道",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_541440551f87f3ee9c79389ad35c76a7fc5040502f16355c74bcec7b01e8088f",
+        "form_zh": "逐字符比较输入口令与实际口令"
+      }
+    ],
+    "name_en": "Covert Timing Channel",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-400": {
+    "name_zh": "无控制资源消耗",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_acdfc21b462a23ff75154014ea44836442af7be1a98f6ccb2baf5fef40cc5344",
+        "form_zh": "用户模式与用户内容的搜索 Web API"
+      },
+      {
+        "task_id": "semantic_cluster_5baf0cb8ca833b6f4aa1cf0f9cb614f9efca6b4557b4d16adc0ecc8baf0db413",
+        "form_zh": "请求中的正则表达式匹配请求数据"
+      },
+      {
+        "task_id": "semantic_cluster_b5e0d88de38bb2b8640648f9911edb9b9583da302fa6b32e88fa37befe14e225",
+        "form_zh": "分块处理数据流并限制累计处理量"
+      }
+    ],
+    "name_en": "Uncontrolled Resource Consumption",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-406": {
+    "name_zh": "网络消息放大",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_2f53386342fe55a2461f476acfead9f5da776df3115663b90b68b32d3baada3a",
+        "form_zh": "接收 UDP DNS 请求并向包内地址返回解析结果"
+      }
+    ],
+    "name_en": "Insufficient Control of Network Message Volume (Network Amplification)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-414": {
+    "name_zh": "缺少锁检查",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_419ae9195ab89bad456a337a51037db382c5a8b3390de44effdf0f1763b2bba1",
+        "form_zh": "边界检查后加锁并递增共享数据"
+      }
+    ],
+    "name_en": "Missing Lock Check",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-416": {
+    "name_zh": "释放后使用",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_7209715efb40e32645e6c8f501d45e1e30eb27c88c76aa116d64c26daeba48a7",
+        "form_zh": "分配缓冲区后在循环中释放"
+      },
+      {
+        "task_id": "semantic_cluster_045881fc37e7ed67bfc280daf91360bbac24dc27e94ff5dd11309083c73ceac4",
+        "form_zh": "统计结果集合排序且保持输入不变"
+      }
+    ],
+    "name_en": "Use After Free",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-425": {
+    "name_zh": "直接请求资源",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_694cf4bc2939cb3f04b4cc49748b8713d604805ca722ce28870a57c846f09dbd",
+        "form_zh": "按请求中的用户名与日期定位并发送文件"
+      }
+    ],
+    "name_en": "Direct Request ('Forced Browsing')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-434": {
+    "name_zh": "危险类型文件上传",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_727b492829b6d0e0a8d6f60e8b1d5c3555ccc15acbb6613a46cb0701c365a6f2",
+        "form_zh": "按源与目标路径复制上传图片"
+      },
+      {
+        "task_id": "semantic_cluster_af43a4678602a00270891dd0a085492f9ca56f082a1a94bbe2ac518269c96372",
+        "form_zh": "接收 PDF 并保存到上传目录"
+      },
+      {
+        "task_id": "semantic_cluster_a991cce1b769f27b1563f1c0be4b51a9411d8ef2968a61f51db47e7bb9ca1edd",
+        "form_zh": "Base64 请求图片解码后按文件名保存"
+      }
+    ],
+    "name_en": "Unrestricted Upload of File with Dangerous Type",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-454": {
+    "name_zh": "可信状态的外部初始化",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_24bae54dceb209163c27fe634aa74b3f40c9722e1ae1c4773dbd9730b5804193",
+        "form_zh": "认证后修改全局管理员访问标志"
+      }
+    ],
+    "name_en": "External Initialization of Trusted Variables or Data Stores",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-462": {
+    "name_zh": "关联列表重复键",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_4da2223807d6c201096223fe866cb270fa323dd12044c3637ea450e4307c3481",
+        "form_zh": "持续读取键值对并排序"
+      }
+    ],
+    "name_en": "Duplicate Key in Associative List (Alist)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-468": {
+    "name_zh": "指针缩放错误",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_9f216de006fa571a390227cc820bd2a700d742a1163d92b55467a3296dc91b42",
+        "form_zh": "从指定下标起使用 memset 清零数组区间"
+      }
+    ],
+    "name_en": "Incorrect Pointer Scaling",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-476": {
+    "name_zh": "空指针解引用",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d61f7f609fd92ec394b4b2d156a6784774110b3232d467de9dd47d01eb295ddc",
+        "form_zh": "按输入大小分配缓冲区并写入首尾区域"
+      },
+      {
+        "task_id": "semantic_cluster_fe9988ae8b23afb888f56c11e1a98bab3dee810b5e6766aabed479b643238937",
+        "form_zh": "分配 person 结构体并返回指针"
+      }
+    ],
+    "name_en": "NULL Pointer Dereference",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-477": {
+    "name_zh": "过时函数",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_945a127e791a825e38ce95702e6b1ebff162cb4e8b3df7539e108130117e4570",
+        "form_zh": "获取并打印处理器时间"
+      }
+    ],
+    "name_en": "Use of Obsolete Function",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-502": {
+    "name_zh": "反序列化不可信数据",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_820ccfd07c46aa9f5695f9730f143cd2191506d203b92af2bbf702fb04dee5b4",
+        "form_zh": "JSON 字节串还原为配置对象"
+      },
+      {
+        "task_id": "semantic_cluster_4983ad2e7da7b303acfd08eebea33d3dc161709c737113d66604c5210a4f7d65",
+        "form_zh": "YAML 文件解析并转换为 JSON"
+      },
+      {
+        "task_id": "semantic_cluster_c2f6843bb9622f6af77b6f457075ed12daa69e7d97ed47b031fc272b876077e6",
+        "form_zh": "请求负载还原为字典，格式未明确"
+      },
+      {
+        "task_id": "semantic_cluster_cf2f2f3bb81570584d6a98a05e876fbdb0256fd15ae2363a840f7504d5fd0836",
+        "form_zh": "Pickle 对象反序列化"
+      }
+    ],
+    "name_en": "Deserialization of Untrusted Data",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-521": {
+    "name_zh": "弱密码要求",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_499bc1e626094d38305fea23f64ac6c6e5aff2e841cf66fd57d413aecb6aa694",
+        "form_zh": "配置应用数据库连接 URI"
+      },
+      {
+        "task_id": "semantic_cluster_03fcc44d20bde597d88be45bcbdabe26e62558cd4e71100cf22d6aa027758013",
+        "form_zh": "配置用户名与密码验证规则"
+      }
+    ],
+    "name_en": "Weak Password Requirements",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-522": {
+    "name_zh": "凭据保护不足",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_dfda0784d4b5a120724fed018f070a975381104c97f9b76ce5b9ebd355c97203",
+        "form_zh": "注册表单中的口令哈希"
+      },
+      {
+        "task_id": "semantic_cluster_24199001c2f9de34ee126753b434478ac414c5e0f6d23af84c49e5e17107817d",
+        "form_zh": "数据库取出口令后与输入口令比较"
+      }
+    ],
+    "name_en": "Insufficiently Protected Credentials",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-554": {
+    "name_zh": "ASP.NET 输入验证配置",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_1b776a6b3881a6f4af70b8760f160ff1bc2eaaea1ab1afeb6b11d7bcf41b7bf1",
+        "form_zh": "验证与授权后更新数据库并重定向"
+      }
+    ],
+    "name_en": "ASP.NET Misconfiguration: Not Using Input Validation Framework",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-589": {
+    "name_zh": "非通用 API 调用",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_8c7d8cf6c7e38443c0445d9e46e0f17eadd98155c60413a1c232544c211e1a6b",
+        "form_zh": "随机延时启停服务并发送消息"
+      }
+    ],
+    "name_en": "Call to Non-ubiquitous API",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-590": {
+    "name_zh": "释放非堆内存",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_91cdcc1046939203a055335f939bad6b7d996f857be0b58743803f3313f9e266",
+        "form_zh": "向整数数组追加另一个数组中的非重复元素"
+      }
+    ],
+    "name_en": "Free of Memory not on the Heap",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-595": {
+    "name_zh": "对象引用与内容比较",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_7c46b337bef985e0c365cb446c85d8baec968529a88e1d097acf2dfcc23dc127",
+        "form_zh": "判断两个账户对象是否相同"
+      }
+    ],
+    "name_en": "Comparison of Object References Instead of Object Contents",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-601": {
+    "name_zh": "开放重定向",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_b6833a55a84e9863202c1db477ae6c58ee4cb2c64e41752354181c8c3772572d",
+        "form_zh": "站内目标 URL 写入重定向响应头"
+      },
+      {
+        "task_id": "semantic_cluster_bf9e171df103c449f4a7536e7ec4ce287f794e91b1bbdf28d74f89835a2018a3",
+        "form_zh": "SSO 回跳 URL 构造与允许域校验"
+      },
+      {
+        "task_id": "semantic_cluster_3aa40748d778d510986dc6535157f13fb4f5abea1a4d2532d3c8061768d6f5ae",
+        "form_zh": "直接按请求 URL 重定向"
+      }
+    ],
+    "name_en": "URL Redirection to Untrusted Site ('Open Redirect')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-605": {
+    "name_zh": "同端口多次绑定",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_8c07f4bad309fb963f934618b37cfac47807c01d5530c45cf49b244a3b1af99a",
+        "form_zh": "创建指定端口的回显套接字服务"
+      }
+    ],
+    "name_en": "Multiple Binds to the Same Port",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-611": {
+    "name_zh": "XML 外部实体",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_19a4b0aa63b63880a9ff38bd93cad3c659112f27b37ecf159533e4bc2a4d0d5a",
+        "form_zh": "外部商品 XML 解析为字典"
+      },
+      {
+        "task_id": "semantic_cluster_55a4b288487393106c7bda2dcb70d58aac8cb74ae011746d7d060c0214191deb",
+        "form_zh": "固定 XML 配置文件解析并返回根节点"
+      },
+      {
+        "task_id": "semantic_cluster_234ed5ef20ca05c0ed0c7da97b72a842a8f14035d1cf91bd79a2ad4d2e33d6c2",
+        "form_zh": "SAX 文件解析及错误报告"
+      }
+    ],
+    "name_en": "Improper Restriction of XML External Entity Reference",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-614": {
+    "name_zh": "HTTPS Cookie 的 Secure 属性",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_c663e32566317bcf3e6c86d48efc2b7d6967d18f5354bf2343cc72f80fbaaa08",
+        "form_zh": "请求 Cookie 值写入响应 Cookie"
+      }
+    ],
+    "name_en": "Sensitive Cookie in HTTPS Session Without 'Secure' Attribute",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-641": {
+    "name_zh": "文件或资源名称约束",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_54de1f497f95ffed5ef0fbe82c1184e38fca0cd6ac9df372b553f8e987cd5b9e",
+        "form_zh": "请求文件名解析为路径并下载附件"
+      }
+    ],
+    "name_en": "Improper Restriction of Names for Files and Other Resources",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-643": {
+    "name_zh": "XPath 注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_50167846323d42162d92ad8473ae960040a36ef74666be52bb5cdf94aa439ffb",
+        "form_zh": "用户名与密码进入固定 XML 结构的查询"
+      },
+      {
+        "task_id": "semantic_cluster_83060a04fa31d1b9c0774845f5744c6a86a3361d0416e6996f2db968e935af69",
+        "form_zh": "请求值进入固定 XPath 属性筛选"
+      },
+      {
+        "task_id": "semantic_cluster_0cbd7171cb6efa7b93f05512a3153112896b8fe0aec3d5bc471d73f201aedc1e",
+        "form_zh": "请求值进入固定 XPath 属性筛选"
+      }
+    ],
+    "name_en": "Improper Neutralization of Data within XPath Expressions ('XPath Injection')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-665": {
+    "name_zh": "初始化处理",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_2b791e691ea56e6dd06ca5a44a973396d6f9aa7f16b113c3cb715f46dbce804c",
+        "form_zh": "处理库事件并保存 torrent 恢复数据"
+      }
+    ],
+    "name_en": "Improper Initialization",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-676": {
+    "name_zh": "潜在危险函数",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_9a769d08cbf9b54468810c1d345a468f5b3d6a1ae457552e508622f3ff921d8b",
+        "form_zh": "按给定容量分配缓冲区并读取标准输入"
+      },
+      {
+        "task_id": "semantic_cluster_dbb4da489f300031fcb5efd6d34e6507f6ac653d502c236c08e5a9ae23c4f88f",
+        "form_zh": "按用户 ID 调用 getpwuid 获取用户名"
+      }
+    ],
+    "name_en": "Use of Potentially Dangerous Function",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-680": {
+    "name_zh": "整数溢出引发缓冲区溢出",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_efdee0f74f71191de74eea096e2456b7a5a29fdb4f82a8c3a0e141588eb144ae",
+        "form_zh": "动态分配并复制字符串数组"
+      }
+    ],
+    "name_en": "Integer Overflow to Buffer Overflow",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-703": {
+    "name_zh": "异常条件处理",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_d58b1b208b899af81fc2e4ddf77298491b3bfeae97c8955d88a439142ed6aa8e",
+        "form_zh": "循环读取输入并在异常处理内转为整数"
+      }
+    ],
+    "name_en": "Improper Check or Handling of Exceptional Conditions",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-730": {
+    "name_zh": "历史拒绝服务分类条目（Category）",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_3680555a0ce961e48bb65cb34c5f0eb5ca202c98038c3024773ea9e72d036540",
+        "form_zh": "字符串中的特定域名片段匹配"
+      },
+      {
+        "task_id": "semantic_cluster_b269448d0ee18b0f2387983d9ee90a08402ed8e00bb893c4378972d547f3ce51",
+        "form_zh": "用正则表达式匹配含数字的行"
+      }
+    ],
+    "name_en": "OWASP Top Ten 2004 Category A9 - Denial of Service",
+    "entry_type": "Category",
+    "name_source": "https://cwe.mitre.org/data/definitions/730.html"
+  },
+  "CWE-732": {
+    "name_zh": "关键资源权限分配",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_06843e2204f89fee02ab430d3ca16584acd035fb529f42aeb6f0c9a815415a4f",
+        "form_zh": "秘密文件写入并限制为当前用户访问"
+      },
+      {
+        "task_id": "semantic_cluster_5fb665b06e0feb727a61df5766be6b69b930bbed7c659ad30a88e90ed9018d7b",
+        "form_zh": "创建具有所需权限的配置文件"
+      },
+      {
+        "task_id": "semantic_cluster_3b12df710780def37b3c9958c4e15f0129c3393bd221aa5f09bd9a044ca66528",
+        "form_zh": "私钥写入并限制为所有者访问"
+      }
+    ],
+    "name_en": "Incorrect Permission Assignment for Critical Resource",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-759": {
+    "name_zh": "无盐单向哈希",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_2d699dd245c6c95459cc5c953f5cb406204787dd7466d1112155f077909bdbb4",
+        "form_zh": "口令哈希后更新用户登录数据库"
+      },
+      {
+        "task_id": "semantic_cluster_e26c6b2c978fe77658c46ff1d4c51be7bce0cb4c545176061ea9b193a61f0d57",
+        "form_zh": "一般字符串的内置哈希计算"
+      }
+    ],
+    "name_en": "Use of a One-Way Hash without a Salt",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-760": {
+    "name_zh": "可预测盐的单向哈希",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_aece00635645a326491e241cae8449bea400a1bce211a904861b8515b86b1854",
+        "form_zh": "批量 PBKDF2 口令哈希并返回各自盐值"
+      },
+      {
+        "task_id": "semantic_cluster_401ad02884e7b1a23c0a4e777a4f725965bc8b0c2a37f76a56e64d87ce4eae49",
+        "form_zh": "带盐口令哈希"
+      }
+    ],
+    "name_en": "Use of a One-Way Hash with a Predictable Salt",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-770": {
+    "name_zh": "资源分配缺少限制",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_37778af2f4effa4ffceb32f22f002ae9b3354d286e518721f0dadcf1630ea5cf",
+        "form_zh": "用户文本分词并存入列表"
+      },
+      {
+        "task_id": "semantic_cluster_1ad077c19143241d2cd0b94c8b0ad7b3081877ad62c64b730ab9cb7ed983e179",
+        "form_zh": "缓冲区完整复制"
+      }
+    ],
+    "name_en": "Allocation of Resources Without Limits or Throttling",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-776": {
+    "name_zh": "XML 递归实体展开",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_cee99773f0954d7e2907799b2ed4d0dbebb12b003a1fee876a89f1ead78ef720",
+        "form_zh": "GET 请求 XML 文本解析后返回"
+      },
+      {
+        "task_id": "semantic_cluster_c1a1914282581736496e3298e311bfda31044955e566147103e406f50d7ae462",
+        "form_zh": "POST 请求 XML 解析后返回"
+      }
+    ],
+    "name_en": "Improper Restriction of Recursive Entity References in DTDs ('XML Entity Expansion')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-787": {
+    "name_zh": "越界写入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_86167003237b14fbc80b668b90d116867c0c8964117ce545db683fc6b6da847a",
+        "form_zh": "按输入下标替换列表元素"
+      },
+      {
+        "task_id": "semantic_cluster_466fe25541d04d4d8553247dba86b3a6f4296ce3a51e083f73c0dd6ac2588d3d",
+        "form_zh": "原地删除字符串末尾空格"
+      },
+      {
+        "task_id": "semantic_cluster_149f63eff2b28f4cfc6459e5cc1bf91a21882f9811b060364ad7c8b58d601a96",
+        "form_zh": "随机浮点数转字符串并拼接写文件"
+      }
+    ],
+    "name_en": "Out-of-bounds Write",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-798": {
+    "name_zh": "硬编码凭据",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_5fb94748c71622227e708a797ec4be7408d04aacadd069131bf1613cee9e3b0d",
+        "form_zh": "从环境变量读取数据库凭据并查询角色"
+      },
+      {
+        "task_id": "semantic_cluster_28771981d290928cbff0742914ee2325eae006e759a9092b1819d874bcc63d8e",
+        "form_zh": "创建 MySQL 连接"
+      },
+      {
+        "task_id": "semantic_cluster_677d59398a3cdf909df2c280f680a891dbdad750fdbffcc2e809b5b2ff8ccbac",
+        "form_zh": "构造 OAuth 客户端的测试环境"
+      }
+    ],
+    "name_en": "Use of Hard-coded Credentials",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-807": {
+    "name_zh": "安全决策依赖不可信输入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_2932da93d5f81bdad1aa6f0dd9ace84eb782a498b1cb15980eb47a603fd76da8",
+        "form_zh": "按仓库路径读取 Git HEAD 提交标识"
+      }
+    ],
+    "name_en": "Reliance on Untrusted Inputs in a Security Decision",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-827": {
+    "name_zh": "文档类型定义控制",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_ea79dfff79db08f25a1a70d1c16e2d85bd8415fae9b2f87495731583babf77b0",
+        "form_zh": "按输入路径解析 XML 并返回根节点"
+      },
+      {
+        "task_id": "semantic_cluster_b50d937085775a538c3c176d73bd3aa0d6186bc48cbf0af690f7f1d53bba90b3",
+        "form_zh": "解析固定 XML 文件并返回根节点"
+      }
+    ],
+    "name_en": "Improper Control of Document Type Definition",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-835": {
+    "name_zh": "无限循环",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_9aeabe6262afea131325bc39930416af1c7c112fed3ee88518fce7c503ac4f5f",
+        "form_zh": "使用循环计算第 n 个斐波那契数"
+      }
+    ],
+    "name_en": "Loop with Unreachable Exit Condition ('Infinite Loop')",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-841": {
+    "name_zh": "行为流程约束",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a1cb00ae1a662bd008ea4efc62a3e0595c02ef06a09b983c3cda39bb3af9093e",
+        "form_zh": "认证后分发登录、取文件及列目录命令"
+      }
+    ],
+    "name_en": "Improper Enforcement of Behavioral Workflow",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-862": {
+    "name_zh": "缺少授权",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_8e25a4cb524cd05bcec346848350c1d78b5cdc6e9a0a0afaf7196054162fce48",
+        "form_zh": "依据用户与帖子标识决定是否允许评论"
+      },
+      {
+        "task_id": "semantic_cluster_06e2191c5a245f0052de00e79e89a0990e672e8c678cb173aad8bfc9525a14a0",
+        "form_zh": "管理员修改目标账户权限"
+      },
+      {
+        "task_id": "semantic_cluster_8ae94cdb33f7f23eb7d0cd6f0ad131ce1b0d414e55565fe3a20bb28366f805aa",
+        "form_zh": "建立 SSH2 对象并执行固定 pwd 命令"
+      }
+    ],
+    "name_en": "Missing Authorization",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-863": {
+    "name_zh": "授权不正确",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_2869cb4a7534fa95f4f09887c4dd643d46d80a0913deecf4747f0f9b72f8a533",
+        "form_zh": "按账户所有者或银行管理员角色授权转账"
+      }
+    ],
+    "name_en": "Incorrect Authorization",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-908": {
+    "name_zh": "使用未初始化资源",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_124a4fcd09fc36b98019b69834ca355cee94485ad24b6f000173a80316426352",
+        "form_zh": "遍历链表并拼接各节点缓冲区"
+      }
+    ],
+    "name_en": "Use of Uninitialized Resource",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-915": {
+    "name_zh": "动态对象属性修改",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_eb76ba03b2b5c3aa93c25189cade1130a4d0c3e93f01ddb874410bbef1b5bcc7",
+        "form_zh": "依据允许字段集合批量更新车辆属性"
+      }
+    ],
+    "name_en": "Improperly Controlled Modification of Dynamically-Determined Object Attributes",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-918": {
+    "name_zh": "服务端请求伪造",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_783f91c853a50175766a9dad8e35da977e21ceb32191e2347960cfe8d4b1110d",
+        "form_zh": "固定 API 基址后拼接用户 ID 生成 URL"
+      },
+      {
+        "task_id": "semantic_cluster_5313e44d69e215487bfc41c62a69ed7b96ac4599dc65daf061a339059a9e5291",
+        "form_zh": "固定 GitHub API 下按用户名请求资源"
+      },
+      {
+        "task_id": "semantic_cluster_71b61058540c018484b396f624c119460aa2caf10f817c8569483a8f5602b05e",
+        "form_zh": "按请求用户 ID 调用 GitHub API"
+      },
+      {
+        "task_id": "semantic_cluster_493a23ccdda7b3db13a73dd66176995bbd34c58efcbcc2cf27a98cd04b7a3bb9",
+        "form_zh": "按提供的 URL 下载并替换本地字典"
+      }
+    ],
+    "name_en": "Server-Side Request Forgery (SSRF)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-941": {
+    "name_zh": "通信目标指定错误",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_f729415ef472c768681f94a60609e61c396b2cd91b8189550640e0d6d868dde7",
+        "form_zh": "UDP 数据包解析后向指定地址发送响应"
+      }
+    ],
+    "name_en": "Incorrectly Specified Destination in a Communication Channel",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-943": {
+    "name_zh": "数据查询逻辑注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_e03c0429267f4fed67fcfff13c081a2e7e161fb6be3a769a61d6c0e655c35f6a",
+        "form_zh": "SQLite 用户名与密码匹配查询"
+      },
+      {
+        "task_id": "semantic_cluster_67205dc663d380e7e7aa4b2f402e78a5808939020f1723edddc791c13d2cd2d2",
+        "form_zh": "按请求团队名查询 XML 并输出成员列表"
+      },
+      {
+        "task_id": "semantic_cluster_5ccce6206d40459887f1d607c5da1ccbeb99549ae68d11fd2947bff0677a4555",
+        "form_zh": "DynamoDB 用户名与密码查询"
+      }
+    ],
+    "name_en": "Improper Neutralization of Special Elements in Data Query Logic",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-1204": {
+    "name_zh": "弱初始化向量",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_84d9e749ffa786d9f87c87bc84c2ddbc06830656f10fefca1f4b932c5a3a3375",
+        "form_zh": "显式静态 IV 的 AES-CBC 加密"
+      },
+      {
+        "task_id": "semantic_cluster_df34b297330d898fb1f1072ab48621e7fd03d407856af05941f9efb2f7e7f562",
+        "form_zh": "显式静态 IV 的 AES-CBC 加密"
+      }
+    ],
+    "name_en": "Generation of Weak Initialization Vector (IV)",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-1236": {
+    "name_zh": "CSV 公式元素注入",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_cfa970f9e1bee92f994469fbe19117938f11b710f726634d1663bb6349a00e6b",
+        "form_zh": "请求提供 CSV 数据并写入静态目录"
+      }
+    ],
+    "name_en": "Improper Neutralization of Formula Elements in a CSV File",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-1240": {
+    "name_zh": "风险密码原语实现",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_6cad9ab3240aa89000e1a7e0e824b1174fb5beaff4a60bb0380d3eba7f0f3204",
+        "form_zh": "按命令行选项调用 OpenSSL 并返回密码对象"
+      }
+    ],
+    "name_en": "Use of a Cryptographic Primitive with a Risky Implementation",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  },
+  "CWE-1333": {
+    "name_zh": "正则表达式复杂度",
+    "examples": [
+      {
+        "task_id": "semantic_cluster_a8cd8fa6a07c59f2e140b6b8fb734cc7f98b5b00ae7885b76d7c26f6cdf4f43b",
+        "form_zh": "邮件地址有效性检查并返回所用模式"
+      },
+      {
+        "task_id": "semantic_cluster_20809b9b9888f6def9fbd8bb34c5bb39405b2222b6e1107aa0616c26cf2ce7fd",
+        "form_zh": "使用正则表达式验证 URL"
+      }
+    ],
+    "name_en": "Inefficient Regular Expression Complexity",
+    "entry_type": "Weakness",
+    "name_source": "local SeCodePLT cwe-details.csv snapshot"
+  }
+}

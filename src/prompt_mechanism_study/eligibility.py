@@ -114,8 +114,14 @@ def qualify_target_security_profiles(
     registry_path: Path,
     case_paths: tuple[Path, ...],
     output: Path,
+    *,
+    profile_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    """Qualify the v3 profile catalog without mutating the legacy producer."""
+    """Qualify the declared profile scope on arm-blind gold code idioms.
+
+    Omitting the scope preserves full-catalog qualification and frozen replay.
+    Explicit scope never certifies an untested profile or broader code coverage.
+    """
 
     root = repository_root.resolve()
     registry_file = registry_path.resolve()
@@ -141,11 +147,20 @@ def qualify_target_security_profiles(
         not isinstance(case_id, str) or not case_id for case_id in case_ids
     ):
         raise EligibilityError("target security qualification case identities are invalid")
-    active_profiles = {
+    registered_profiles = {
         row["oracle_profile_id"]
         for row in registry.values()
         if row["oracle_profile_id"] in TARGET_LOCAL_PROFILE_IDS
     }
+    active_profiles = registered_profiles
+    if profile_ids is not None:
+        if (not profile_ids or len(set(profile_ids)) != len(profile_ids)
+                or not set(profile_ids) <= registered_profiles):
+            raise EligibilityError("target security qualification profile scope is invalid")
+        active_profiles = set(profile_ids)
+    supplied_case_count = len(cases)
+    if profile_ids is not None:
+        cases = [case for case in cases if case.get("profile_id") in active_profiles]
     case_profiles = {row.get("profile_id") for row in cases}
     if case_profiles != active_profiles:
         raise EligibilityError(
@@ -213,6 +228,14 @@ def qualify_target_security_profiles(
             "gold idioms; it is not a global CWE-detection accuracy claim."
         ),
     }
+    if profile_ids is not None:
+        report["qualification_scope"] = {
+            "profile_ids": sorted(active_profiles),
+            "registered_local_profiles_not_qualified": sorted(registered_profiles - active_profiles),
+            "supplied_gold_cases": supplied_case_count,
+            "out_of_scope_gold_cases": supplied_case_count - len(cases),
+            "coverage": "only_the_evaluated_gold_code_idioms_within_the_declared_profiles",
+        }
     write_bundle(output, {"case-results.json": results, "qualification.json": report})
     return report
 

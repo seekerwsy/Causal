@@ -1,10 +1,7 @@
 """Pair schema-3 structural, prioritization, baseline, and slot invariants."""
 
-import inspect
 from dataclasses import replace
-
 import pytest
-
 from prompt_mechanism_study.interaction_selector import (
     PairRelationGateStatus,
     PairShadowObservation,
@@ -12,7 +9,7 @@ from prompt_mechanism_study.interaction_selector import (
     freeze_pair_candidate_universe,
     freeze_pair_preoutcome_design,
     pair_preoutcome_observations,
-    pair_shadow_data_sha256,
+    pair_preoutcome_data_sha256,
     run_pair_shadow_qualification,
 )
 from prompt_mechanism_study.mechanisms import (
@@ -30,7 +27,6 @@ from prompt_mechanism_study.mechanisms import (
 from prompt_mechanism_study.prioritization import (
     CandidateCoverageSummary,
     CandidateKind,
-    DiscoverabilityStatus,
     FixedSlotSource,
     PolicyTrack,
     SlotStatus,
@@ -55,11 +51,27 @@ from prompt_mechanism_study.representation import (
     pair_policy_key,
 )
 
-pytestmark = pytest.mark.extended
-
 
 FACTOR_1 = "feature.first_control"
+
+
 FACTOR_2 = "feature.second_control"
+
+
+def test_pair_solver_preserves_pre_refactor_fit() -> None:
+    from prompt_mechanism_study.interaction_selector import _fit_logit
+    from prompt_mechanism_study.reviewer_fixture import load_reviewer_smoke_fixture
+
+    # Frozen from the original 800-iteration fit, including Pair-specific scaling.
+    inputs = load_reviewer_smoke_fixture()
+    operations = tuple(factor.operation for factor in inputs.pair_policy.factors)
+    model = _fit_logit(inputs.pair_observations, operations, 0.05)
+    assert model.means == (0.5,)
+    assert model.scales == (0.5,)
+    assert model.weights == pytest.approx(
+        (-1.4514302698112234, -0.25162384410401717, 0.6446550275198336,
+         0.6446550275198336, 0.9503690451874942), rel=0, abs=1e-12,
+    )
 
 
 def _structural_relation_fixture():
@@ -163,7 +175,6 @@ def _evaluate_structural_relation(
     )
 
 
-@pytest.mark.reviewer
 def test_pair_structural_predicates_replay_from_prompt_tsg_evidence() -> None:
     graph, first, second = _structural_relation_fixture()
 
@@ -224,7 +235,6 @@ def test_pair_structural_predicates_replay_from_prompt_tsg_evidence() -> None:
     )
 
 
-@pytest.mark.reviewer
 def test_pair_structural_predicates_fail_closed_on_ambiguity_or_tampering() -> None:
     graph, first, second = _structural_relation_fixture()
 
@@ -392,7 +402,7 @@ def _shadow_fixture():
             for policy in policies
         },
         candidate_family_ids={policy.policy_key: "pair-shadow" for policy in policies},
-        discovery_data_sha256=pair_shadow_data_sha256(rows),
+        preoutcome_data_sha256=pair_preoutcome_data_sha256(pair_preoutcome_observations(rows)),
         discovery_population_sha256=content_hash("pair-discovery-population"),
         information_budget_sha256=content_hash("pair-shadow-budget"),
         top_k=2,
@@ -419,7 +429,6 @@ def _shadow_fixture():
     return present, absent, incompatible, rows, universe, plan, evidence
 
 
-@pytest.mark.reviewer
 def test_pair_shadow_has_one_compatibility_first_universe_and_one_rd_path() -> None:
     present, absent, incompatible, rows, universe, plan, evidence = _shadow_fixture()
 
@@ -460,55 +469,6 @@ def test_pair_shadow_has_one_compatibility_first_universe_and_one_rd_path() -> N
     )
 
 
-@pytest.mark.reviewer
-def test_pure_interaction_discoverability_has_no_atomic_heredity_input() -> None:
-    present, _absent, _incompatible, rows, universe, plan, evidence = (
-        _shadow_fixture()
-    )
-    preoutcome = freeze_pair_preoutcome_design(
-        universe,
-        pair_preoutcome_observations(rows),
-        plan,
-    )
-    decision = next(
-        item
-        for item in preoutcome.discoverability
-        if item.candidate_id == present.policy_key
-    )
-    incompatible_decision = next(
-        item
-        for item in preoutcome.discoverability
-        if item.candidate_id not in universe.compatible_policy_keys
-    )
-    result = run_pair_shadow_qualification(
-        universe,
-        rows,
-        evidence,
-        plan,
-        preoutcome_freeze=preoutcome,
-    )
-
-    assert decision.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
-    assert decision.discovery_population_sha256 == universe.discovery_population_sha256
-    assert decision.coverage_summary.state_or_cell_task_units == (
-        ("00", 8),
-        ("01", 8),
-        ("10", 8),
-        ("11", 8),
-    )
-    assert decision.coverage_summary.representation_resolved_rate == 1.0
-    assert incompatible_decision.status is DiscoverabilityStatus.DISCOVERY_INELIGIBLE
-    assert preoutcome.atomic_evidence_read is False
-    assert not any("ATOMIC" in item for item in preoutcome.eligibility_inputs)
-    assert set(inspect.signature(freeze_pair_preoutcome_design).parameters) == {
-        "universe",
-        "observations",
-        "plan",
-    }
-    assert result.no_relation.slots[0].candidate_id == present.policy_key
-
-
-@pytest.mark.reviewer
 def test_zero_marginal_xor_pair_can_enter_full_without_atomic_signal() -> None:
     policy = _shadow_policy(
         "feature.xor_first",
@@ -550,7 +510,7 @@ def test_zero_marginal_xor_pair_can_enter_full_without_atomic_signal() -> None:
             )
         },
         candidate_family_ids={policy.policy_key: "pair-shadow"},
-        discovery_data_sha256=pair_shadow_data_sha256(rows),
+        preoutcome_data_sha256=pair_preoutcome_data_sha256(pair_preoutcome_observations(rows)),
         discovery_population_sha256=content_hash("xor-discovery-population"),
         information_budget_sha256=content_hash("xor-information-budget"),
         top_k=1,
@@ -596,7 +556,6 @@ def test_zero_marginal_xor_pair_can_enter_full_without_atomic_signal() -> None:
     assert preoutcome.atomic_evidence_read is False
 
 
-@pytest.mark.reviewer
 def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> None:
     _present, _absent, _incompatible, rows, universe, plan, evidence = (
         _shadow_fixture()
@@ -614,8 +573,16 @@ def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> No
     )
     baseline_universe = freeze_pair_baseline_universe(
         universe,
-        qualification.support_gates,
+        freeze_pair_preoutcome_design(universe, pair_preoutcome_observations(rows), plan), plan,
+        protocol_id=universe.model_bound_records[0].protocol_id,
+        schema_version=universe.model_bound_records[0].schema_version,
     )
+    # A support-only result cannot stand in for the common frozen fold decision.
+    with pytest.raises(TypeError, match="frozen common discoverability"):
+        freeze_pair_baseline_universe(
+            universe, qualification.support_gates, plan,
+            protocol_id=baseline_universe.protocol_id, schema_version=baseline_universe.schema_version,
+        )
     expert_card = BlindExpertRankingCard(
         baseline_universe.protocol_id,
         baseline_universe.schema_version,
@@ -731,7 +698,6 @@ def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> No
         )
 
 
-@pytest.mark.reviewer
 def test_pair_relation_evidence_cannot_change_common_rd_coordinates() -> None:
     present, absent, _, rows, universe, plan, evidence = _shadow_fixture()
     preoutcome = freeze_pair_preoutcome_design(

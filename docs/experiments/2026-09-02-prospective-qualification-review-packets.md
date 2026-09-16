@@ -87,12 +87,14 @@ qualification plan be frozen. No `QUAL_ACCEPT` provider call is allowed before
 those remaining conditions close.
 
 The subsequent final-v5 capacity reconciliation is recorded in
-`2026-09-02-role-power-budget-decision-support.md`. Under the current 21-CWE
-scope, 155 source-curated units remain after these two candidate reservations,
-which is fewer than the rounded 170-unit conservative Pair power candidate
-before any disjoint Discovery allocation. The role manifest therefore also
-requires an explicit capacity route; this candidate bundle alone does not make
-the study population-ready.
+the current [source-capacity contract](../research-dataset-spec.md). The power
+figures in this dated development note used the superseded Gaussian approximation.
+They do not qualify the repaired task-level analysis. Under the current 21-CWE
+scope, 155 source-curated units remain after these two candidate reservations.
+This is an upper bound before candidate-specific eligibility and disjoint
+Discovery/Confirmation allocation. Sufficiency and any acquisition requirement
+remain unknown until the repaired power and coverage gates close; this candidate
+bundle alone does not make the study population-ready.
 
 ## Independent subagent review closure
 

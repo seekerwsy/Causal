@@ -40,15 +40,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def _add_study_group(groups: Any) -> None:
     study = groups.add_parser(
         "study",
-        help="run the schema-3 reviewer smoke or independently verify its result",
+        help="run reviewer smoke, authorized bounded development, or independent verification",
         description=(
-            "Run the deterministic zero-network schema-3 reviewer smoke or reload it "
-            "with the independent verifier. Formal provider execution remains disabled."
+            "Run the zero-network reviewer smoke, an explicitly authorized frozen "
+            "development comparison, or independent result verification. "
+            "Formal provider execution remains disabled."
         ),
     )
     study.set_defaults(handler=_run_study)
-    study.add_argument("phase", choices=("smoke", "verify-result"))
+    study.add_argument("phase", choices=("smoke", "verify-result", "development", "verify-development"))
     study.add_argument("output", type=Path)
+    study.add_argument("--development-plan", type=Path)
 
 
 def _add_data_group(groups: Any) -> None:
@@ -115,11 +117,51 @@ def _add_data_group(groups: Any) -> None:
 
 def _add_curation_group(groups: Any) -> None:
     group = groups.add_parser(
-        "curate",
-        help="run blind semantic, contract, and mechanism curation",
-        description="Run blind semantic, contract, and mechanism curation.",
+        "curate", help="prepare, review, repair and finalize outcome-blind source data",
+        description="Use the frozen source bundle for study reproduction; repair is conditional data preparation.",
     )
+    stages = group.add_subparsers(dest="curation_stage", required=True, metavar="STAGE")
+    _add_curation_prepare(stages)
+    _add_curation_review(stages)
+    _add_curation_repair(stages)
+    _add_curation_finalize(stages)
+
+
+
+def _add_curation_prepare(stages: Any) -> None:
+    group = stages.add_parser("prepare", help="prepare natural tasks, contracts and blind reservations")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+
+    pool = _leaf(actions, "candidate-pool", _run_prepare_candidate_pool,
+                 "include usable prepared sources and reuse three-axis candidate evidence")
+    pool.add_argument("source_bundle", type=Path)
+    pool.add_argument("output", type=Path)
+    pool.add_argument("--qualification-manifest", type=Path, required=True,
+                      help="current qualification reservations and additional method exposures")
+
+    source_use = _leaf(actions, "source-use", _run_prepare_source_use,
+                       "prepare every frozen task, replay its source assets and preserve role boundaries")
+    source_use.add_argument("source_bundle", type=Path)
+    source_use.add_argument("reservation_bundle", type=Path)
+    source_use.add_argument("catalog", type=Path)
+    source_use.add_argument("registry", type=Path)
+    source_use.add_argument("output", type=Path)
+    source_use.add_argument("--source-root", action="append", required=True, metavar="DATASET=PATH")
+    source_use.add_argument("--source-archive", action="append", default=[], metavar="DATASET=PATH")
+    source_use.add_argument("--candidate-reviews", type=Path)
+    source_use.add_argument("--candidate-context-reviews", type=Path)
+    source_use.add_argument("--native-asset-reviews", type=Path)
+    source_use.add_argument("--contract-review-round", type=Path, action="append", nargs=6,
+                            metavar=("PROPOSALS", "PACKETS", "DECISIONS", "INITIAL", "ADJUDICATIONS", "REVIEWS"))
+
+    restored = _leaf(actions, "restored-contracts", _run_prepare_restored_contracts,
+                     "propose source-backed contracts for available restored inputs")
+    restored.add_argument("base_bundle", type=Path)
+    restored.add_argument("source_use_bundle", type=Path)
+    restored.add_argument("reservation_bundle", type=Path)
+    restored.add_argument("source_root", type=Path)
+    restored.add_argument("output", type=Path)
+    restored.add_argument("--producer-commit", required=True)
 
     semantics = _leaf(
         actions,
@@ -134,7 +176,7 @@ def _add_curation_group(groups: Any) -> None:
 
     assemble = _leaf(
         actions,
-        "assemble-clusters",
+        "clusters",
         _run_assemble_clusters,
         "assemble exact/lineage clusters and retain pair decisions as diagnostics",
     )
@@ -159,20 +201,9 @@ def _add_curation_group(groups: Any) -> None:
         help="reuse contracts whose representative record and prompt hash still match",
     )
 
-    review_contracts = _leaf(
-        actions,
-        "review-contracts",
-        _run_contract_review,
-        "blindly triage every functional contract before independent adjudication",
-    )
-    review_contracts.add_argument("prepared_root", type=Path)
-    review_contracts.add_argument("contracts_root", type=Path)
-    review_contracts.add_argument("output", type=Path)
-    _add_curation_runtime_options(review_contracts)
-
     content_proposals = _leaf(
         actions,
-        "contract-content-proposals",
+        "content",
         _run_contract_content_proposals,
         "backfill faithful contracts and repair faulty contracts without outcomes",
     )
@@ -186,7 +217,7 @@ def _add_curation_group(groups: Any) -> None:
 
     reserve_future = _leaf(
         actions,
-        "reserve-future-evaluation",
+        "reservation",
         _run_reserve_future_evaluation,
         "seal one prompt-blind candidate per fully unexposed near-duplicate group",
     )
@@ -194,26 +225,26 @@ def _add_curation_group(groups: Any) -> None:
     reserve_future.add_argument("output", type=Path)
     reserve_future.add_argument("--producer-commit", required=True)
 
-    content_review = _leaf(
+
+
+def _add_curation_review(stages: Any) -> None:
+    group = stages.add_parser("review", help="prepare and close independent blind reviews")
+    actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+
+    review_contracts = _leaf(
         actions,
-        "legacy-contract-content-review",
-        _run_contract_content_review,
-        "replay the archived single-provider review; output cannot enter the final data gate",
+        "contracts",
+        _run_contract_review,
+        "blindly triage every functional contract before independent adjudication",
     )
-    content_review.add_argument("base_bundle", type=Path)
-    content_review.add_argument("proposals_root", type=Path)
-    content_review.add_argument("output", type=Path)
-    content_review.add_argument("--repository-root", type=Path, default=Path.cwd())
-    content_review.add_argument("--max-new-batches", type=int)
-    content_review.add_argument("--workers", type=int, default=1)
-    content_review.add_argument(
-        "--reviewer-config",
-        default="contract-cleaning-reviewer-qwen37max.json",
-    )
+    review_contracts.add_argument("prepared_root", type=Path)
+    review_contracts.add_argument("contracts_root", type=Path)
+    review_contracts.add_argument("output", type=Path)
+    _add_curation_runtime_options(review_contracts)
 
     prepare_subagent_review = _leaf(
         actions,
-        "prepare-subagent-contract-review",
+        "prepare",
         _run_prepare_subagent_contract_review,
         "freeze dual-blind subagent review assignments and packets",
     )
@@ -222,15 +253,23 @@ def _add_curation_group(groups: Any) -> None:
     prepare_subagent_review.add_argument("output", type=Path)
     prepare_subagent_review.add_argument("--repository-root", type=Path, default=Path.cwd())
     prepare_subagent_review.add_argument("--producer-commit", required=True)
+    prepare_subagent_review.add_argument("--source-use-bundle", type=Path)
+    prepare_subagent_review.add_argument("--reservation-bundle", type=Path)
     prepare_subagent_review.add_argument(
         "--nonterminal-reviews-root",
         type=Path,
         help="review only task IDs with a nonterminal decision in this prior review bundle",
     )
 
+    verify_review = _leaf(actions, "verify", _run_verify_contract_review_round,
+                          "independently replay dual decisions and blind third adjudication")
+    for name in ("proposals_root", "packets_root", "decisions_root", "initial_root",
+                 "adjudication_decisions_root", "reviews_root"):
+        verify_review.add_argument(name, type=Path)
+
     seal_subagent_review = _leaf(
         actions,
-        "seal-initial-subagent-contract-review",
+        "seal",
         _run_seal_initial_subagent_contract_review,
         "validate dual reviews and freeze blind disagreement packets",
     )
@@ -240,7 +279,7 @@ def _add_curation_group(groups: Any) -> None:
 
     finalize_subagent_review = _leaf(
         actions,
-        "finalize-subagent-contract-review",
+        "finalize",
         _run_finalize_subagent_contract_review,
         "merge agreements and blind third decisions into the review bundle",
     )
@@ -249,9 +288,40 @@ def _add_curation_group(groups: Any) -> None:
     finalize_subagent_review.add_argument("proposals_root", type=Path)
     finalize_subagent_review.add_argument("output", type=Path)
 
+    merge_subagent_reviews = _leaf(
+        actions,
+        "merge",
+        _run_merge_subagent_contract_reviews,
+        "merge repaired-contract review decisions into the full prior review population",
+    )
+    merge_subagent_reviews.add_argument("prior_reviews_root", type=Path)
+    merge_subagent_reviews.add_argument("revised_reviews_root", type=Path)
+    merge_subagent_reviews.add_argument("proposals_root", type=Path)
+    merge_subagent_reviews.add_argument("output", type=Path)
+
+    review_bindings = _leaf(
+        actions,
+        "bindings",
+        _run_binding_review,
+        "blindly bind ambiguous task units to registered mechanism realizations",
+    )
+    review_bindings.add_argument("prepared_root", type=Path)
+    review_bindings.add_argument("clusters_root", type=Path)
+    review_bindings.add_argument("contracts_root", type=Path)
+    review_bindings.add_argument("eligibility_root", type=Path)
+    review_bindings.add_argument("registry", type=Path)
+    review_bindings.add_argument("output", type=Path)
+    _add_curation_runtime_options(review_bindings)
+
+
+
+def _add_curation_repair(stages: Any) -> None:
+    group = stages.add_parser("repair", help="resolve nonterminal contracts and evidence only when required")
+    actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+
     prepare_subagent_repairs = _leaf(
         actions,
-        "prepare-subagent-contract-repairs",
+        "prepare",
         _run_prepare_subagent_contract_repairs,
         "freeze source-only repair packets for nonterminal reviewed contracts",
     )
@@ -261,10 +331,12 @@ def _add_curation_group(groups: Any) -> None:
     prepare_subagent_repairs.add_argument("output", type=Path)
     prepare_subagent_repairs.add_argument("--repository-root", type=Path, default=Path.cwd())
     prepare_subagent_repairs.add_argument("--producer-commit", required=True)
+    prepare_subagent_repairs.add_argument("--source-use-bundle", type=Path)
+    prepare_subagent_repairs.add_argument("--reservation-bundle", type=Path)
 
     finalize_subagent_repairs = _leaf(
         actions,
-        "finalize-subagent-contract-repairs",
+        "finalize",
         _run_finalize_subagent_contract_repairs,
         "freeze repaired proposals after validating every subagent repair packet",
     )
@@ -275,21 +347,12 @@ def _add_curation_group(groups: Any) -> None:
     finalize_subagent_repairs.add_argument("decisions_root", type=Path)
     finalize_subagent_repairs.add_argument("output", type=Path)
     finalize_subagent_repairs.add_argument("--producer-commit", required=True)
-
-    merge_subagent_reviews = _leaf(
-        actions,
-        "merge-subagent-contract-reviews",
-        _run_merge_subagent_contract_reviews,
-        "merge repaired-contract review decisions into the full prior review population",
-    )
-    merge_subagent_reviews.add_argument("prior_reviews_root", type=Path)
-    merge_subagent_reviews.add_argument("revised_reviews_root", type=Path)
-    merge_subagent_reviews.add_argument("proposals_root", type=Path)
-    merge_subagent_reviews.add_argument("output", type=Path)
+    finalize_subagent_repairs.add_argument("--source-use-bundle", type=Path)
+    finalize_subagent_repairs.add_argument("--reservation-bundle", type=Path)
 
     semantic_repairs = _leaf(
         actions,
-        "contract-semantic-repairs",
+        "semantic",
         _run_contract_semantic_repairs,
         "repair faulty or evidence-escalated contracts one task per request",
     )
@@ -303,7 +366,7 @@ def _add_curation_group(groups: Any) -> None:
 
     repair_evidence = _leaf(
         actions,
-        "contract-repair-evidence",
+        "evidence",
         _run_contract_repair_evidence,
         "bind exact source evidence to immutable repaired contracts",
     )
@@ -317,7 +380,7 @@ def _add_curation_group(groups: Any) -> None:
 
     adjudicate_repair_evidence = _leaf(
         actions,
-        "adjudicate-contract-repair-evidence",
+        "adjudicate-evidence",
         _run_adjudicate_contract_repair_evidence,
         "close empty evidence and independently recheck non-empty disputes",
     )
@@ -332,7 +395,7 @@ def _add_curation_group(groups: Any) -> None:
 
     correct_repair_evidence = _leaf(
         actions,
-        "correct-unbound-contract-evidence",
+        "correct-evidence",
         _run_correct_unbound_contract_evidence,
         "correct and rebind only independently rejected non-empty contracts",
     )
@@ -347,7 +410,7 @@ def _add_curation_group(groups: Any) -> None:
 
     review_evidence = _leaf(
         actions,
-        "materialize-contract-review-evidence",
+        "materialize-evidence",
         _run_materialize_contract_review_evidence,
         "supply exact whole-prompt spans for unresolved independent review",
     )
@@ -357,9 +420,58 @@ def _add_curation_group(groups: Any) -> None:
     review_evidence.add_argument("output", type=Path)
     review_evidence.add_argument("--producer-commit", required=True)
 
+    repair = _leaf(
+        actions,
+        "contracts",
+        _run_repair_contracts,
+        "freeze a corrected contract bundle without response-format requirements",
+    )
+    repair.add_argument("contracts_root", type=Path)
+    repair.add_argument("output", type=Path)
+
+    contract_adjudications = _leaf(
+        actions,
+        "contract-adjudications",
+        _run_contract_adjudications,
+        "apply bounded outcome-blind contract and review corrections",
+    )
+    contract_adjudications.add_argument("contracts_root", type=Path)
+    contract_adjudications.add_argument("reviews_root", type=Path)
+    contract_adjudications.add_argument("adjudications", type=Path)
+    contract_adjudications.add_argument("output", type=Path)
+
+    binding_adjudications = _leaf(
+        actions,
+        "binding-adjudications",
+        _run_binding_adjudications,
+        "apply bounded outcome-blind corrections to unresolved mechanism bindings",
+    )
+    binding_adjudications.add_argument("prepared_root", type=Path)
+    binding_adjudications.add_argument("clusters_root", type=Path)
+    binding_adjudications.add_argument("bindings_root", type=Path)
+    binding_adjudications.add_argument("registry", type=Path)
+    binding_adjudications.add_argument("adjudications", type=Path)
+    binding_adjudications.add_argument("output", type=Path)
+
+
+
+def _add_curation_finalize(stages: Any) -> None:
+    group = stages.add_parser("finalize", help="assemble and verify the frozen reviewer data")
+    actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+
+    source_use = _leaf(actions, "source-use", _run_verify_source_use,
+                       "independently verify source uses, input restoration and role boundaries")
+    source_use.add_argument("source_bundle", type=Path)
+    source_use.add_argument("reservation_bundle", type=Path)
+    source_use.add_argument("catalog", type=Path)
+    source_use.add_argument("registry", type=Path)
+    source_use.add_argument("output", type=Path)
+    source_use.add_argument("--source-root", action="append", default=[], metavar="DATASET=PATH")
+    source_use.add_argument("--source-archive", action="append", default=[], metavar="DATASET=PATH")
+
     assemble_proposals = _leaf(
         actions,
-        "assemble-contract-content",
+        "proposals",
         _run_assemble_contract_content,
         "combine closed evidence and semantic repairs into reviewed proposals",
     )
@@ -372,7 +484,7 @@ def _add_curation_group(groups: Any) -> None:
 
     finalize_content = _leaf(
         actions,
-        "finalize-contract-content",
+        "task-units",
         _run_finalize_contract_content,
         "assemble or verify the terminal content-cleaned reviewer data set",
     )
@@ -383,53 +495,6 @@ def _add_curation_group(groups: Any) -> None:
     finalize_content.add_argument("--reviews-root", type=Path)
     finalize_content.add_argument("--reservation-root", type=Path)
     finalize_content.add_argument("--producer-commit")
-
-    review_bindings = _leaf(
-        actions,
-        "review-bindings",
-        _run_binding_review,
-        "blindly bind ambiguous task units to registered mechanism realizations",
-    )
-    review_bindings.add_argument("prepared_root", type=Path)
-    review_bindings.add_argument("clusters_root", type=Path)
-    review_bindings.add_argument("contracts_root", type=Path)
-    review_bindings.add_argument("eligibility_root", type=Path)
-    review_bindings.add_argument("registry", type=Path)
-    review_bindings.add_argument("output", type=Path)
-    _add_curation_runtime_options(review_bindings)
-
-    repair = _leaf(
-        actions,
-        "repair-contracts",
-        _run_repair_contracts,
-        "freeze a corrected contract bundle without response-format requirements",
-    )
-    repair.add_argument("contracts_root", type=Path)
-    repair.add_argument("output", type=Path)
-
-    contract_adjudications = _leaf(
-        actions,
-        "apply-contract-adjudications",
-        _run_contract_adjudications,
-        "apply bounded outcome-blind contract and review corrections",
-    )
-    contract_adjudications.add_argument("contracts_root", type=Path)
-    contract_adjudications.add_argument("reviews_root", type=Path)
-    contract_adjudications.add_argument("adjudications", type=Path)
-    contract_adjudications.add_argument("output", type=Path)
-
-    binding_adjudications = _leaf(
-        actions,
-        "apply-binding-adjudications",
-        _run_binding_adjudications,
-        "apply bounded outcome-blind corrections to unresolved mechanism bindings",
-    )
-    binding_adjudications.add_argument("prepared_root", type=Path)
-    binding_adjudications.add_argument("clusters_root", type=Path)
-    binding_adjudications.add_argument("bindings_root", type=Path)
-    binding_adjudications.add_argument("registry", type=Path)
-    binding_adjudications.add_argument("adjudications", type=Path)
-    binding_adjudications.add_argument("output", type=Path)
 
 
 def _add_representation_group(groups: Any) -> None:
@@ -499,39 +564,67 @@ def _add_representation_group(groups: Any) -> None:
     qualification_review.add_argument("--qual-dev-count", type=int, default=28)
     qualification_review.add_argument("--qual-accept-count", type=int, default=28)
 
-    extract_tsg = _leaf(
-        actions,
-        "extract-tsg",
-        _run_extract_tsg,
-        "extract evidence-bound Prompt TSGs for a frozen task file",
-    )
-    extract_tsg.add_argument("tasks", type=Path)
-    extract_tsg.add_argument("catalog", type=Path)
-    extract_tsg.add_argument("evaluator", type=Path)
-    extract_tsg.add_argument("extractor_prompt", type=Path)
-    extract_tsg.add_argument("output", type=Path)
-    extract_tsg.add_argument("--start", type=int, default=0)
-    extract_tsg.add_argument("--limit", type=int)
-    extract_tsg.add_argument("--task-selection", type=Path)
-    extract_tsg.add_argument("--semantic-reviewer", type=Path)
-    extract_tsg.add_argument("--semantic-reviewer-prompt", type=Path)
-    extract_tsg.add_argument("--path-authority-annotations", type=Path)
-
     extract_contracts = _leaf(
         actions,
         "extract-contracts",
         _run_extract_contracts,
-        "run the active blind dual-annotation task contract extractor",
+        "extract source-only task graphs and then assess fixed source scopes",
     )
     extract_contracts.add_argument("tasks", type=Path)
     extract_contracts.add_argument("catalog", type=Path)
-    extract_contracts.add_argument("proposer_evaluator", type=Path)
-    extract_contracts.add_argument("proposer_prompt", type=Path)
-    extract_contracts.add_argument("reviewer_evaluator", type=Path)
-    extract_contracts.add_argument("reviewer_prompt", type=Path)
+    extract_contracts.add_argument("evaluator", type=Path)
+    extract_contracts.add_argument("annotator_prompt", type=Path)
     extract_contracts.add_argument("selection", type=Path)
     extract_contracts.add_argument("output", type=Path)
     extract_contracts.add_argument("--workers", type=int, default=1)
+    extract_contracts.add_argument("--qualification-reference", type=Path,
+                                   help="bind an independent source reference before any extraction calls")
+    extract_contracts.add_argument("--development-exposed", action="store_true",
+                                   help="use already exposed development tasks; never grants formal admission")
+
+    candidate_request = _leaf(
+        actions, "candidate-request", _run_candidate_request,
+        "prepare an outcome-blind candidate request from source tasks and extracted graphs",
+    )
+    candidate_request.add_argument("tasks", type=Path)
+    candidate_request.add_argument("extraction", type=Path)
+    candidate_request.add_argument("output", type=Path)
+    candidate_request.add_argument("--input-catalog", type=Path)
+
+    candidates = _leaf(
+        actions, "build-candidates", _run_build_candidates,
+        "build source-bound candidate definitions from one retained or development response",
+    )
+    candidates.add_argument("request", type=Path)
+    candidates.add_argument("design", type=Path)
+    candidates.add_argument("output", type=Path)
+    candidate_response = candidates.add_mutually_exclusive_group(required=True)
+    candidate_response.add_argument("--response", type=Path,
+                                    help="replay a retained candidate response without model calls")
+    candidate_response.add_argument("--evaluator", type=Path,
+                                    help="make one explicitly bounded development model call")
+    candidates.add_argument("--review", type=Path)
+
+    candidate_bindings = _leaf(
+        actions, "bind-candidates", _run_bind_candidates,
+        "bind reviewed candidate definitions to exact task scopes for the shared support audit",
+    )
+    candidate_bindings.add_argument("candidates", type=Path)
+    candidate_bindings.add_argument("tasks", type=Path)
+    candidate_bindings.add_argument("output", type=Path)
+    candidate_bindings.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
+    candidate_bindings.add_argument("--qualification-bundle", type=Path)
+    candidate_bindings.add_argument("--pair-review", type=Path)
+
+    visualize = _leaf(actions, "visualize", _run_visualize_tsg,
+                      "export an offline source-evidence, instance-graph and assigned-arm result viewer")
+    visualize.add_argument("tasks", type=Path)
+    visualize.add_argument("extraction", type=Path)
+    visualize.add_argument("output", type=Path)
+    visualize.add_argument("--additional-extraction", type=Path, action="append", default=[])
+    visualize.add_argument("--results", type=Path)
+    visualize.add_argument("--catalog", type=Path)
+    visualize.add_argument("--review", type=Path, help="saved development analysis bundle for graph debugging")
 
     bindings = _leaf(
         actions,
@@ -590,6 +683,10 @@ def _add_qualification_group(groups: Any) -> None:
     target_security.add_argument("registry", type=Path)
     target_security.add_argument("output", type=Path)
     target_security.add_argument("--cases", type=Path, action="append", required=True)
+    target_security.add_argument(
+        "--profile", action="append",
+        help="qualify only this registered local profile; repeat for the declared research scope",
+    )
     target_security.add_argument("--repository-root", type=Path, default=Path.cwd())
 
     prompt_tsg = _leaf(
@@ -611,19 +708,18 @@ def _add_qualification_group(groups: Any) -> None:
         actions,
         "prompt-contract",
         _run_prompt_contract_qualification,
-        "independently replay and score the active task-level Prompt TSG Gate C",
+        "replay open-graph extraction and score independent source semantics",
     )
     prompt_contract.add_argument("tasks", type=Path)
     prompt_contract.add_argument("extraction_bundle", type=Path)
     prompt_contract.add_argument("catalog", type=Path)
-    prompt_contract.add_argument("registry", type=Path)
     prompt_contract.add_argument("gold", type=Path)
-    prompt_contract.add_argument("proposer_evaluator", type=Path)
-    prompt_contract.add_argument("proposer_prompt", type=Path)
-    prompt_contract.add_argument("reviewer_evaluator", type=Path)
-    prompt_contract.add_argument("reviewer_prompt", type=Path)
+    prompt_contract.add_argument("evaluator", type=Path)
+    prompt_contract.add_argument("annotator_prompt", type=Path)
     prompt_contract.add_argument("output", type=Path)
     prompt_contract.add_argument("--repository-root", type=Path, default=Path.cwd())
+    prompt_contract.add_argument("--assertion-review", type=Path,
+                                 help="independent source review of every asserted open-graph statement")
 
     judge = _leaf(
         actions,
@@ -648,6 +744,8 @@ def _add_qualification_group(groups: Any) -> None:
     positivity.add_argument("catalog", type=Path)
     positivity.add_argument("output", type=Path)
     positivity.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
+    positivity.add_argument("--scope-bindings", type=Path,
+                            help="frozen global factor definitions, task scopes and shared support rules for open graphs")
     positivity.add_argument(
         "--graph-artifact",
         default="graphs.json",
@@ -659,8 +757,10 @@ def _add_qualification_group(groups: Any) -> None:
         ),
         help="graph collection inside each verified bundle",
     )
-    positivity.add_argument("--minimum-state-task-units", type=int, default=30)
-    positivity.add_argument("--minimum-shared-lineages", type=int, default=2)
+    positivity.add_argument("--minimum-state-task-units", type=int,
+                            help="archival closed-catalog replay only")
+    positivity.add_argument("--minimum-shared-lineages", type=int,
+                            help="archival closed-catalog replay only")
 
     dataset = _leaf(
         actions,
@@ -694,38 +794,6 @@ def _add_qualification_group(groups: Any) -> None:
         help="optional BaxBench-compatible source snapshot for backend data inventory",
     )
 
-    design = _leaf(
-        actions,
-        "study-design",
-        _run_study_design,
-        "freeze the outcome-blind Python sample, power assumptions, and replication readiness",
-    )
-    design.add_argument("eligibility_root", type=Path)
-    design.add_argument("task_units_root", type=Path)
-    design.add_argument("output", type=Path)
-    design.add_argument("--repository-root", type=Path, default=Path.cwd())
-    design.add_argument("--seed", type=int, default=2026082301)
-    design.add_argument("--clusters-per-family", type=int, default=15)
-    design.add_argument(
-        "--exclude-sample",
-        type=Path,
-        action="append",
-        default=[],
-        help="prior JSON/JSONL sample whose exposed task units cannot be selected",
-    )
-    design.add_argument(
-        "--family",
-        action="append",
-        default=[],
-        help="mechanism family to include; repeat to restrict the study population",
-    )
-    design.add_argument(
-        "--family-quota",
-        action="append",
-        default=[],
-        metavar="FAMILY=COUNT",
-        help="explicit prospective cluster quota; repeat for an unequal design",
-    )
 
 
 def _add_artifact_group(groups: Any) -> None:
@@ -762,6 +830,16 @@ def _run_study(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
         from prompt_mechanism_study.target_workflow import run_target_reviewer_smoke
 
         report = run_target_reviewer_smoke(args.output)
+    elif args.phase == "development":
+        from prompt_mechanism_study.target_workflow import run_target_development
+
+        if args.development_plan is None:
+            raise ValueError("development execution requires a prospectively frozen --development-plan")
+        report = run_target_development(args.development_plan, args.output)
+    elif args.phase == "verify-development":
+        from prompt_mechanism_study.verification.reporting import verify_development_result
+
+        report = verify_development_result(args.output)
     else:
         from prompt_mechanism_study.verification import (
             load_and_verify_target_result_bundle,
@@ -934,21 +1012,15 @@ def _run_reserve_future_evaluation(
     )
 
 
-def _run_contract_content_review(
-    args: argparse.Namespace, _: argparse.ArgumentParser
-) -> int:
-    from prompt_mechanism_study.contract_cleaning import run_contract_content_review
 
-    report = run_contract_content_review(
-        args.repository_root,
-        args.base_bundle,
-        args.proposals_root,
-        args.output,
-        max_new_batches=args.max_new_batches,
-        workers=args.workers,
-        reviewer_config_name=args.reviewer_config,
-    )
-    return _emit_status(report)
+
+def _run_prepare_restored_contracts(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.contract_cleaning import prepare_restored_contract_proposals
+
+    return _emit_status(prepare_restored_contract_proposals(
+        args.base_bundle, args.source_use_bundle, args.reservation_bundle,
+        args.source_root, args.output, producer_commit=args.producer_commit,
+    ))
 
 
 def _run_prepare_subagent_contract_review(
@@ -964,8 +1036,19 @@ def _run_prepare_subagent_contract_review(
             args.output,
             producer_commit=args.producer_commit,
             nonterminal_reviews_root=args.nonterminal_reviews_root,
+            source_use_bundle=args.source_use_bundle,
+            reservation_bundle=args.reservation_bundle,
         )
     )
+
+
+def _run_verify_contract_review_round(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.qualification import verify_contract_review_round
+
+    return _emit_json(verify_contract_review_round(
+        args.proposals_root, args.packets_root, args.decisions_root, args.initial_root,
+        args.adjudication_decisions_root, args.reviews_root,
+    ))
 
 
 def _run_seal_initial_subagent_contract_review(
@@ -1010,6 +1093,8 @@ def _run_prepare_subagent_contract_repairs(
             args.reviews_root,
             args.output,
             producer_commit=args.producer_commit,
+            source_use_bundle=args.source_use_bundle,
+            reservation_bundle=args.reservation_bundle,
         )
     )
 
@@ -1028,6 +1113,8 @@ def _run_finalize_subagent_contract_repairs(
             args.decisions_root,
             args.output,
             producer_commit=args.producer_commit,
+            source_use_bundle=args.source_use_bundle,
+            reservation_bundle=args.reservation_bundle,
         )
     )
 
@@ -1250,7 +1337,7 @@ def _run_binding_adjudications(args: argparse.Namespace, _: argparse.ArgumentPar
 
 
 def _run_freeze_population(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.prioritization import prepare_discovery_population
+    from prompt_mechanism_study.discovery_population import prepare_discovery_population
 
     scopes: dict[str, str] = {}
     for item in args.scope:
@@ -1294,6 +1381,53 @@ def _run_select_tsg_holdout(args: argparse.Namespace, _: argparse.ArgumentParser
     return _emit_status(report)
 
 
+def _source_use_locations(args: argparse.Namespace, parser: argparse.ArgumentParser):
+    roots = {}
+    for item in args.source_root:
+        name, separator, path = item.partition("=")
+        if not separator or not name or not path or name in roots:
+            parser.error("source roots must be unique DATASET=PATH values")
+        roots[name] = Path(path)
+    archives = {}
+    for item in args.source_archive:
+        name, separator, path = item.partition("=")
+        if not separator or not name or not path or name in archives:
+            parser.error("source archives must be unique DATASET=PATH values")
+        archives[name] = Path(path)
+    return roots, archives
+
+
+def _run_prepare_candidate_pool(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.qualification_data import screen_prepared_source_pool
+    return _emit_status(screen_prepared_source_pool(
+        args.source_bundle, args.output, qualification_manifest=args.qualification_manifest,
+    ))
+
+
+def _run_prepare_source_use(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.qualification_data import prepare_source_use
+
+    roots, archives = _source_use_locations(args, parser)
+    return _emit_json(prepare_source_use(
+        args.source_bundle, args.reservation_bundle, args.catalog, args.registry,
+        args.output, source_roots=roots, source_archives=archives,
+        candidate_reviews=args.candidate_reviews,
+        contract_review_rounds=args.contract_review_round,
+        native_asset_reviews=args.native_asset_reviews,
+        candidate_context_reviews=args.candidate_context_reviews,
+    ))
+
+
+def _run_verify_source_use(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.qualification import verify_source_use
+
+    roots, archives = _source_use_locations(args, parser)
+    return _emit_json(verify_source_use(
+        args.output, args.source_bundle, args.reservation_bundle, args.catalog, args.registry,
+        source_roots=roots or None, source_archives=archives or None,
+    ))
+
+
 def _run_prepare_qualification_review(
     args: argparse.Namespace, _: argparse.ArgumentParser
 ) -> int:
@@ -1314,23 +1448,11 @@ def _run_prepare_qualification_review(
     return _emit_status(report)
 
 
-def _run_extract_tsg(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.prompt_tsg_extract import extract_task_file
-
-    report = extract_task_file(
-        args.tasks,
-        args.catalog,
-        args.evaluator,
-        args.extractor_prompt,
-        args.output,
-        start=args.start,
-        limit=args.limit,
-        task_selection_path=args.task_selection,
-        reviewer_evaluator_path=args.semantic_reviewer,
-        reviewer_prompt_path=args.semantic_reviewer_prompt,
-        path_authority_annotations_path=args.path_authority_annotations,
-    )
-    return _emit_gate_status(report, "PROMPT_TSG_EXTRACTION_COMPLETE")
+def _run_visualize_tsg(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.tsg_visualization import build_tsg_viewer
+    return _emit_status(build_tsg_viewer(args.tasks, (args.extraction, *args.additional_extraction),
+                                       args.output, results_root=args.results, catalog_path=args.catalog,
+                                       review_root=args.review))
 
 
 def _run_extract_contracts(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
@@ -1339,15 +1461,41 @@ def _run_extract_contracts(args: argparse.Namespace, _: argparse.ArgumentParser)
     report = extract_contract_task_file(
         args.tasks,
         args.catalog,
-        args.proposer_evaluator,
-        args.proposer_prompt,
-        args.reviewer_evaluator,
-        args.reviewer_prompt,
+        args.evaluator,
+        args.annotator_prompt,
         args.selection,
         args.output,
         max_workers=args.workers,
+        qualification_reference_path=args.qualification_reference,
+        review_status="development_exposed" if args.development_exposed else "prospective_frozen",
     )
     return _emit_status(report)
+
+
+def _run_candidate_request(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.candidate_construction import prepare_candidate_request
+
+    return _emit_json(prepare_candidate_request(
+        args.tasks, args.extraction, args.output, input_catalog_path=args.input_catalog,
+    ))
+
+
+def _run_build_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.candidate_construction import build_candidate_catalog
+
+    return _emit_json(build_candidate_catalog(
+        args.request, args.design, args.output,
+        response_path=args.response, evaluator_path=args.evaluator, review_path=args.review,
+    ))
+
+
+def _run_bind_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.candidate_construction import bind_candidate_scopes
+
+    return _emit_json(bind_candidate_scopes(
+        args.candidates, args.tasks, args.prompt_tsg_bundle, args.output,
+        qualification_bundle=args.qualification_bundle, pair_review_path=args.pair_review,
+    ))
 
 
 def _run_freeze_bindings(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
@@ -1365,7 +1513,7 @@ def _run_freeze_bindings(args: argparse.Namespace, _: argparse.ArgumentParser) -
 
 
 def _run_freeze_partition(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.prioritization import freeze_task_unit_partition
+    from prompt_mechanism_study.discovery_population import freeze_task_unit_partition
 
     report = freeze_task_unit_partition(
         args.tasks,
@@ -1398,6 +1546,7 @@ def _run_target_security_oracle(args: argparse.Namespace, _: argparse.ArgumentPa
         args.registry,
         tuple(args.cases),
         args.output,
+        profile_ids=None if args.profile is None else tuple(args.profile),
     )
     return _emit_gate_status(report, "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE")
 
@@ -1434,13 +1583,12 @@ def _run_prompt_contract_qualification(
         args.tasks,
         args.extraction_bundle,
         args.catalog,
-        args.registry,
+        None,
         args.gold,
-        args.proposer_evaluator,
-        args.proposer_prompt,
-        args.reviewer_evaluator,
-        args.reviewer_prompt,
+        args.evaluator,
+        args.annotator_prompt,
         args.output,
+        assertion_review_path=args.assertion_review,
     )
     return _emit_gate_status(report, "QUALIFIED_FOR_FORMAL_EXTRACTION")
 
@@ -1488,7 +1636,7 @@ def _run_functional_judge(args: argparse.Namespace, _: argparse.ArgumentParser) 
 
 
 def _run_positivity(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.prioritization import audit_discovery_positivity
+    from prompt_mechanism_study.discovery_population import audit_discovery_positivity
 
     report = audit_discovery_positivity(
         args.tasks,
@@ -1498,7 +1646,10 @@ def _run_positivity(args: argparse.Namespace, _: argparse.ArgumentParser) -> int
         minimum_state_task_units=args.minimum_state_task_units,
         minimum_shared_lineages=args.minimum_shared_lineages,
         graph_artifact=args.graph_artifact,
+        scope_bindings_path=args.scope_bindings,
     )
+    if report["status"] == "SCOPED_SOURCE_SUPPORT_CHECK_COMPLETE":
+        return _emit_json(report)
     return _emit_gate_status(report, "POSITIVITY_GATE_PASSED")
 
 
@@ -1523,28 +1674,6 @@ def _run_dataset_eligibility(args: argparse.Namespace, _: argparse.ArgumentParse
     return _emit_status(report)
 
 
-def _run_study_design(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.study_design import freeze_study_design
-
-    family_quotas: dict[str, int] = {}
-    for item in args.family_quota:
-        try:
-            family, count = item.rsplit("=", 1)
-            family_quotas[family] = int(count)
-        except (ValueError, TypeError):
-            parser.error("family quotas must use FAMILY=COUNT")
-    report = freeze_study_design(
-        args.repository_root,
-        args.eligibility_root,
-        args.task_units_root,
-        args.output,
-        seed=args.seed,
-        clusters_per_family=args.clusters_per_family,
-        excluded_sample_paths=args.exclude_sample or None,
-        included_families=args.family or None,
-        family_quotas=family_quotas or None,
-    )
-    return _emit_status(report)
 
 
 def _run_artifact_verify(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:

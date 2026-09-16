@@ -1,9 +1,25 @@
 # Contract content cleaning protocol
 
 This is the single active content-cleaning successor to the reviewer task-unit
-bundle frozen at commit `1d1654e`. It changes no task identity, source prompt,
+bundle frozen at commit `1d1654e`. Ordinary contract repair changes no task identity, source prompt,
 near-duplicate group, method, Prompt TSG, experimental role, arm, generated
 program, Oracle result, or outcome.
+
+For study reproduction, start with the released frozen data bundle and run
+`prompt-mechanism-study curate finalize task-units verify BUNDLE`. Rebuilding the
+data foundation is separate, outcome-blind preparation with four CLI groups:
+
+| Group | Responsibility |
+|---|---|
+| `curate prepare` | source semantics, clusters, contract proposals and blind reservations |
+| `curate review` | independent contract and binding review, disagreement closure and merging |
+| `curate repair` | conditional correction of nonterminal contracts or evidence |
+| `curate finalize` | proposal assembly and final task-unit bundle construction/verification |
+
+The arguments and underlying functions are unchanged. The old flat command
+names have no live aliases; historical execution logs retain their original
+commands. Archived single-provider content review is unavailable from this CLI
+and cannot supply terminal quality decisions.
 
 ## Frozen boundary
 
@@ -82,92 +98,92 @@ decision:
 | uncertain | nonterminal; independent adjudication required |
 
 The migration audit is `contract-repair-ledger.jsonl`; it is not an additional
-quality authority. Final authority remains the reviewer bundle's
+quality authority. For the immutable v5 baseline, the authoritative files are
 `functional-contracts.jsonl`, `task-quality.jsonl`, and `task-roles.jsonl`.
 
 ## Execution order
 
 ```powershell
-prompt-mechanism-study curate reserve-future-evaluation BASE RESERVATION `
+prompt-mechanism-study curate prepare reservation BASE RESERVATION `
   --producer-commit COMMIT
 
-prompt-mechanism-study curate contract-content-proposals BASE PROPOSALS `
+prompt-mechanism-study curate prepare content BASE PROPOSALS `
   --producer-commit COMMIT --workers 6 --stop-after-evidence
 
-prompt-mechanism-study curate contract-semantic-repairs `
+prompt-mechanism-study curate repair semantic `
   BASE PROPOSALS/evidence REPAIRS --producer-commit COMMIT --workers 6
 
-prompt-mechanism-study curate contract-repair-evidence `
+prompt-mechanism-study curate repair evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE --producer-commit COMMIT --workers 6
 
 # Run only when the first evidence pass contains unresolved non-empty targets.
 # Empty-target contracts close deterministically; only disputes reach the reviewer.
-prompt-mechanism-study curate adjudicate-contract-repair-evidence `
+prompt-mechanism-study curate repair adjudicate-evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE/final REPAIR-EVIDENCE-ADJUDICATED `
   --producer-commit COMMIT --workers 6
 
 # Run only when independent evidence adjudication still rejects non-empty values.
-prompt-mechanism-study curate correct-unbound-contract-evidence `
+prompt-mechanism-study curate repair correct-evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE-ADJUDICATED/final CONTRACT-CORRECTIONS `
   --producer-commit COMMIT --workers 6
 
 # Use only after bounded correction still leaves span-localization disputes.
-prompt-mechanism-study curate materialize-contract-review-evidence `
+prompt-mechanism-study curate repair materialize-evidence `
   BASE CONTRACT-CORRECTIONS/final CONTRACT-CORRECTIONS/final REVIEW-EVIDENCE `
   --producer-commit COMMIT
 
-prompt-mechanism-study curate assemble-contract-content `
+prompt-mechanism-study curate finalize proposals `
   BASE PROPOSALS/evidence REVIEW-EVIDENCE/final REVIEW-EVIDENCE/final `
   PROPOSALS-FINAL `
   --producer-commit COMMIT
 
-prompt-mechanism-study curate prepare-subagent-contract-review `
+prompt-mechanism-study curate review prepare `
   BASE PROPOSALS-FINAL REVIEW-PACKETS --producer-commit COMMIT
 
 # Three reviewer slots independently populate DECISIONS from their frozen packets.
-prompt-mechanism-study curate seal-initial-subagent-contract-review `
+prompt-mechanism-study curate review seal `
   REVIEW-PACKETS DECISIONS INITIAL-REVIEW
 
 # The third reviewer slot blindly reviews every packet emitted for disagreement.
-prompt-mechanism-study curate finalize-subagent-contract-review `
+prompt-mechanism-study curate review finalize `
   INITIAL-REVIEW ADJUDICATION-DECISIONS PROPOSALS-FINAL REVIEW-ROUND-1
 
 # Nonterminal contracts and contracts rejected by a deterministic protocol
 # invariant are repaired. Repair decisions are source-only; exact whole-prompt
 # evidence remains pending until independent re-review.
-prompt-mechanism-study curate prepare-subagent-contract-repairs `
+prompt-mechanism-study curate repair prepare `
   BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS `
   --producer-commit COMMIT
 
 # Three producer slots populate REPAIR-DECISIONS from the frozen repair packets.
-prompt-mechanism-study curate finalize-subagent-contract-repairs `
+prompt-mechanism-study curate repair finalize `
   BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS REPAIR-DECISIONS `
   PROPOSALS-REPAIRED --producer-commit COMMIT
 
 # Re-review only contracts whose content identity changed in the repair round.
-prompt-mechanism-study curate prepare-subagent-contract-review `
+prompt-mechanism-study curate review prepare `
   BASE PROPOSALS-REPAIRED REPAIR-REVIEW-PACKETS --producer-commit COMMIT `
   --nonterminal-reviews-root REVIEW-ROUND-1
 
-prompt-mechanism-study curate seal-initial-subagent-contract-review `
+prompt-mechanism-study curate review seal `
   REPAIR-REVIEW-PACKETS REPAIR-REVIEW-DECISIONS REPAIR-INITIAL-REVIEW
 
-prompt-mechanism-study curate finalize-subagent-contract-review `
+prompt-mechanism-study curate review finalize `
   REPAIR-INITIAL-REVIEW REPAIR-ADJUDICATION-DECISIONS `
   PROPOSALS-REPAIRED REPAIR-REVIEW
 
-prompt-mechanism-study curate merge-subagent-contract-reviews `
+prompt-mechanism-study curate review merge `
   REVIEW-ROUND-1 REPAIR-REVIEW PROPOSALS-REPAIRED REVIEW-FINAL
 
 # REVIEW-FINAL/report.json must report nonterminal_count=0. If not, repeat only
 # the remaining nonterminal subset; never relabel or silently omit it.
 
-prompt-mechanism-study curate finalize-contract-content build FINAL `
+prompt-mechanism-study curate finalize task-units build FINAL `
   --base-bundle BASE --proposals-root PROPOSALS-REPAIRED `
   --reviews-root REVIEW-FINAL --reservation-root RESERVATION `
   --producer-commit COMMIT
 
-prompt-mechanism-study curate finalize-contract-content verify FINAL
+prompt-mechanism-study curate finalize task-units verify FINAL
 ```
 
 Semantic repair and repaired-contract evidence binding each use one task unit
@@ -218,6 +234,92 @@ are byte-identical, and the verifier/default reviewer suite pass. Prompt TSG,
 prospective formal-role assignments, arms, generated code, and outcomes must
 remain absent.
 
+## Completed ordered source review
+
+The active source-only preparation is
+`data/dataset-curation/research-source-use-v2`. Its four disjoint cohorts are
+complete in the authorized order. These reviews establish current source
+contracts, native assertion mappings and exact candidate sufficiency; they grant
+no measurement qualification or scientific claim. The immutable v5 baseline,
+66 exposed tasks and 56 qualification reservations retain their original
+identities and restrictions.
+
+| Cohort | Tasks | Current contract quality: included / insufficient / defect | Candidate records: Atomic / Pair | Source-sufficient candidates |
+|---|---:|---|---:|---:|
+| Restored upstream inputs | 124 | 88 / 31 / 5 | 214 / 36 | 5 Atomic |
+| Unchanged insufficient sources with native assets | 124 | 61 / 61 / 2 | 178 / 4 | 3 Atomic |
+| Other unchanged insufficient sources | 1,055 | Original insufficient quality retained | 850 / 72 | 1 Atomic |
+| Unchanged source defects | 156 | 56 / 60 / 40 | 100 / 28 | 2 Atomic |
+
+The first, second and fourth cohorts have 404 faithful, evidence-supported
+current contracts with no nonterminal decisions or required repairs remaining.
+Their eight complete independent review rounds preserve raw dual judgments,
+blind third judgments for disagreements, and fresh re-review of required repairs.
+The third cohort received candidate-level source review and retained its original
+quality. Across all 2,165 prepared tasks, current quality is 871 included,
+1,246 insufficient and 48 source defects; 789 included tasks are unexposed and
+unreserved. Original quality records remain immutable.
+
+All 1,459 cohort tasks have 32,098 context-group decisions and 1,482 exact
+candidate records. Eleven Atomic records on 11 distinct tasks pass source
+sufficiency only. The proposal book defines 22 groups containing 48 Atomic and
+eight Pair proposals, with concrete meanings currently limited to Python.
+The 964 non-Python cohort tasks retain explicit missing-definition states.
+`NO_SOURCE_CONTEXT` does not establish feature absence or universal ineligibility.
+A Pair is reviewed independently of whether either Atomic factor is selected
+or supported. The other 584 unchanged quality-included available tasks have not
+received this follow-up. Complete functionality and joint success remain unknown
+where the source does not support complete functional judgment.
+
+Native content review covers 284 tasks and all 662 of their asset bindings.
+The restored cohort's 199 bindings provide setup, dependencies or no assertions,
+with zero assertion mappings. The second cohort's 359 bindings provide 368
+functional and 90 security assertion mappings. The fourth cohort's 104 bindings
+provide 82 functional and 33 security assertion mappings.
+Each mapping binds exact source and asset evidence. These are correspondences,
+not passing tests or complete coverage. No asset was executed and no measurement
+qualification or formal admission was granted.
+
+Use `curate prepare restored-contracts BASE SOURCE-USE QUALIFICATION-RESERVATIONS
+SECODEPLT-SOURCE OUTPUT --producer-commit COMMIT` for restored-input proposals.
+It checks frozen source bytes, replays the upstream default prompt and binds
+exact UTF-8 evidence. A changed input cannot inherit its parent's contract review.
+Whole-prompt evidence remains pending independent semantic review. Continue with
+the existing `curate review prepare`, `seal`, `finalize` and conditional
+`curate repair prepare` / `finalize` commands. Pass `--source-use-bundle SOURCE-USE`
+and `--reservation-bundle QUALIFICATION-RESERVATIONS` for review/repair preparation
+and repair finalization. Packets withhold source metadata, prior quality and
+producer assessments. The frozen review prompt is
+`contract-content-review-v1.txt`, SHA-256
+`91e105f57840d3f81f7108de65c0b18392cccc48ef3980e6413abec02bd87b29`.
+
+`curate review verify PROPOSALS PACKETS DECISIONS INITIAL ADJUDICATIONS REVIEWS`
+independently reconstructs assignments, raw judgments, disagreements, third
+judgments and published dispositions. After required repairs close, pass each
+complete round to `curate prepare source-use` using repeated
+`--contract-review-round PROPOSALS PACKETS DECISIONS INITIAL ADJUDICATIONS REVIEWS`.
+The package keeps original review records and binds current measurement contracts
+to the freshly reviewed input. Changed but unreviewed proposals block preparation.
+
+Native review follows `source-native-asset-review-v1.txt`; candidate review follows
+`source-candidate-context-screen-v1.txt`, `source-candidate-sufficiency-review-v1.txt`
+and `source-candidate-policies-v1.json`. Pass `--native-asset-reviews FILE`,
+`--candidate-context-reviews FILE` and `--candidate-reviews FILE` on the same
+source-use command. Independent verification reconstructs source spans, current
+contract and policy identities, every native binding, all context groups and
+exactly the required five-axis candidate judgments. Native assets must not supply
+new model-visible task requirements. Implementation freedom alone is not source
+insufficiency, and no preparation step adds independent task units.
+
+Full replay of all seven raw source roots, two pinned archives and eight
+contract-review rounds returns `SOURCE_USE_VERIFIED`. The released manifest
+SHA-256 is
+`2015d760cbeaacff16e701ad25a507e5973960a31b0ecd7de8d4b769bf7a741c`.
+Its report records exact reproduction inputs and the environment. The embedded
+review lineage supports independent verification without the original development
+review directories. Earlier immutable preparations and per-slot raw decisions
+remain provenance, outside the current reviewer entry point.
+
 ## Completed 2026-09-01 execution
 
 The all-task subagent execution is frozen locally under
@@ -247,11 +349,11 @@ byte. Their common bundle/manifest SHA-256 is
 The independent verifier returns
 `VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`.
 
-The canonical publication copy is tracked byte-for-byte at
+The canonical baseline copy is tracked byte-for-byte at
 `data/dataset-curation/reviewer-task-unit-dataset-v5`. The ignored A/B build
-directories remain execution provenance only; the tracked copy is the single
-reviewer-facing data coordinate and replays the same verifier status and
-manifest hash.
+directories remain execution provenance only; the tracked copy replays the same
+baseline verifier status and manifest hash. Current prepared prompts, contracts
+and source-use decisions come from the v2 preparation described above.
 
 The terminal corpus contains no response-envelope requirement, no included
 contract with unresolved semantics, and no stale contract-quality diagnostic

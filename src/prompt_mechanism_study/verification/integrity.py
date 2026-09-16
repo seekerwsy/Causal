@@ -31,9 +31,9 @@ from prompt_mechanism_study.study_design import (
     DiscoveryDesignFreeze,
     FormalBudgetPreflight,
     FormalReportAuthorization,
-    RQ1BudgetQualification,
     StudyFreezeIndex,
 )
+from prompt_mechanism_study.study_planning import RQ1BudgetQualification
 
 TARGET_RESULT_PACKAGE_FILES = frozenset(
     {
@@ -53,6 +53,7 @@ TARGET_RESULT_PACKAGE_FILES = frozenset(
         "shared_evidence_record.json",
         "target_selector_yield_result.json",
         "formal_report_authorization.json",
+        "execution_artifacts.json",
         "rq_tables.json",
         "verification.json",
     }
@@ -77,6 +78,7 @@ def target_result_package_index(
     report: Mapping[str, object],
     verification: Mapping[str, object],
     authorization: FormalReportAuthorization | None = None,
+    execution_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the content-addressed index used by the writer and read-only verifier."""
 
@@ -146,6 +148,10 @@ def target_result_package_index(
                 authorization.formal_report_authorization_id,
                 authorization,
             )
+        ),
+        "execution_artifacts": (
+            None if execution_artifacts is None else
+            _target_ref(content_id("execution_artifacts_", execution_artifacts), execution_artifacts)
         ),
         "rq_tables": _target_ref(table_id, report),
         "verification": _target_ref(
@@ -217,13 +223,18 @@ def _decode_target_value(value: Any, annotation: Any, path: str) -> Any:
             raise ValueError(f"{path} must be a JSON object")
         expected_fields = fields(annotation)
         expected_names = {item.name for item in expected_fields}
-        if set(value) != expected_names:
+        # Only explicitly declared, absent extensions preserve older frozen bytes.
+        optional_names = {item.name for item in expected_fields
+                          if item.metadata.get("omit_if_none") and item.default is None}
+        if not expected_names - optional_names <= set(value) <= expected_names:
             raise ValueError(f"{path} fields are not exact for {annotation.__name__}")
+        if any(name in value and value[name] is None for name in optional_names):
+            raise ValueError(f"{path} absent extensions must be omitted, not null")
         hints = get_type_hints(annotation)
         return annotation(
             **{
                 item.name: _decode_target_value(
-                    value[item.name],
+                    value.get(item.name),
                     hints[item.name],
                     f"{path}.{item.name}",
                 )

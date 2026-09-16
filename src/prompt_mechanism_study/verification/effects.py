@@ -6,6 +6,7 @@ import math
 import random
 import statistics
 from collections import Counter, defaultdict
+from functools import lru_cache
 
 from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
@@ -147,12 +148,6 @@ def _v3_work(track, assignments, outcomes, failed, plan):
         }
     local = {assignment_id: outcomes[assignment_id] for assignment_id in assignment_ids}
     arms = ATOMIC_CONFIRMATORY_ARMS if track is PolicyTrack.ATOMIC else PAIR_CONFIRMATORY_ARMS
-    for arm in arms:
-        values = [local[item.assignment_id] for item in assignments if item.arm is arm]
-        valid = sum(item.code_valid for item in values)
-        unknown = sum(item.code_valid - item.oracle_evaluable for item in values)
-        if valid and unknown / valid > plan.maximum_unknown_fraction_among_valid:
-            reasons.add("maximum_unknown_fraction_exceeded")
     lower = _v3_unit_values(assignments, local, lambda item: float(item.secure_yield))
     upper = _v3_unit_values(assignments, local, lambda item: float(item.latent_secure_upper))
     strata = defaultdict(set)
@@ -160,6 +155,7 @@ def _v3_work(track, assignments, outcomes, failed, plan):
         strata[item.task_unit_id].add(item.stratum_id)
     if any(len(values) != 1 for values in strata.values()):
         raise ValueError("independent verifier found cross-stratum task units")
+    allocations, unit_weights = _v3_mixture(assignments)
     contributions = tuple(
         (
             task_unit_id,
@@ -167,27 +163,44 @@ def _v3_work(track, assignments, outcomes, failed, plan):
             _v3_contrast(track, values, values),
             _v3_contrast(track, lower[task_unit_id], upper[task_unit_id]),
             _v3_upper_contrast(track, lower[task_unit_id], upper[task_unit_id]),
+            *allocations[task_unit_id],
         )
         for task_unit_id, values in sorted(lower.items())
     )
-    counts = Counter(item[1] for item in contributions)
+    counts = Counter((item[5], item[1]) for item in contributions)
     if any(count < plan.minimum_task_units_per_stratum for count in counts.values()):
         reasons.add("insufficient_task_units_per_stratum")
+    r_counts = Counter(item[5] for item in contributions)
+    minimum = (plan.atomic_minimum_task_units_per_realization if track is PolicyTrack.ATOMIC
+               else plan.pair_minimum_task_units_per_realization)
+    if any(count < minimum for count in r_counts.values()):
+        reasons.add("insufficient_task_units_per_realization")
+    q = {item[5]: item[6] for item in contributions}
+    if not math.isclose(sum(q.values()), 1.0, abs_tol=1e-12):
+        return {"track": track, "point": None, "standard_error": None, "latent_lower": None,
+                "latent_upper": None, "contributions": contributions, "weights": (),
+                "assignments": len(assignments), "reasons": ("incomplete_realization_support",),
+                "arm_summaries": ()}
     point, error, weights = _v3_point_error(contributions)
     if error == 0:
         reasons.add("zero_standard_error")
+    summaries = _v3_arm_summaries(assignments, local, arms)
+    if any(arm[3] and (arm[3] - arm[4]) / arm[3] > plan.maximum_unknown_fraction_among_valid
+           for arm in summaries):
+        reasons.add("maximum_unknown_fraction_exceeded")
     return {
         "track": track,
         "point": point,
         "standard_error": error,
-        "latent_lower": sum(item[3] for item in contributions) / len(contributions),
-        "latent_upper": sum(item[4] for item in contributions) / len(contributions),
+        "latent_lower": sum(unit_weights[item[0]] * item[3] for item in contributions),
+        "latent_upper": sum(unit_weights[item[0]] * item[4] for item in contributions),
         "contributions": contributions,
         "weights": weights,
         "assignments": len(assignments),
         "reasons": tuple(sorted(reasons)),
-        "arm_summaries": _v3_arm_summaries(assignments, local, arms),
+        "arm_summaries": summaries,
     }
+
 
 
 def _v3_family(track, work, plan):
@@ -208,7 +221,8 @@ def _v3_family(track, work, plan):
             work,
             "primary_family_invalid_provenance",
         )
-    if reasons & {"insufficient_task_units_per_stratum", "maximum_unknown_fraction_exceeded"}:
+    if reasons & {"insufficient_task_units_per_stratum", "insufficient_task_units_per_realization",
+                   "incomplete_realization_support", "maximum_unknown_fraction_exceeded"}:
         return _v3_failed_family(
             TargetFamilyStatus.INSUFFICIENT_SUPPORT,
             work,
@@ -277,53 +291,64 @@ def _v3_failed_family(status, work, family_reason):
     }
 
 
-def _v3_unit_values(assignments, outcomes, getter):
-    grouped = defaultdict(list)
-    task_weights = defaultdict(set)
-    realization_weights = defaultdict(set)
-    arms_by_unit = defaultdict(set)
+def _v3_mixture(assignments):
+    allocation = {}
+    q = {}
     for item in assignments:
-        grouped[(item.task_unit_id, item.task_instance_id, item.realization_id, item.arm)].append(
-            getter(outcomes[item.assignment_id])
-        )
-        task_weights[(item.task_unit_id, item.task_instance_id)].add(
-            float(item.task_instance_weight)
-        )
-        realization_weights[(item.task_unit_id, item.realization_id)].add(
-            float(item.realization_weight)
-        )
+        pair = (item.realization_id, float(item.realization_weight))
+        if item.task_unit_id in allocation and allocation[item.task_unit_id] != pair:
+            raise ValueError("independent verifier found multiple task realizations")
+        allocation[item.task_unit_id] = pair
+        if pair[0] in q and q[pair[0]] != pair[1]:
+            raise ValueError("independent verifier found realization weight drift")
+        if not 0 < pair[1] <= 1:
+            raise ValueError("independent verifier found invalid realization weight")
+        q[pair[0]] = pair[1]
+    counts = Counter(r for r, _ in allocation.values())
+    return allocation, {unit: weight / counts[r] for unit, (r, weight) in allocation.items()}
+
+
+@lru_cache(maxsize=128)
+def _v3_descendant_index(assignments):
+    """Build an independent, outcome-free index of fixed assignment cells."""
+    _v3_mixture(assignments)
+    grouped, task_weights, arms_by_unit = defaultdict(list), defaultdict(set), defaultdict(set)
+    instances_by_unit = defaultdict(set)
+    for item in assignments:
+        grouped[(item.task_unit_id, item.task_instance_id, item.arm)].append(item.assignment_id)
+        task_weights[(item.task_unit_id, item.task_instance_id)].add(float(item.task_instance_weight))
         arms_by_unit[item.task_unit_id].add(item.arm)
-    if any(len(values) != 1 for values in task_weights.values()) or any(
-        len(values) != 1 for values in realization_weights.values()
-    ):
+        instances_by_unit[item.task_unit_id].add(item.task_instance_id)
+    if any(len(values) != 1 for values in task_weights.values()):
         raise ValueError("independent verifier found descendant weight drift")
-    result = {}
+    index = []
     for unit_id in sorted(arms_by_unit):
-        instances = sorted(value for unit, value in task_weights if unit == unit_id)
-        realizations = sorted(value for unit, value in realization_weights if unit == unit_id)
-        task_total = sum(next(iter(task_weights[(unit_id, value)])) for value in instances)
-        realization_total = sum(
-            next(iter(realization_weights[(unit_id, value)])) for value in realizations
-        )
-        result[unit_id] = {}
-        for arm in arms_by_unit[unit_id]:
-            total = 0.0
+        instances = sorted(instances_by_unit[unit_id])
+        weights = {value: next(iter(task_weights[(unit_id, value)])) for value in instances}
+        total = sum(weights.values())
+        arm_index = []
+        for arm in sorted(arms_by_unit[unit_id], key=lambda item: item.value):
+            instance_index = []
             for instance in instances:
-                for realization in realizations:
-                    values = grouped.get((unit_id, instance, realization, arm))
-                    if not values:
-                        raise ValueError(
-                            "independent verifier found incomplete assigned-arm support"
-                        )
-                    total += (
-                        next(iter(task_weights[(unit_id, instance)]))
-                        / task_total
-                        * next(iter(realization_weights[(unit_id, realization)]))
-                        / realization_total
-                        * sum(values)
-                        / len(values)
-                    )
-            result[unit_id][arm] = total
+                keys = grouped.get((unit_id, instance, arm))
+                if not keys:
+                    raise ValueError("independent verifier found incomplete assigned-arm support")
+                instance_index.append((weights[instance], tuple(keys)))
+            arm_index.append((arm, tuple(instance_index)))
+        index.append((unit_id, total, tuple(arm_index)))
+    return tuple(index)
+
+
+def _v3_unit_values(assignments, outcomes, getter):
+    result = {}
+    for unit_id, total, arm_index in _v3_descendant_index(tuple(assignments)):
+        result[unit_id] = {}
+        for arm, instance_index in arm_index:
+            sums = []
+            for weight, keys in instance_index:
+                values = [getter(outcomes[key]) for key in keys]
+                sums.append(weight * sum(values) / len(values))
+            result[unit_id][arm] = sum(sums) / total
     return result
 
 
@@ -350,24 +375,20 @@ def _v3_upper_contrast(track, lower, upper):
 
 
 def _v3_point_error(contributions):
-    by_stratum = defaultdict(list)
-    for _, stratum, point, _, _ in contributions:
-        by_stratum[stratum].append(point)
-    total = len(contributions)
-    weights = tuple(
-        (stratum, len(values) / total)
-        for stratum, values in sorted(by_stratum.items())
-    )
-    means = {stratum: sum(values) / len(values) for stratum, values in by_stratum.items()}
-    point = sum(weight * means[stratum] for stratum, weight in weights)
-    variance = 0.0
-    for stratum, weight in weights:
-        values = by_stratum[stratum]
-        if len(values) < 2:
-            return point, 0.0, weights
-        variance += weight**2 * sum((item - means[stratum]) ** 2 for item in values) / (
-            len(values) * (len(values) - 1)
-        )
+    cells = defaultdict(list)
+    by_r = Counter(row[5] for row in contributions)
+    policy_weights = {row[5]: row[6] for row in contributions}
+    for _, stratum, point, _, _, r, _ in contributions:
+        cells[(r, stratum)].append(point)
+    weights = tuple((r, stratum, policy_weights[r] * len(values) / by_r[r])
+                    for (r, stratum), values in sorted(cells.items()))
+    means = {cell: sum(values) / len(values) for cell, values in cells.items()}
+    point = sum(weight * means[(r, stratum)] for r, stratum, weight in weights)
+    if any(len(values) < 2 for values in cells.values()):
+        return point, 0.0, weights
+    variance = sum(weight ** 2 * sum((v - means[(r, stratum)]) ** 2 for v in cells[(r, stratum)])
+                   / (len(cells[(r, stratum)]) * (len(cells[(r, stratum)]) - 1))
+                   for r, stratum, weight in weights)
     return point, math.sqrt(max(variance, 0.0)), weights
 
 
@@ -380,6 +401,7 @@ def _v3_arm_summaries(assignments, outcomes, arms):
         lambda item: float(item.joint == 1),
     )
     values = tuple(_v3_unit_values(assignments, outcomes, getter) for getter in metric_getters)
+    _, weights = _v3_mixture(assignments)
     summaries = []
     for arm in arms:
         assigned = [item for item in assignments if item.arm is arm]
@@ -388,7 +410,7 @@ def _v3_arm_summaries(assignments, outcomes, arms):
             (
                 arm,
                 len(assigned),
-                *(statistics.mean(unit[arm] for unit in metric.values()) for metric in values),
+                *(sum(weights[uid] * unit[arm] for uid, unit in metric.items()) for metric in values),
                 sum(item.code_valid - item.oracle_evaluable for item in arm_outcomes),
                 sum(item.code_valid == 0 for item in arm_outcomes),
             )
@@ -401,58 +423,39 @@ def _v3_bootstrap(track, work, plan):
     for value in work.values():
         for task_unit_id, stratum, *_ in value["contributions"]:
             global_units[stratum].add(task_unit_id)
-    rng = random.Random(
-        int(
-            content_hash(
-                {
-                    "domain": "target_max_t_task_unit_bootstrap_v1",
-                    "seed": plan.bootstrap_seed,
-                    "track": track,
-                    "plan_id": plan.target_itt_plan_id,
-                }
-            )[-16:],
-            16,
-        )
-    )
+    seed = int(content_hash({
+        "domain": "target_max_t_task_unit_bootstrap_v1",
+        "seed": plan.bootstrap_seed,
+        "track": track,
+        "plan_id": plan.target_itt_plan_id,
+    })[-16:], 16)
+    populations = tuple((stratum, tuple(sorted(values))) for stratum, values in sorted(global_units.items()))
+    indexed_work = [(value, {item[0]: (item[5], item[2]) for item in value['contributions']})
+                    for value in work.values()]
     maxima = []
     invalid = 0
-    for _ in range(plan.bootstrap_draws):
-        sampled = {}
-        for stratum, values in sorted(global_units.items()):
-            population = tuple(sorted(values))
-            sampled[stratum] = tuple(
-                population[rng.randrange(len(population))] for _ in population
-            )
+    for sampled in _v3_resampling_draws(populations, seed, plan.bootstrap_draws):
         draw_statistics = []
-        for value in work.values():
-            contribution_by_unit = {item[0]: item[2] for item in value["contributions"]}
-            means = {}
-            variances = {}
+        for value, contribution_by_unit in indexed_work:
+            means, variances, realization_counts = {}, {}, Counter()
             draw_valid = True
-            for stratum, weight in value["weights"]:
-                points = [
-                    contribution_by_unit[task_unit_id]
-                    for task_unit_id in sampled[stratum]
-                    if task_unit_id in contribution_by_unit
-                ]
-                if len(points) < 2:
+            for r, stratum, weight in value["weights"]:
+                points = [contribution_by_unit[unit][1] for unit in sampled[stratum]
+                          if unit in contribution_by_unit and contribution_by_unit[unit][0] == r]
+                if len(points) < plan.minimum_task_units_per_stratum:
                     draw_valid = False
                     break
+                realization_counts[r] += len(points)
                 mean = sum(points) / len(points)
-                means[stratum] = mean
-                variances[stratum] = sum((item - mean) ** 2 for item in points) / (
-                    len(points) * (len(points) - 1)
-                )
-            if not draw_valid:
+                means[(r, stratum)] = mean
+                variances[(r, stratum)] = sum((point - mean) ** 2 for point in points) / (len(points) * (len(points) - 1))
+            minimum = (plan.atomic_minimum_task_units_per_realization if track is PolicyTrack.ATOMIC
+                       else plan.pair_minimum_task_units_per_realization)
+            if not draw_valid or any(n < minimum for n in realization_counts.values()):
                 draw_statistics = []
                 break
-            point = sum(dict(value["weights"])[stratum] * mean for stratum, mean in means.items())
-            error = math.sqrt(
-                sum(
-                    dict(value["weights"])[stratum] ** 2 * variance
-                    for stratum, variance in variances.items()
-                )
-            )
+            point = sum(weight * means[(r, stratum)] for r, stratum, weight in value["weights"])
+            error = math.sqrt(sum(weight ** 2 * variances[(r, stratum)] for r, stratum, weight in value["weights"]))
             if error <= 0:
                 draw_statistics = []
                 break
@@ -462,6 +465,18 @@ def _v3_bootstrap(track, work, plan):
         else:
             invalid += 1
     return maxima, invalid
+
+
+@lru_cache(maxsize=16)
+def _v3_resampling_draws(populations, seed, draws):
+    rng = random.Random(seed)
+    result = []
+    for _ in range(draws):
+        sample = {}
+        for stratum, population in populations:
+            sample[stratum] = tuple(population[rng.randrange(len(population))] for _ in population)
+        result.append(sample)
+    return tuple(result)
 
 
 def _v3_classify(lower, upper, margin):
@@ -480,9 +495,12 @@ def _v3_check_contributions(reported, expected):
     for actual, values in zip(reported, expected, strict=True):
         if (actual.task_unit_id, actual.stratum_id) != values[:2]:
             raise ValueError("target task-unit contribution identity drift")
+        if actual.realization_id != values[5]:
+            raise ValueError("target task-unit realization drift")
+        _v3_same(actual.realization_weight, values[6], "realization policy weight")
         for actual_value, expected_value in zip(
             (actual.point, actual.latent_lower, actual.latent_upper),
-            values[2:],
+            values[2:5],
             strict=True,
         ):
             _v3_same(actual_value, expected_value, "task-unit contribution")

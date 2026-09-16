@@ -1,7 +1,8 @@
 # Task-unit data bundle
 
-This document and the executable verifier in `task_unit_data.py` are the
-authoritative data-structure contract. `research-dataset-spec.md` defines the
+This document describes the shared source-data structure. The immutable schema-5
+quality baseline is verified by `contract_cleaning.verify_contract_content_data`;
+`task_unit_data.py` describes the retained schema-4 compiler boundary. `research-dataset-spec.md` defines the
 planned research populations but does not duplicate this field schema.
 
 The compiler is the single active path from the completed seven-source
@@ -10,33 +11,41 @@ model calls, semantic re-clustering, Prompt TSG extraction, hypothesis
 eligibility, formal role assignment, generation, measurement, or outcome
 analysis.
 
-## Build and verify
+## Current bundle and verification
 
-```powershell
-prompt-mechanism-study data task-unit-bundle build `
-  .codex-runtime/reviewer-task-unit-data-20260831-13-review-closed `
-  --prepared-root .codex-runtime/external-gate-c-overlap-audit/seven-source-prepared-v2 `
-  --clusters-root .codex-runtime/semantic-problem-pilot-final `
-  --candidate-root .codex-runtime/dataset-final-quality-20260831-40-independent-quality `
-  --contracts-root .codex-runtime/contract-recovery-adjudication-20260831-10 `
-  --contract-reviews-root .codex-runtime/contract-quality-triage-37acead-20260831-03-r6-closed/final `
-  --legacy-roles-root data/method/legacy-v5-role-bindings-v2 `
-  --development-exclusions data/dataset-curation/contract-review-development-exclusions-v1.json
+The immutable source/quality baseline is `data/dataset-curation/reviewer-task-unit-dataset-v5`.
+Its manifest SHA-256 is
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+It retains 2,165 task units, including 720 quality-included units and 381
+quality-included Python units. Technical readiness and exposure remain separate
+from source admission. Its ten files include the nine tables listed below plus
+`contract-repair-ledger.jsonl`, which preserves source-only review decisions.
 
-prompt-mechanism-study data task-unit-bundle verify `
-  .codex-runtime/reviewer-task-unit-data-20260831-13-review-closed
+```text
+prompt-mechanism-study curate finalize task-units verify data/dataset-curation/reviewer-task-unit-dataset-v5
 ```
 
-The reference v4 build has manifest digest
-`b61634973f0279522c06cd299389776828b74c2c298947a48e881fc94963e690`.
-It contains 2,283 source records, 2,165 task units, and 2,165 directly joined
-contracts. Quality remains 1,222 included, 930 pending contract repair, six
-pending independent review, and seven source-defect exclusions. Technical
-readiness is 166 when exposure is correctly excluded from that calculation;
-141 of those tasks have no recorded method-development exposure. All 2,165
-legacy contracts still require source-span enrichment, so this build closes the
-reviewer schema and referential-integrity gap but does not claim full quality
-closure.
+The old schema-4 build commands and provisional 1,222/563/166 counts are
+development history recoverable from Git. Reproducing the current verification
+does not require those development directories or repeat provider calls.
+
+The single downstream preparation package is
+`data/dataset-curation/research-source-use-v2`, produced by
+`qualification_data.prepare_source_use` and independently reconstructed by
+`verification.qualification.verify_source_use`. It retains every v5 task and
+original quality/role identity. `prepared-tasks.json` supplies actual prompts and
+functional contracts bound to those prompts; `task-uses.json` records current
+source quality, protected uses and pending candidate requirements. Restored inputs
+keep the same parent task with a new input hash and independently re-reviewed
+contracts. The v5 contracts remain the immutable baseline; protected inputs are
+retained. `source-contract-reviews.json` carries the complete eight-round review
+lineage for 404 current contracts. Native, context and candidate review files
+preserve their separate source-only judgments and exact evidence.
+`source-material.json` holds original source asset bytes. Observed assertions
+remain distinct from measurement qualification, and all source assets remain inert.
+This preparation changes neither independent N nor formal role assignments.
+See [the dataset contract](research-dataset-spec.md) for the rule, executed counts,
+limitations and exact verification command.
 
 ## Authority boundaries
 

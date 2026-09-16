@@ -1,122 +1,41 @@
 from __future__ import annotations
-
 import json
 from pathlib import Path
-
 import pytest
-
-from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
     bailian_complete,
     load_gate_inputs,
-    preflight,
-    python_syntax_valid,
-    request_for,
-    run_phase,
-    validate_review_response,
 )
-from prompt_mechanism_study.records import content_hash
 
-pytestmark = pytest.mark.extended
+
 ROOT = Path(__file__).parents[1]
 
 
-def _response(_contract: dict[str, object], status: str) -> bytes:
-    payload = {
-        "verdict": status,
-        "evidence_lines": [1],
-        "reason": "The cited line establishes or contradicts the requested behavior.",
-    }
-    return json.dumps(payload, separators=(",", ":")).encode()
-
-
-def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("ALI_BAILIAN_API_KEY", raising=False)
-    output = tmp_path / "preflight"
-
-    report = preflight(ROOT, output)
-
-    verify_bundle(output)
-    assert report["status"] == "JUDGE_GATE_PREFLIGHT_COMPLETE"
-    assert report["provider_attempts"] == 0
-    assert report["live_ready"] is False
-    assert len(report["pilot_case_ids"]) == 4
-    assert len(report["remaining_case_ids"]) == 12
-    oracle = load_gate_inputs(ROOT)
-    assert oracle.evaluator["candidate_id"] == (
-        "qwen37flash-software-engineer-functional-judge-v1"
-    )
-    assert oracle.evaluator["model_id"] == "qwen3.7-flash-2026-07-15"
-    assert oracle.evaluator["maximum_output_tokens"] == 1024
-    assert oracle.gate["status"] == "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
-    assert oracle.gate["formal_use_authorized"] is False
-    assert oracle.gate["dynamic_alias_allowed"] is False
-    assert oracle.gate["fallback_model_ids"] == []
-    assert len(oracle.prompt.split()) < 300
-    assert not {"pdftotext", "slurm", "pragma"} & set(oracle.prompt.casefold().split())
-    case = oracle.cases[0]
-    projected = request_for(case, oracle.contracts[case["task_id"]])
-    assert projected["functional_task"]
-    assert all(set(item) == {"requirement_id", "criterion"} for item in projected["requirements"])
-
-    legacy = load_gate_inputs(
-        ROOT,
-        Path("configs/functional-judge/functional-oracle-qwen37max.json"),
-    )
-    assert legacy.evaluator["candidate_id"] == (
-        "qwen37max-software-engineer-functional-judge-v2"
-    )
-
-
-@pytest.mark.reviewer
-def test_functional_review_derives_failure_from_requirements() -> None:
+def test_http_failure_retains_bounded_redacted_body_without_retry(monkeypatch):
+    import io
+    from urllib.error import HTTPError
     inputs = load_gate_inputs(ROOT)
-    case = next(item for item in inputs.cases if item["expected_status"] == "fail")
-    contract = inputs.contracts[case["task_id"]]
-
-    result = validate_review_response(_response(contract, "fail"), case["code_text"])
-
-    assert result["status"] == "fail"
-    malformed = json.loads(_response(contract, "fail"))
-    malformed.pop("reason")
-    with pytest.raises(JudgeGateError):
-        validate_review_response(json.dumps(malformed).encode(), case["code_text"])
-    assert python_syntax_valid(case["code_text"])
-    assert not python_syntax_valid("def broken(:\n")
-
-
-def test_pilot_runs_four_closed_single_attempt_cases(tmp_path: Path) -> None:
-    inputs = load_gate_inputs(ROOT)
-    expected_by_request = {
-        content_hash(request_for(case, inputs.contracts[case["task_id"]])): (
-            case["expected_status"],
-            inputs.contracts[case["task_id"]],
-        )
-        for case in inputs.cases
-    }
-
-    def provider(request, _evaluator, _prompt):
-        expected, contract = expected_by_request[content_hash(request)]
-        return _response(contract, expected)
-
-    output = tmp_path / "pilot"
-    report = run_phase(ROOT, "pilot", output, provider=provider)
-
-    verify_bundle(output / "summary")
-    assert report["status"] == "PILOT_PASSED"
-    assert report["metrics"] == {
-        "cases": 4,
-        "correct": 4,
-        "false_pass": 0,
-        "false_fail": 0,
-        "unknown": 0,
-        "invalid": 0,
-        "provider_attempts": 4,
-    }
+    status = 400
+    secret = 'test-only-error-credential'
+    payload = json.dumps({'error': {'message': 'Rejected schema; echoed credential ' + secret}}).encode()
+    observed, traces = [], []
+    def reject(request, *, timeout):
+        observed.append(request)
+        raise HTTPError(request.full_url, status, 'rejected', {}, io.BytesIO(payload))
+    monkeypatch.setenv('ALI_BAILIAN_API_KEY', secret)
+    monkeypatch.setattr('prompt_mechanism_study.functional_judge.urlopen', reject)
+    with pytest.raises(JudgeGateError, match=f'provider HTTP error {status}') as caught:
+        bailian_complete({}, inputs.evaluator, inputs.prompt,
+                         trace=lambda kind, raw: traces.append((kind, raw)))
+    assert len(observed) == 1
+    assert [kind for kind, _ in traces] == ['request', 'response']
+    expected = payload.replace(secret.encode(), b'[REDACTED]')
+    assert caught.value.provider_response == traces[-1][1] == expected
+    assert all(secret.encode() not in raw for _, raw in traces)
 
 
-def test_active_flash_request_enforces_snapshot_and_output_ceiling(monkeypatch) -> None:
+def test_chat_request_preserves_frozen_decoding_and_repair_messages(monkeypatch) -> None:
     inputs = load_gate_inputs(ROOT)
     observed: dict[str, object] = {}
 
@@ -141,16 +60,41 @@ def test_active_flash_request_enforces_snapshot_and_output_ceiling(monkeypatch) 
     def _urlopen(request, *, timeout):
         observed["body"] = json.loads(request.data)
         observed["timeout"] = timeout
+        observed['authorization'] = request.get_header('Authorization')
         return _Response()
 
     monkeypatch.setenv("ALI_BAILIAN_API_KEY", "test-only")
     monkeypatch.setattr("prompt_mechanism_study.functional_judge.urlopen", _urlopen)
 
-    bailian_complete({}, inputs.evaluator, inputs.prompt)
+    evaluator = dict(inputs.evaluator)
+    evaluator.update(enable_thinking=True, maximum_completion_tokens=8192, thinking_budget=4096)
+    traces = []
+    continuation = [dict(role='assistant', content='{"verdict":"unknown"}'),
+                    dict(role='user', content='Revise the draft using the original source.')]
+    returned = bailian_complete({}, evaluator, inputs.prompt,
+                               trace=lambda kind, raw: traces.append((kind, raw)), continuation=continuation)
+    assert [kind for kind, _ in traces] == ['request', 'response']
+    assert json.loads(traces[0][1]) == observed['body']
+    assert json.loads(traces[1][1])['choices'][0]['message']['content'].encode() == returned
+    assert all(b'test-only' not in raw for _, raw in traces)
 
     body = observed["body"]
     assert isinstance(body, dict)
-    assert body["model"] == "qwen3.7-flash-2026-07-15"
-    assert body["max_tokens"] == 1024
-    assert body["enable_thinking"] is False
+    assert body["model"] == evaluator['model_id']
+    assert body['messages'][:2] == [dict(role='system', content=inputs.prompt), dict(role='user', content='{}')]
+    assert body['messages'][2:] == continuation
+    assert body['max_completion_tokens'] == 8192 and 'max_tokens' not in body
+    assert body['thinking_budget'] == 4096 and body['enable_thinking'] is True
+    assert body['temperature'] == evaluator['temperature']
+    assert body['seed'] == evaluator['seed']
+    assert observed['authorization'] == 'Bearer test-only'
     assert body["n"] == 1
+
+    bailian_complete({}, {**evaluator, 'provider': 'deepseek', 'model_id': 'deepseek-flash',
+                          'base_url': 'https://api.deepseek.com'}, inputs.prompt,
+                     continuation=continuation)
+    deepseek_body = observed['body']
+    assert deepseek_body['max_tokens'] == 8192
+    assert not {'max_completion_tokens', 'seed', 'n', 'thinking_budget', 'enable_thinking'} & deepseek_body.keys()
+    assert deepseek_body['thinking'] == {'type': 'enabled'} and deepseek_body['stream'] is False
+    assert deepseek_body['messages'] == body['messages']

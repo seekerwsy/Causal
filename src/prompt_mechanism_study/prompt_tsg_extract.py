@@ -1,4 +1,7 @@
-"""Bounded LLM facts, blind ambiguity adjudication, and deterministic Prompt TSGs."""
+"""Archival direct-graph extraction for frozen pre-contract artifacts only.
+
+Not an active execution path. Use prompt_contract_extract for new annotations.
+"""
 
 from __future__ import annotations
 

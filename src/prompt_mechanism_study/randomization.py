@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prioritization import (
@@ -53,6 +54,8 @@ class TargetRandomizationPlan:
     provider_seed_root: int | None
     atomic_total_block_slots: int
     pair_total_block_slots: int
+    realization_weights: tuple[tuple[str, str, float], ...]
+    allocation_tasks: tuple[tuple[str, str, str], ...]
     algorithm_id: str = "sha256_ranked_complete_block_v1"
 
     def __post_init__(self) -> None:
@@ -72,10 +75,65 @@ class TargetRandomizationPlan:
                 raise ValueError(f"{name} must be a positive multiple of four")
         if self.algorithm_id != "sha256_ranked_complete_block_v1":
             raise ValueError("target randomization algorithm is not the frozen algorithm")
+        if self.realization_weights != tuple(sorted(self.realization_weights)):
+            raise ValueError("realization weights require canonical order")
+        weights = defaultdict(dict)
+        for policy, realization, q in self.realization_weights:
+            require_text(policy, "realization policy")
+            require_text(realization, "realization ID")
+            if realization in weights[policy] or type(q) is not float or not 0 < q <= 1:
+                raise ValueError("realization weights must be unique positive probabilities")
+            weights[policy][realization] = q
+        if any(not math.isclose(sum(q.values()), 1, rel_tol=0, abs_tol=1e-12) for q in weights.values()):
+            raise ValueError("every frozen realization distribution must sum to one")
+        if self.allocation_tasks != tuple(sorted(set(self.allocation_tasks))):
+            raise ValueError("allocation tasks require canonical unique order")
+        coordinates, strata = set(), {}
+        for policy, unit, stratum in self.allocation_tasks:
+            for value in (policy, unit, stratum):
+                require_text(value, "allocation task coordinate")
+            if (policy, unit) in coordinates:
+                raise ValueError("one task-policy coordinate may enter allocation only once")
+            coordinates.add((policy, unit))
+            if strata.setdefault(unit, stratum) != stratum:
+                raise ValueError("shared task units cannot cross allocation strata")
+        if {policy for policy, _, _ in self.allocation_tasks} != set(weights):
+            raise ValueError("allocation tasks and realization distributions must cover the same policies")
 
     @property
     def target_randomization_plan_id(self) -> str:
         return content_id("target_randomization_plan_", self)
+
+
+def allocate_target_realizations(plan: TargetRandomizationPlan) -> dict[tuple[str, str], str]:
+    """Allocate once, before text exists, using largest remainders within strata.
+
+    Task order and remainder ties are seeded hashes. The pool and Q are immutable;
+    validation failures retain this allocation and are never replaced or redrawn.
+    """
+    weights = defaultdict(dict)
+    for policy, realization, q in plan.realization_weights:
+        weights[policy][realization] = q
+    groups = defaultdict(list)
+    for policy, unit, stratum in plan.allocation_tasks:
+        groups[(policy, stratum)].append(unit)
+    allocations = {}
+    for (policy, stratum), units in sorted(groups.items()):
+        q = weights[policy]
+        n = len(units)
+        counts = {r: math.floor(n * weight) for r, weight in q.items()}
+        priority = sorted(q, key=lambda r: (
+            -(n * q[r] - counts[r]),
+            content_hash(("realization_remainder", plan.assignment_seed, policy, stratum, r)),
+        ))
+        for r in priority[:n - sum(counts.values())]:
+            counts[r] += 1
+        ordered = sorted(units, key=lambda unit: (
+            content_hash(("realization_task", plan.assignment_seed, policy, stratum, unit)), unit,
+        ))
+        slots = [r for r in sorted(q) for _ in range(counts[r])]
+        allocations.update({(policy, unit): r for unit, r in zip(ordered, slots, strict=True)})
+    return allocations
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +164,7 @@ class TargetTaskBundle:
     task_instance_weight: float
     realization_weight: float
     variants: tuple[TargetTaskArmVariant, ...]
+    exclusion_reason: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -131,7 +190,11 @@ class TargetTaskBundle:
             if self.track is PolicyTrack.ATOMIC
             else PAIR_CONFIRMATORY_ARMS
         )
-        if tuple(item.arm for item in self.variants) != expected:
+        if self.exclusion_reason is not None:
+            require_text(self.exclusion_reason, "task bundle exclusion reason")
+            if self.variants:
+                raise ValueError("an excluded task bundle cannot carry executable variants")
+        elif tuple(item.arm for item in self.variants) != expected:
             raise ValueError("target task bundle must contain its four arms in canonical order")
         if any(type(item) is not TargetTaskArmVariant for item in self.variants):
             raise TypeError("target task-bundle variants must be typed")
@@ -225,7 +288,10 @@ class AssignedArmITTRecord:
         )
 
     @property
+    @lru_cache(maxsize=131072)
     def assignment_id(self) -> str:
+        # Immutable assignments are revisited by every endpoint and power replicate.
+        # Keep one bounded planning family resident (24 effects x 400 tasks x 8 slots).
         return content_id("assigned_arm_itt_assignment_", self)
 
 
@@ -251,7 +317,7 @@ def randomize_target_confirmation(
             key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
         )
     )
-    if not frozen_bundles or any(type(item) is not TargetTaskBundle for item in frozen_bundles):
+    if any(type(item) is not TargetTaskBundle for item in frozen_bundles):
         raise TypeError("target randomization requires typed task bundles")
     bundle_ids = tuple(item.target_task_bundle_id for item in frozen_bundles)
     if len(set(bundle_ids)) != len(bundle_ids):
@@ -259,6 +325,19 @@ def randomize_target_confirmation(
     coordinates = tuple((item.policy_key, item.task_unit_id) for item in frozen_bundles)
     if len(set(coordinates)) != len(coordinates):
         raise ValueError("one policy/task coordinate may have only one realization bundle")
+    allocations = allocate_target_realizations(plan)
+    if set(coordinates) != set(allocations):
+        raise ValueError("task bundles must retain every allocated task, including exclusions")
+    weights = {(policy, r): q for policy, r, q in plan.realization_weights}
+    strata = {(policy, unit): s for policy, unit, s in plan.allocation_tasks}
+    for bundle in frozen_bundles:
+        coordinate = (bundle.policy_key, bundle.task_unit_id)
+        if (
+            bundle.realization_id != allocations[coordinate]
+            or bundle.realization_weight != weights[(bundle.policy_key, bundle.realization_id)]
+            or bundle.stratum_id != strata[coordinate]
+        ):
+            raise ValueError("task bundle failed frozen realization allocation replay")
 
     successful = tuple(
         item for item in dispatch.records if item.status is BridgeStatus.SUCCESS
@@ -285,7 +364,8 @@ def randomize_target_confirmation(
 
     bundles_by_policy: dict[str, list[TargetTaskBundle]] = defaultdict(list)
     for bundle in frozen_bundles:
-        bundles_by_policy[bundle.policy_key].append(bundle)
+        if bundle.exclusion_reason is None:
+            bundles_by_policy[bundle.policy_key].append(bundle)
     assignments = []
     for record in successful:
         track = track_by_policy[record.policy_key]

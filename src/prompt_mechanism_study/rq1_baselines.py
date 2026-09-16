@@ -16,10 +16,14 @@ from typing import Sequence
 from prompt_mechanism_study.artifact_io import require_sha256
 from prompt_mechanism_study.interaction_selector import (
     PairCandidateUniverseManifest,
-    PairSupportGate,
+    PairPreOutcomeFreeze,
+    PairShadowPlan,
 )
 from prompt_mechanism_study.prioritization import (
     AtomicCandidateUniverseManifest,
+    AtomicFoldFreeze,
+    AtomicShadowPlan,
+    DiscoverabilityStatus,
     FixedSlotSource,
     PolicyTrack,
     SelectorSlot,
@@ -150,6 +154,8 @@ class RQ1BaselineUniverse:
     model_bound_records: tuple[ModelBoundCandidateRecord, ...]
     expert_candidate_cards: tuple[BlindExpertCandidateCard, ...]
     eligibility_evidence_sha256: str
+    protocol_id: str
+    schema_version: str
 
     def __post_init__(self) -> None:
         if type(self.track) is not PolicyTrack:
@@ -158,10 +164,10 @@ class RQ1BaselineUniverse:
         require_text(self.model_id, "baseline model_id")
         if type(self.top_k) is not int or self.top_k <= 0:
             raise ValueError("baseline top_k must be positive")
-        if not self.candidate_policy_keys or self.candidate_policy_keys != tuple(
+        if self.candidate_policy_keys != tuple(
             sorted(set(self.candidate_policy_keys))
         ):
-            raise ValueError("baseline candidate policies must be non-empty and canonical")
+            raise ValueError("baseline candidate policies must be canonical")
         if self.eligible_policy_keys != tuple(sorted(set(self.eligible_policy_keys))):
             raise ValueError("baseline eligible policies must be canonical")
         if not set(self.eligible_policy_keys) <= set(self.candidate_policy_keys):
@@ -189,13 +195,15 @@ class RQ1BaselineUniverse:
             {self.track},
         ):
             raise ValueError("baseline expert cards must use the universe track")
-        if {item.discovery_model_id for item in self.model_bound_records} != {
+        if self.model_bound_records and {item.discovery_model_id for item in self.model_bound_records} != {
             self.model_id
         }:
             raise ValueError("baseline records must bind one discovery model")
-        if len({item.protocol_id for item in self.model_bound_records}) != 1:
+        require_text(self.protocol_id, "baseline protocol_id")
+        require_text(self.schema_version, "baseline schema_version")
+        if any(item.protocol_id != self.protocol_id for item in self.model_bound_records):
             raise ValueError("baseline records must bind one protocol")
-        if len({item.schema_version for item in self.model_bound_records}) != 1:
+        if any(item.schema_version != self.schema_version for item in self.model_bound_records):
             raise ValueError("baseline records must bind one schema version")
         require_sha256(
             self.eligibility_evidence_sha256,
@@ -207,28 +215,27 @@ class RQ1BaselineUniverse:
         return content_id("rq1_baseline_universe_", self)
 
     @property
-    def protocol_id(self) -> str:
-        return self.model_bound_records[0].protocol_id
-
-    @property
-    def schema_version(self) -> str:
-        return self.model_bound_records[0].schema_version
-
-    @property
     def candidate_material_sha256(self) -> str:
         return content_hash(self.expert_candidate_cards)
 
 
 def freeze_atomic_baseline_universe(
     universe: AtomicCandidateUniverseManifest,
+    fold_freeze: AtomicFoldFreeze,
+    plan: AtomicShadowPlan,
+    *,
+    protocol_id: str,
+    schema_version: str,
 ) -> RQ1BaselineUniverse:
     """Adapt the frozen Atomic common universe without reading RD or FCI evidence."""
 
     if type(universe) is not AtomicCandidateUniverseManifest:
         raise TypeError("Atomic baseline requires an AtomicCandidateUniverseManifest")
-    model_ids = {item.discovery_model_id for item in universe.model_bound_records}
-    if len(model_ids) != 1:
-        raise ValueError("Atomic baseline universe must bind exactly one model")
+    if type(fold_freeze) is not AtomicFoldFreeze or type(plan) is not AtomicShadowPlan:
+        raise TypeError("Atomic baseline requires the frozen common discoverability and plan")
+    _check_common_discoverability(universe, fold_freeze, plan)
+    eligible = tuple(item.candidate_id for item in fold_freeze.discoverability
+                     if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE)
     policy_by_key = {item.policy_key: item for item in universe.policy_keys}
     family_by_key = dict(universe.candidate_family_ids)
     realization_by_key = dict(universe.realization_policy_ids)
@@ -248,43 +255,50 @@ def freeze_atomic_baseline_universe(
             None,
             (("support_gate_passed", 1),),
         )
-        for policy_key in universe.supported_policy_keys
+        for policy_key in eligible
     )
     return RQ1BaselineUniverse(
         PolicyTrack.ATOMIC,
         universe.universe_id,
-        next(iter(model_ids)),
+        plan.model_id,
         universe.top_k,
         universe.candidate_ids,
-        universe.supported_policy_keys,
+        eligible,
         universe.model_bound_records,
         expert_cards,
         content_hash(
             {
                 "positivity_audit_sha256": universe.positivity_audit_sha256,
                 "information_budget_sha256": universe.information_budget_sha256,
-                "supported_policy_keys": universe.supported_policy_keys,
+                "discoverability": fold_freeze.discoverability,
+                "fold_freeze_id": fold_freeze.fold_freeze_id,
             }
         ),
+        protocol_id,
+        schema_version,
     )
 
 
 def freeze_pair_baseline_universe(
     universe: PairCandidateUniverseManifest,
-    support_gates: Sequence[PairSupportGate],
+    preoutcome_freeze: PairPreOutcomeFreeze,
+    plan: PairShadowPlan,
+    *,
+    protocol_id: str,
+    schema_version: str,
 ) -> RQ1BaselineUniverse:
     """Adapt the Pair compatibility/support universe without RD or relation evidence."""
 
     if type(universe) is not PairCandidateUniverseManifest:
         raise TypeError("Pair baseline requires a PairCandidateUniverseManifest")
-    frozen_gates = tuple(support_gates)
-    if any(type(item) is not PairSupportGate for item in frozen_gates):
-        raise TypeError("Pair baseline support gates must be typed")
+    if type(preoutcome_freeze) is not PairPreOutcomeFreeze or type(plan) is not PairShadowPlan:
+        raise TypeError("Pair baseline requires the frozen common discoverability and plan")
+    _check_common_discoverability(universe, preoutcome_freeze, plan)
+    frozen_gates = preoutcome_freeze.support_gates
     if tuple(item.pair_id for item in frozen_gates) != universe.compatible_policy_keys:
         raise ValueError("Pair baseline support gates must cover the compatible universe")
-    model_ids = {item.discovery_model_id for item in universe.model_bound_records}
-    if len(model_ids) != 1:
-        raise ValueError("Pair baseline universe must bind exactly one model")
+    eligible = tuple(item.candidate_id for item in preoutcome_freeze.discoverability
+                     if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE)
     policy_by_key = {item.policy_key: item for item in universe.policy_keys}
     family_by_key = dict(universe.candidate_family_ids)
     compatibility_by_key = {
@@ -319,15 +333,15 @@ def freeze_pair_baseline_universe(
             ),
         )
         for gate in frozen_gates
-        if gate.passed
+        if gate.pair_id in eligible
     )
     return RQ1BaselineUniverse(
         PolicyTrack.PAIR,
         universe.universe_id,
-        next(iter(model_ids)),
+        plan.model_id,
         universe.top_k,
         universe.candidate_ids,
-        tuple(item.pair_id for item in frozen_gates if item.passed),
+        eligible,
         universe.model_bound_records,
         expert_cards,
         content_hash(
@@ -335,9 +349,24 @@ def freeze_pair_baseline_universe(
                 "compatibility_evidence_sha256": universe.compatibility_evidence_sha256,
                 "information_budget_sha256": universe.information_budget_sha256,
                 "support_gates": frozen_gates,
+                "discoverability": preoutcome_freeze.discoverability,
+                "preoutcome_freeze_id": preoutcome_freeze.preoutcome_freeze_id,
             }
         ),
+        protocol_id,
+        schema_version,
     )
+
+
+def _check_common_discoverability(universe, frozen, plan) -> None:
+    if (
+        frozen.universe_id != universe.universe_id or frozen.plan_id != plan.plan_id
+        or frozen.preoutcome_data_sha256 != universe.preoutcome_data_sha256
+        or frozen.discovery_population_sha256 != universe.discovery_population_sha256
+        or tuple(item.candidate_id for item in frozen.discoverability) != universe.candidate_ids
+        or any(item.discovery_model_id != plan.model_id for item in universe.model_bound_records)
+    ):
+        raise ValueError("baseline common discoverability/model binding drifted from Core")
 
 
 @dataclass(frozen=True, slots=True)

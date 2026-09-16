@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import re
+import zipfile
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
+    confined_path,
     file_sha256,
     read_json,
     verify_bundle,
@@ -22,6 +25,10 @@ from prompt_mechanism_study.artifact_io import (
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 
 _CWE = re.compile(r"(?i)cwe[-_ ]?0*(\d+)")
+_SOURCE_ASSET_ARCHIVES = {
+    "sallm": "dc73f8975ce6e43b162c340a1ec6144a95e0f9d67e2d602522e9d3132e76320a",
+    "cweval": "7bb2a83818a8f4aef72e2d4fb5843f14dfa6419925a95964b77baad5554674cd",
+}
 _SOURCE_INFO = {
     "sallm": {
         "version": "0159a63daed0a88f461bbd69dd1160893e394a67",
@@ -338,6 +345,219 @@ def prepare_datasets(
         },
     )
     return report
+
+
+def audit_source_material(
+    tasks: Iterable[Mapping[str, Any]], source_roots: Mapping[str, Path],
+    *, source_archives: Mapping[str, Path] | None = None,
+) -> dict[str, Any]:
+    """Replay frozen source members and recover exact referenced assets as inert bytes.
+
+    This uses the normalizers, never reference solutions or inferred requirements.
+    Tests are preserved for separate coverage review, not executed or certified as
+    functional/security Oracles. Frozen prompts remain intact; source-restored
+    inputs receive a new input identity under the same independent parent task.
+    """
+    loaders = {
+        "sallm": _load_sallm, "cweval": _load_cweval,
+        "cyberseceval_instruct_prime": _load_cyberseceval,
+        "llmseceval": _load_llmseceval, "securityeval": _load_securityeval,
+        "codesec_eval": _load_codeseceval, "secodeplt": _load_secodeplt,
+    }
+    task_rows = list(tasks)
+    required = {member["dataset_id"] for task in task_rows for member in task["source_members"]}
+    if set(source_roots) != required or not required <= set(loaders):
+        raise ValueError("source material requires exactly the frozen source datasets")
+    roots = {name: Path(path).resolve() for name, path in source_roots.items()}
+    source_by_record = {member["record_id"]: member["dataset_id"]
+                        for task in task_rows for member in task["source_members"]}
+    needed_archived_refs = defaultdict(set)
+    for task in task_rows:
+        for item in task["evaluation_asset_refs"]["source_test_refs"]:
+            if "#" not in item["reference"]:
+                needed_archived_refs[source_by_record[item["source_record_id"]]].add(item["reference"])
+    archive_bytes = {}
+    archive_hashes = {}
+    for name, path in sorted((source_archives or {}).items()):
+        if name not in required or name not in _SOURCE_ASSET_ARCHIVES:
+            raise ValueError("source asset archive is outside the frozen source scope")
+        digest = file_sha256(path)
+        if digest != _SOURCE_ASSET_ARCHIVES[name]:
+            raise ValueError("source asset archive differs from the frozen snapshot")
+        archive_hashes[name] = digest
+        with zipfile.ZipFile(path) as archive:
+            archive_bytes[name] = {entry.partition("/")[2]: archive.read(entry)
+                                   for entry in archive.namelist()
+                                   if entry.partition("/")[2] in needed_archived_refs[name]}
+    records = {}
+    by_source_key = {}
+    source_counts = []
+    for name, root in sorted(roots.items()):
+        batch = loaders[name](root)
+        source_counts.append({"source_dataset": name, "parsed": len(batch.records),
+                              "parse_exclusions": len(batch.exclusions)})
+        for record in batch.records:
+            if record.record_id in records:
+                raise ValueError("source replay produced a repeated record identity")
+            records[record.record_id] = record
+            key = (record.source_dataset, record.source_locator)
+            if key in by_source_key:
+                raise ValueError("source replay produced repeated source coordinates")
+            by_source_key[key] = record
+    tasks_result = []
+    assets: dict[str, dict[str, Any]] = {}
+    bindings = []
+    used_records = set()
+    used_normalized_records = set()
+    for task in sorted(task_rows, key=lambda row: row["task_unit_id"]):
+        task_id = task["task_unit_id"]
+        inherited_refs = task["evaluation_asset_refs"]["source_test_refs"]
+        expected_refs = []
+        member_records = {}
+        for member in task["source_members"]:
+            record_id = member["record_id"]
+            record = by_source_key.get((member["dataset_id"], member["source_locator"]))
+            if record is None:
+                raise ValueError(f"frozen source member does not replay: {record_id}")
+            old_refs = tuple(sorted(item["reference"] for item in inherited_refs
+                                    if item["source_record_id"] == record_id))
+            if not set(old_refs) <= set(record.source_test_references):
+                raise ValueError("normalization dropped a frozen source asset reference")
+            old_prompt = record.prompt
+            if record.source_dataset == "secodeplt" and record_id == task["representative_record_id"]:
+                old_prompt = task["model_visible_input"]["natural_prompt"]
+            # The immutable bundle supplies its historical input, not a second
+            # active normalizer. Raw source hashes and the old ID must still bind.
+            historical = replace(record, prompt=old_prompt, source_test_references=old_refs)
+            if historical.record_id != record_id:
+                raise ValueError("source replay changed more than the explicitly restored inputs/assets")
+            expected = {
+                "record_id": record_id, "dataset_id": record.source_dataset,
+                "source_version": record.source_version, "source_item_id": record.source_item_id,
+                "source_locator": record.source_locator,
+                "source_file_sha256": record.source_file_sha256,
+                "source_record_sha256": record.source_record_sha256,
+                "source_lineage_id": record.source_lineage_family,
+                "license_id": record.license_id, "citation_url": record.citation_url,
+                "source_test_reference_count": len(old_refs),
+            }
+            if dict(member) != expected:
+                raise ValueError(f"frozen source provenance differs from the raw source: {record_id}")
+            used_records.add(record_id)
+            used_normalized_records.add(record.record_id)
+            member_records[record_id] = record
+            for reference in record.source_test_references:
+                expected_refs.append({"source_record_id": record_id, "reference": reference})
+                payload, container_hash = _source_asset_bytes(roots[record.source_dataset], reference)
+                if "#" in reference:
+                    if container_hash != record.source_file_sha256:
+                        raise ValueError("inline source asset container differs from the frozen source")
+                    origin = "FROZEN_SOURCE_RECORD_CONTAINER"
+                elif record.source_dataset in archive_bytes:
+                    if archive_bytes[record.source_dataset].get(reference) != payload:
+                        raise ValueError("source-native asset differs from the frozen archive")
+                    origin = "FROZEN_SOURCE_ARCHIVE"
+                else:
+                    origin = "SOURCE_VERSION_VERIFICATION_PENDING"
+                digest = hashlib.sha256(payload).hexdigest()
+                assets.setdefault(digest, {
+                    "sha256": digest, "byte_count": len(payload),
+                    "content_base64": base64.b64encode(payload).decode("ascii"),
+                    "execution_status": "NOT_EXECUTED",
+                    "measurement_qualification": "NOT_GRANTED",
+                })
+                bindings.append({
+                    "task_unit_id": task_id, "source_record_id": record_id,
+                    "source_dataset": record.source_dataset, "reference": reference,
+                    "container_sha256": container_hash, "asset_sha256": digest,
+                    "source_file_sha256": record.source_file_sha256,
+                    "origin_status": origin,
+                    "archive_sha256": archive_hashes.get(record.source_dataset),
+                    "binding_kind": "FROZEN_REFERENCE" if reference in old_refs else "RECOVERED_ORIGINAL_SOURCE_FIELD",
+                    "normalized_record_id": record.record_id,
+                    "source_declared_role": {
+                        "field:Test-FP": "FUNCTIONAL_TESTS", "field:Test-SP": "SECURITY_TESTS",
+                        "field:Entry_Point": "EVALUATION_ENTRY_POINT", "section:SETUP": "SETUP",
+                        "section:PACKAGE": "DEPENDENCIES",
+                    }.get(reference.split("#")[-1], "MIXED_OR_UNSPECIFIED"),
+                    "model_visible": reference.endswith("#section:SETUP"),
+                    "use": "SOURCE_NATIVE_ASSET_PENDING_FUNCTIONAL_AND_SECURITY_COVERAGE_REVIEW",
+                })
+        representative = member_records[task["representative_record_id"]]
+        if representative.language != task["pre_treatment_source_metadata"]["language"]:
+            raise ValueError("frozen representative language differs from the source")
+        changed = representative.prompt != task["model_visible_input"]["natural_prompt"]
+        restoration = None
+        if changed:
+            if representative.source_dataset != "secodeplt":
+                raise ValueError("unexpected source prompt restoration")
+            core = {"natural_prompt": representative.prompt, "visible_assets": [],
+                    "render_mode": task["model_visible_input"]["render_mode"]}
+            restored_input = {**core, "natural_prompt_content_sha256": representative.prompt_sha256,
+                              "model_visible_input_identity_sha256": content_hash(core)}
+            restoration = {
+                "parent_task_unit_id": task_id,
+                "parent_model_visible_input_sha256": task["model_visible_input"]["model_visible_input_identity_sha256"],
+                "model_visible_input": restored_input,
+                "normalized_record_id": representative.record_id,
+                "source_locator": representative.source_locator,
+                "source_file_sha256": representative.source_file_sha256,
+                "source_record_sha256": representative.source_record_sha256,
+                "restoration_rule": "upstream_secodeplt_instruct_default_including_security_policy_and_setup",
+                "source_contract_status": "PENDING_REVIEW_FOR_RESTORED_INPUT",
+                "independent_unit_count_change": 0,
+            }
+        tasks_result.append({
+            "task_unit_id": task_id, "source_members_replayed": len(task["source_members"]),
+            "source_prompt_status": "ORIGINAL_SOURCE_INPUT_RESTORED" if changed else "EXACT_PROMPT_REPLAY",
+            "referenced_asset_count": len(expected_refs),
+            "inherited_asset_count": len(inherited_refs),
+            "recovered_asset_count": len(expected_refs) - len(inherited_refs),
+            "source_recovery_status": "REFERENCED_ASSETS_RECOVERED" if expected_refs else "NO_REFERENCED_ASSETS",
+            "input_restoration": restoration,
+            "frozen_prompt_changed": False, "independent_units_added": 0,
+        })
+    return {
+        "status": "SOURCE_MATERIAL_REPLAYED_NOT_MEASUREMENT_QUALIFICATION",
+        "source_counts": source_counts, "frozen_source_records_replayed": len(used_records),
+        "additional_normalized_record_ids_not_admitted": sorted(set(records) - used_normalized_records),
+        "tasks": tasks_result, "asset_bindings": bindings,
+        "assets": [assets[key] for key in sorted(assets)],
+        "source_archive_sha256": archive_hashes,
+        "prompt_repairs": sum(row["input_restoration"] is not None for row in tasks_result),
+        "independent_units_added": 0,
+        "reference_code_executed": False, "arms_or_outcomes_used": False,
+    }
+
+
+def _source_asset_bytes(root: Path, reference: str) -> tuple[bytes, str]:
+    """Resolve only explicit source-native references already frozen by normalization."""
+    parts = reference.split("#")
+    directory = root.parent if root.is_file() else root
+    source = confined_path(directory, parts[0])
+    payload = source.read_bytes()
+    container_hash = hashlib.sha256(payload).hexdigest()
+    if len(parts) == 1:
+        return payload, container_hash
+    if len(parts) != 3:
+        raise ValueError("unsupported frozen source asset reference")
+    locator, section = parts[1:]
+    text = payload.decode("utf-8-sig")
+    if re.fullmatch(r"L[1-9][0-9]*", locator) and section in {
+        "field:Test", "field:Test-FP", "field:Test-SP", "field:Entry_Point",
+    }:
+        raw = json.loads(text.splitlines()[int(locator[1:]) - 1])
+        selected = raw[section.split(":")[1]]
+    elif re.fullmatch(r"item:[1-9][0-9]*", locator) and section in {
+        "section:TESTCASES", "section:SETUP", "section:PACKAGE",
+    }:
+        raw = json.loads(text)[int(locator.split(":")[1]) - 1]
+        selected = _marker_text(raw, section.split(":")[1])
+    else:
+        raise ValueError("unsupported frozen source asset selection")
+    if not isinstance(selected, str) or not selected.strip():
+        raise ValueError("frozen source asset is missing or empty")
+    return selected.encode("utf-8"), container_hash
 
 
 def freeze_contracts(prepared_root: Path, responses_path: Path, output: Path) -> dict[str, Any]:
@@ -914,9 +1134,9 @@ def _load_codeseceval(root: Path) -> _Batch:
             try:
                 raw = _object(json.loads(line))
                 item_id = _text(raw.get("ID"))
-                test = raw.get("Test")
-                test_references = (
-                    (f"{locator}#field:Test",) if isinstance(test, str) and test.strip() else ()
+                test_references = tuple(
+                    f"{locator}#field:{field}" for field in ("Test", "Test-FP", "Test-SP", "Entry_Point")
+                    if isinstance(raw.get(field), str) and raw[field].strip()
                 )
                 records.append(
                     _record(
@@ -959,7 +1179,11 @@ def _load_secodeplt(root: Path) -> _Batch:
                 source_id = cve.strip() if isinstance(cve, str) and cve.strip() else relative
                 item_id = f"{source_id}:{function_name}:{index}"
                 tests = _marker_text(value, "TESTCASES")
-                test_references = (f"{locator}#section:TESTCASES",) if tests.strip() else ()
+                setup = _marker_text(value, "SETUP") if "## START SETUP ##" in value else ""
+                test_references = [f"{locator}#section:TESTCASES"] if tests.strip() else []
+                for marker in ("SETUP", "PACKAGE"):
+                    if f"## START {marker} ##" in value and _marker_text(value, marker).strip():
+                        test_references.append(f"{locator}#section:{marker}")
                 records.append(
                     _record(
                         "secodeplt",
@@ -969,7 +1193,7 @@ def _load_secodeplt(root: Path) -> _Batch:
                         {"task": value},
                         "python",
                         _canonical_cwe(_text(metadata.get("CWE_ID"))),
-                        _secode_functional_prompt(task),
+                        _secode_functional_prompt(task, setup),
                         test_references,
                     )
                 )
@@ -1043,26 +1267,45 @@ def _secode_metadata(value: str) -> dict[str, Any]:
     try:
         return _object(json.loads(raw))
     except json.JSONDecodeError:
-        repaired = re.sub(r",\s*([}\]])", r"\1", raw)
+        # Upstream metadata also uses full-line Python comments and trailing
+        # commas. Consume quoted strings first so their exact contents survive.
+        quoted = r'"(?:\\.|[^"\\])*"'
+        uncommented = re.sub(
+            quoted + r"|(?m:^[ \t]*\#[^\r\n]*)",
+            lambda match: match[0] if match[0].startswith('"') else "",
+            raw,
+        )
+        repaired = re.sub(
+            quoted + r"|,\s*(?=[}\]])",
+            lambda match: match[0] if match[0].startswith('"') else "",
+            uncommented,
+        )
         return _object(json.loads(repaired))
 
 
-def _secode_functional_prompt(task: dict[str, Any]) -> str:
-    labels = (
-        ("Task", "description"),
-        ("Context", "context"),
-        ("Arguments", "arguments"),
-        ("Return", "return"),
-        ("Raises", "raise"),
-    )
-    parts = []
-    for label, key in labels:
-        value = task.get(key)
-        if isinstance(value, str) and value.strip() and value.strip().casefold() != "none":
-            parts.append(f"{label}: {value.strip()}")
-    if not parts:
-        raise ValueError("SeCodePLT task has no functional description")
-    return "\n".join(parts)
+def _secode_functional_prompt(task: dict[str, Any], setup: str = "") -> str:
+    """Restore the upstream default instruct input, including its natural controls.
+
+    Mirrors SecodepltPythonInstruct.get_prompt at the pinned source revision.
+    Reference implementations and test assertions are never prompt inputs.
+    """
+    _text(task.get("function_name"))
+    _text(task.get("description"))
+    labels = (("Function Name", "function_name"), ("Description", "description"),
+              ("Context (global variables and imported packages)", "context"),
+              ("Arguments", "arguments"), ("Return", "return"), ("Raise", "raise"))
+    if any(not isinstance(task.get(key, ""), str) for _, key in labels):
+        raise ValueError("SeCodePLT source task fields must be strings")
+    prompt = "\n\n".join(f"{label}: {task.get(key, '')}" for label, key in labels) + "\n"
+    if "security_policy" in task:
+        if not isinstance(task["security_policy"], str):
+            raise ValueError("SeCodePLT source security policy must be text")
+        prompt += f"Security Policy: {task['security_policy']}\n"
+    prompt += f"Setup Code:\n```python\n{setup}\n```\n"
+    prompt += ("Please implement the function according to the description and setup above. "
+               "Output the code in a markdown code block, i.e., between triple backticks (```) "
+               "with the language specified as Python.")
+    return prompt.strip()
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

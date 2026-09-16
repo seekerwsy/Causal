@@ -1,218 +1,450 @@
 \section{Method}
+\label{sec:method}
 
-\model exposes one path from a natural-language programming request to a scoped requirement evidence record. Its three reader-facing stages contain seven explicit scientific operations: representation; prioritization; hypothesis freeze; intervention and randomization; measurement; outcome assembly; and inference and reporting. Figure~\ref{fig:overview} shows the stage outputs and the downstream role of the expert study.
+\model connects a task-specific prompt modification to the evidence needed to
+explain and assess it. Given natural programming requests, a generator model,
+and a fixed evidence-acquisition budget, Stage I represents requirements in their
+task context. Stage II constructs and prioritizes requirement hypotheses, then
+estimates the effects of frozen prompt interventions on held-out tasks. Stage III
+organizes the linked task semantics, edits, and effect evidence into explanations
+with explicit conditions for security guidance. The same requirement scope and
+non-target task requirements connect all three stages.
 
-\begin{figure}[H]
-  \centering
-  \input{figures/prompt-mechanism-study-overview}
-  \caption{\model maps natural-language prompts into typed Prompt TSGs,
-  discovers and freezes a budgeted set of requirement hypotheses from
-  observational evidence, and evaluates their effects through blocked
-  randomization on cluster-disjoint held-out tasks. The requirement evidence
-  record supports the computational analyses in RQ1--RQ3 and the separately
-  governed expert study in RQ4. The Prompt TSG defines what can be edited;
-  observational discovery determines what should be tested; blocked
-  randomization identifies the assigned prompt-policy effect.}
-  \Description{A vertical workflow begins with a natural-language prompt.
-  Stage I builds a typed Prompt TSG. Stage II discovers, selects, and freezes an
-  requirement hypothesis. Stage III evaluates matched prompt policies through
-  blocked randomization. A requirement evidence record combines the context,
-  edit, selection evidence, effect, uncertainty, and scope. A dashed arrow
-  connects this record to the separately governed RQ4 expert evaluation.}
-  \label{fig:overview}
-\end{figure}
+Consider a request to delete database records for a supplied user identifier
+and return the deletion count. An explanation should identify the supplied
+identifier as a SQL value, locate the parameterization requirement at the deletion
+operation, and describe a modification that retains the deletion and return
+behavior. It must then distinguish the reason for considering that change from
+evidence about its effect. Observational prioritization supplies the former;
+randomized intervention supplies the latter.
 
-Algorithm~\ref{alg:phase} makes the single active scientific path explicit. Each stage produces the only admissible input to the next; discovery outcomes cannot enter held-out policy construction or rerank hypotheses.
+These reader-facing stages cover seven scientific operations: representation,
+prioritization, hypothesis freeze, intervention/\allowbreak randomization,
+measurement, outcome assembly, and inference/\allowbreak reporting.
+Stage III presents the reporting
+output of this same path; it adds neither an experimental role nor another
+causal analysis. Development fixes the representation
+and measurement rules, discovery prioritizes hypotheses, and confirmation tests
+the selected policies. These roles contain disjoint deduplicated \emph{task
+units} and frozen near-duplicate groups; instances and repeated generations
+belonging to one unit never cross the role boundary.
 
-\begin{algorithm}[t]
-  \caption{Requirement discovery and effect evaluation in \model}
-  \label{alg:phase}
-  \small
-  \begin{algorithmic}[1]
-    \Require Natural prompts $\mathcal P$; finite type and requirement catalogs;
-      discovery outcomes $Y^0$; held-out tasks $\mathcal T$; budget $K$
-    \Ensure Requirement evidence records $\{\mathcal E_h\}$
-    \Statex \textbf{Stage I: Build typed prompt representations}
-    \ForAll{$P \in \mathcal P$}
-      \State $G_P \gets T_{\mathcal E}(P)$; validate types, grounding, and scope
-      \State derive applicable one-factor ADD/REMOVE templates from $G_P$
-    \EndFor
-    \Statex \textbf{Stage II: Discover, prioritize, and freeze}
-    \State build $(W,X^0,Y^0)$ from discovery clusters only
-    \State run constrained FCI and semantic-cluster stability resampling
-    \State rank the fixed candidate universe and retain top-$K$ slots
-    \ForAll{selected slot $\widetilde h$}
-      \State bridge $\widetilde h$ to one catalog requirement and operation
-      \State freeze $h$: scope, realizations, arms, outcomes, and inference rules
-    \EndFor
-    \Statex \textbf{Stage III: Evaluate frozen requirement effects}
-    \ForAll{frozen $h$ and eligible held-out protocol block}
-      \State materialize and arm-blind validate every required prompt policy
-      \State assign arms by frozen blocked randomization; generate and measure
-    \EndFor
-    \State assemble all assigned outcomes and estimate cluster-level ITT
-    \State classify effect, specificity, and functionality on separate axes
-    \State \Return one scoped $\mathcal E_h$ for every frozen hypothesis
-  \end{algorithmic}
-\end{algorithm}
+\subsection{Stage I: Structured Graph Representation}
 
-\subsection{Stage I: Typed Prompt Representation}
-\label{sec:representation}
+\subsubsection{Typed Symbolic Representation}
+A requirement name alone does not identify an editable part of a task. In the
+running example, the relevant object is the supplied identifier used as a SQL
+value, the operation is deletion, and the required non-target behavior includes
+returning the deletion count. Prompt TSG represents these distinctions in a
+\emph{typed symbolic graph representation language}.
 
-Stage I converts a free-form request into a bounded representation whose task context and editable security content can be queried independently.
+The language, vocabulary, and task graph have different roles. The language
+defines generic node and relation types and their permitted connections. The
+vocabulary supplies reusable concepts, such as SQL value parameterization.
+A task graph instantiates those concepts at particular operations, objects,
+and source locations. Thus, two occurrences of the same concept can refer to
+different parts of a request without becoming one interchangeable graph node.
+For the complete baseline input $P$ and fixed extractor $\mathcal E$, write
+\begin{equation}
+  G_P=T_{\mathcal E}(P)=(V,E,\tau_V,\tau_E,\alpha),
+\end{equation}
+where $\tau_V$ and $\tau_E$ assign node and relation types, and $\alpha$ records
+concept identities, source spans, and task-local instance identities.
+Nodes distinguish objects, operations, functional and safety requirements,
+constraints, condition predicates, and presentation controls. Relations express input use, produced
+objects, operation order, requirement scope, and conditions.
 
-\subsubsection{Prompt TSG Schema}
+This representation keeps the task context separate from the requirement that
+may be edited. In the example, adding a parameterization requirement does not
+authorize changing which records are deleted or what the operation returns.
+Prompt-TSG edges describe these semantic relationships; they are not causal
+edges and do not establish whether the requirement affects generated code.
 
-For prompt $P$ and a run-locked extractor $\mathcal E$, the extractor-relative \prompttsg is
+\subsubsection{Graph Construction and Grounding}
+The graph must represent the input actually supplied to the code generator.
+We therefore prepare the complete system and user messages once and construct
+the baseline graph from that source. Source-only LLM annotation first identifies
+the task's objects, operations, requirements, and conditions with supporting
+source spans. A subsequent binding step connects these fixed local instances:
+which objects an operation uses or produces, which operations and objects a
+requirement governs, and which predicates qualify an action or requirement.
+The binding step cannot add or relabel source facts to complete a desired
+relation. Deterministic compilation checks type compatibility, instance
+references, and cited evidence locations. Generated code, security outcomes,
+and selector outputs do not participate in either step.
 
-\[
-  G_P=T_{\mathcal E}(P)
-  =(V,E,\tau_V,\tau_E,\alpha),
-\]
+Source grounding preserves the difference between a reusable concept and its
+local meaning. A parameterization requirement attached to another database
+operation cannot establish that the deletion input is covered. Likewise, a
+mention of an input being used is not evidence that it must be validated.
+These distinctions are checked through the relevant operation and object
+bindings rather than keyword co-occurrence. The same bindings let the final
+explanation name the input and operation concerned, rather than presenting an
+unscoped concept label.
 
-where $V$ contains task operations, inputs, assets, sinks, trust boundaries, security controls, and presentation controls; $E$ contains prompt-level scope, flow, constraint, and guard relations; $\tau_V$ and $\tau_E$ map nodes and edges to finite catalog types; and $\alpha$ stores text grounding, factor state, and security scope. Prompt TSG relations encode the semantics stated in the prompt, not learned causal edges. Presentation controls cannot enter task or security-flow motifs, and each safety control must be grounded in the bounded context to which it applies.
+Conditions are kept distinct from unconditional implementation constraints.
+For example, an instruction to use Python does not make a database operation
+conditional on Python being used. A relation must preserve the source meaning,
+not merely connect endpoints of permitted types.
 
-\subsubsection{Prompt-to-TSG Extraction and Validation}
+The vocabulary is induced from full development prompts and reviewed before
+discovery; formal use fixes the vocabulary, extractor, and query rules.
+Structural checks do not prove that an annotation understood the source
+correctly, so source-semantic qualification is also required for the admitted
+profiles. Unmodeled content and ambiguous evidence remain explicit rather
+than being repaired from later outcomes.
 
-We construct the same typed representation using either a structured LLM extractor or a deterministic finite matcher. The extraction strategy is fixed before processing the study collection and applied uniformly without access to intervention assignments or generated-code outcomes. Catalog validation rejects ill-typed endpoints, dangling references, contradictory states, and unbounded matches.
+\subsubsection{Context and Requirement Queries}
+Queries turn the representation into task-scoped observations for hypothesis
+construction. A context query asks whether the task contains the relevant
+operation and security boundary. A factor query asks whether the source
+expresses a particular requirement in that scope. The context is defined
+independently of the target requirement's state: a SQL operation using a supplied
+value remains the same context whether or not parameterization is requested.
 
-Every context or factor query returns exactly one of \textsc{present}, \textsc{absent}, \textsc{not-applicable}, or \textsc{unresolved}. In particular, \textsc{absent} requires an applicable and fully resolved scope; failure to resolve a flow cannot be relabeled as absence. This four-valued semantics prevents an unknown context from becoming an apparently valid ADD or REMOVE target.
+After graph construction, a source-only assessment evaluates fixed operation,
+input, and condition scopes against the complete source. It separately judges
+whether the requirement applies in each scope and whether the source expresses
+it there. Both judgments refer to existing graph instances; the assessment
+cannot add facts or choose a different scope. In the SQL example, the supplied
+identifier's stated role as a data value supports applicability. If an input's
+role as a value or a database identifier is genuinely ambiguous, the absence of
+parameterization wording cannot resolve that ambiguity. Separating applicability
+from expression prevents an unexpressed but applicable requirement from being
+confused with an inapplicable one.
 
-\subsubsection{Context-Conditioned Requirement Templates}
+Every query returns \textsc{present}, \textsc{absent},
+\textsc{not-applicable}, or \textsc{unresolved}. For the running example,
+parameterization can be absent only when its scope is applicable and the
+source assessment resolves the requirement as unexpressed. A missing graph
+match alone is not enough. Evidence from different operations cannot be joined
+to create a positive match, and ambiguity is not silently converted to absence.
+Stage I thus supplies grounded task graphs, scope bindings, and query states.
+These identify where an explanation and a possible edit belong, and which
+non-target requirements the edit must preserve. They do not yet establish
+whether that change affects generated code.
 
-Queries over $G_P$ derive a requirement template
+\subsection{Stage II: Requirement-Level Causal Analysis}
+\label{sec:method-causal}
 
-\[
-  \theta=
-  \left\langle
-  C_q, f, z_f^0, \mathcal O_\theta, \mathcal I_\theta
-  \right\rangle,
-\]
+\subsubsection{Hypotheses and Observational Prioritization}
+A testable hypothesis connects a requirement identified in Stage I to a proposed
+\emph{intervention}: a controlled change to its expression in the prompt, with
+non-target task requirements held fixed. It specifies the requirement, its
+scope, and whether the intervention will add an unexpressed requirement or
+remove an expressed one. In the running example, the addition hypothesis asks
+whether explicitly requiring parameterization for the deletion input changes
+the security outcome. The factor definition fixes the scope across tasks;
+local operation and object identities instantiate that definition rather than
+creating a new factor for each variable name.
 
-where $C_q$ is immutable applicability context, $f$ is the only editable security factor, $z_f^0$ is its natural-prompt state, $\mathcal O_\theta$ contains the valid ADD or REMOVE operations, and $\mathcal I_\theta$ contains task, non-target security, context, and presentation invariants. ADD requires $z_f^0=\textsc{absent}$ in an applicable resolved context. REMOVE requires $z_f^0=\textsc{present}$ plus grounded target evidence and a pre-attested task-preserving neutral counterpart. Task operations, sources, sinks, APIs, and trust boundaries remain context rather than editable targets.
+An \emph{Atomic} factor is one independently editable semantic requirement,
+not necessarily one sentence, node, or edge. Value parameterization and
+identifier allowlisting, for example, are different decisions. Requirement
+addition and removal define separate hypotheses because they start from
+different source states and ask different intervention questions. Both require
+a concrete editing policy and a matched comparison.
 
-The Prompt TSG is the representation; requirement templates are context-conditioned queries over that representation. A template defines what could be tested, but it does not yet specify a full experimental hypothesis.
+A \emph{Pair} hypothesis combines two distinct requirements that admit a joint,
+task-preserving comparison. It has its own applicability and compatibility
+conditions. Neither requirement must first be selected, ranked, or supported
+as an Atomic candidate. This keeps interactions eligible even when an Atomic
+selection step would not have prioritized their individual factors. Natural
+sources must establish the relevant boundary and non-target behavior, but need
+not already contain experimental controls. Incomplete functional specifications
+limit functionality claims without automatically invalidating a measurable
+security comparison.
 
-Table~\ref{tab:requirement-catalog} exposes the complete five-family requirement catalog used by the frozen bidirectional held-out protocol. The catalog defines candidate vocabulary, not evidence that any row matters.
+The analysis budget limits how many hypotheses can receive independent effect
+evidence. Prioritization separates three decisions: whether natural tasks support the
+comparison, whether the candidate meets the selector's structural criterion,
+and how it ranks among admitted candidates. Before
+using outcomes to prioritize candidates, one discoverability rule family checks
+context applicability, natural-state support, source-lineage overlap, and valid
+task-unit folds. Atomic candidates need support for their factor states; Pair
+candidates need their own compatible four-cell support. These checks use
+natural task observations, not states manufactured by experimental edits.
 
-\begin{table}[t]
-  \centering
-  \scriptsize
-  \caption{Frozen prompt-side requirement catalog. Context is immutable; only
-  the requirement state may be edited. ADD requires grounded absence in an
-  applicable context. REMOVE additionally requires grounded presence and a
-  pre-attested task-preserving neutral counterpart.}
-  \label{tab:requirement-catalog}
-  \begin{tabularx}{\linewidth}{p{.21\linewidth}Xp{.11\linewidth}p{.16\linewidth}}
-    \toprule
-    Applicable context & Editable requirement & Scope & Valid operation \\
-    \midrule
-    Untrusted text reaches process launch & Preserve argument boundaries and
-      avoid invoking a command shell with untrusted text & CWE-78 & ADD / REMOVE \\
-    Untrusted values or identifiers enter SQL & Bind values separately from
-      SQL syntax and allowlist dynamic identifiers & CWE-89 & ADD / REMOVE \\
-    Untrusted structured input is deserialized & Use restricted deserialization
-      that cannot construct arbitrary objects & CWE-502 & ADD / REMOVE \\
-    Collision resistance or integrity is required & Use a current cryptographic
-      hash & CWE-328 & ADD / REMOVE \\
-    Security-sensitive randomness is required & Use a cryptographically secure
-      randomness source compatible with the task API & CWE-338 & ADD / REMOVE \\
-    \bottomrule
-  \end{tabularx}
-\end{table}
+For Atomic hypotheses, the structural criterion comes from Fast Causal
+Inference (FCI). FCI uses conditional-independence relations to infer a graph
+that allows for unobserved common causes~\cite{spirtes1995fci,zheng2024causallearn}.
+\model builds this observational analysis separately for each security scope
+and generator model, using natural prompt-query states, approved pre-treatment
+metadata, independently measured baseline outcomes, and frozen typed background
+constraints. A candidate passes the structural gate when its feature--outcome
+adjacency meets the qualified, frozen criterion. This graph is distinct from
+the task-semantic Prompt TSG: FCI supplies selection evidence about relationships
+among measured variables, not new semantic edges within a prompt.
 
-\subsection{Stage II: Requirement Hypothesis Discovery and Selection}
-\label{sec:hypothesis-selection}
+The ranking score answers a different question: how much do outcome rates differ
+between the relevant natural requirement states? A \emph{risk difference} (RD)
+is a difference between outcome probabilities, expressed in percentage points.
+For the primary endpoint, the outcome is a request yielding valid code that can
+be assessed as secure (Section~\ref{sec:method-measurement}). The Atomic score
+compares the operation-specific target state with its baseline state using
+cross-fitting and covariate standardization. For addition, the comparison is
+expressed minus unexpressed; for removal, it is unexpressed minus expressed.
+Candidates are ranked by the absolute first-order RD, retaining the sign for
+interpretation without requiring a favorable direction. RD is computed from the
+discovery observations, not from FCI edge strengths; FCI determines structural
+admission, while RD determines priority.
 
-Stage II asks which TSG-derived templates should consume a fixed held-out evaluation budget. Observational structure supplies selection evidence only; it does not identify an intervention effect.
+For Pair hypotheses, the same admission--ranking separation uses a different
+structural source. A Prompt-TSG relation gate checks whether the two factors
+have the specified semantic relationship, such as a shared sink or distinct
+control points; it does not require their Atomic FCI admission. The ranking
+score is an absolute cross-fitted, standardized second-order RD. It compares
+the outcome-rate difference for one factor across the two states of the other,
+using all four natural factor-state cells. Thus, the Pair score targets
+interaction rather than the sum of two Atomic scores. Neither structural gate
+nor observational RD identifies the effect of an assigned prompt change.
+Generated code is evaluated to obtain outcomes, not inserted as a graph variable
+or treated as a mediator.
 
-\subsubsection{Constrained Observational Discovery}
+\subsubsection{Frozen Requirement Interventions}
+Atomic and Pair selectors retain budgets $K_A$ and $K_I$. The union of selected
+hypotheses undergoes one common conversion into concrete prompt policies.
+Each unique selected model-bound effect is confirmed once, and its result is
+reused by every selector slot that refers to it. Overlap can reduce duplicate
+evaluation, but cannot change a selector's denominator.
 
-For each configured CWE/security scope and generator model, $W$ contains a minimal approved set of pre-treatment task metadata, $X^0$ contains natural Prompt TSG queries, and $Y^0$ contains discovery outcomes measured by independent evaluators. Generated code is not a primary-PAG variable, and assigned arms and post-intervention projections do not enter this table.
+Before confirmation outcomes are available, each hypothesis fixes its scope,
+intervention direction, editing recipes and weights, comparison arms, eligible
+population rules, endpoint, and inference plan. Empty, failed, and
+non-evaluable slots remain in the original budget without replacement.
+The confirmation set cannot be reranked after seeing which changes succeed.
 
-The Prompt TSG supplies variables and typed background constraints, not causal edges. Temporal tiers prohibit outcomes from causing pre-treatment metadata or prompt factors; catalog types exclude semantically impossible relations. We run the established causal-learn FCI implementation with frozen conditional independence and search settings~\cite{spirtes1995fci,zheng2024causallearn}. Its PAG preserves endpoint uncertainty under latent-variable assumptions rather than selecting a convenient orientation~\cite{zhang2008ancestral}.
+Natural prompts that express different requirements can also differ in other
+ways. Confirmation therefore tests each frozen hypothesis by varying the
+assigned prompt policy while holding the task fixed. The intervention acts on
+the prompt, not directly on the code that the model will generate.
 
-A candidate is graph-admissible when its feature--outcome relation satisfies the frozen type and scope constraints and appears as a permitted adjacency or endpoint-compatible possible path, either globally or in its predeclared $C_q$-eligible population. Concurrent prompt factors are not interpreted as mediators merely because they co-occur in a PAG.
+There are two intervention directions. \emph{Requirement addition} (ADD)
+introduces a requirement whose absence has been resolved in the applicable
+source scope. It does not assume that baseline code lacks the corresponding
+protection. \emph{Requirement removal} (REMOVE) withdraws an identifiable source
+requirement through a task-preserving neutral counterpart; it does not instruct
+the model to implement the opposite, insecure behavior. In the SQL example,
+addition explicitly requests parameterization of the supplied identifier,
+whereas removal withdraws an existing parameterization requirement. Both retain
+the deletion and return behavior. The two directions remain separate policies
+and effect estimates, not interchangeable evidence about one symmetric effect.
 
-\subsubsection{Stability under Semantic-Cluster Resampling}
+For an Atomic hypothesis, the primary comparison is between a target edit $T$
+and an operation-matched no-op $N$. The no-op applies a matched rewrite without
+changing whether the target requirement is expressed: it leaves the requirement
+unexpressed for an addition policy and retains it for a removal policy. This
+comparison distinguishes the target requirement change from the matched editing
+operation. The primary contrast is target minus matched no-op, not target minus
+the untouched source prompt.
 
-We repeatedly resample whole semantic task clusters and rerun constrained FCI. All tasks, request-randomness slots, and outcomes descended from a sampled cluster move together. This prevents large families of near-duplicate tasks from dominating the support estimate. For candidate skeleton $\widetilde h$, we define
+Two additional controls address alternative explanations: a length-matched
+placebo or sham edit, and a direction-compatible generic-security instruction.
+Together with $T$ and $N$, these form the Atomic four-arm design. Their purpose
+is to distinguish a named requirement from rewriting, presentation changes,
+or nonspecific security guidance. Specificity conclusions require their own
+prospectively fixed secondary inference rules.
 
-\[
-  S(\widetilde h)
-  =\frac{1}{B_{\widetilde h}}
-  \sum_{b=1}^{B_{\widetilde h}}
-  \mathbb I\!\left[
-    \widetilde h\ \text{is graph-admissible in resample }b
-  \right].
-\]
+Pair hypotheses instead use a factorial design. For factor $j$, let $T_j$ be
+its target operator and $N_j$ its matched no-op. The four cells are
+\begin{equation}
+\begin{aligned}
+  A_{00}&=N_1+N_2, & A_{10}&=T_1+N_2,\\
+  A_{01}&=N_1+T_2, & A_{11}&=T_1+T_2.
+\end{aligned}
+\end{equation}
+This separates changing either requirement from changing both. The joint-target
+cell cannot introduce a third requirement. If the operators have not been shown
+to commute, the policy must cover both application orders with positive frozen
+weights or exclude the pair.
 
-$B_{\widetilde h}$ counts only resamples with the frozen minimum number of $C_q$-eligible semantic clusters. An ineligible resample does not enter the denominator; too few valid resamples makes the candidate non-rankable rather than relaxing the threshold. Full-data graph admissibility is a gate, after which $S(\widetilde h)$ supplies cluster-resampling support; frozen score components and canonical candidate order resolve ties. $S(\widetilde h)$ is a selection-stability measure, neither a causal probability nor evidence that an effect is homogeneous across task clusters.
+A policy can have several concrete editing recipes, called \emph{realizations},
+that specify wording and, where relevant, operator order. Their weights define
+the policy mixture to be evaluated. Before task-specific text is materialized,
+source-stratified balanced allocation assigns exactly one realization to each
+task--policy coordinate. Only its complete four-arm bundle is produced and
+checked. A pre-assignment failure is recorded without trying another
+realization, replacing the task, or renormalizing the weights. Realizations can
+therefore have different protocolizable populations.
 
-\subsubsection{Budgeted Selection and Hypothesis Freeze}
+Within each task-instance--policy--realization--model block, all arms receive
+equal generation-request counts and randomized execution order under the same
+frozen model and decoding policy. Repeated requests capture generation
+variability, not additional independent tasks. Effect identification assumes
+consistency, positive arm probabilities, and no cross-request interference.
 
-Each selector ranks the same frozen candidate universe under the same top-$K$ budget. The TSG-constrained FCI selector is compared with association, regularized prediction, LLM-based explanation, and seeded random ranking. The union of their selected skeletons crosses one selector-invariant bridge, so a shared candidate is protocolized and evaluated once.
+\subsubsection{Independent Outcome Measurement}
+\label{sec:method-measurement}
+A prompt may produce valid but insecure code, code whose security cannot be
+assessed, or no valid code at all. We keep these cases distinct. A security
+\emph{Oracle} is the study's fixed, arm-blind procedure for measuring security
+outcomes. The primary safety endpoint is \emph{oracle-evaluable secure-code yield}:
+\begin{equation}
+  Y=Y_CY_E\,\mathbb I\{\text{Oracle label is secure}\},
+\end{equation}
+where $Y_C$ indicates syntactically valid code and $Y_E$ indicates a supported
+Oracle decision. The endpoint counts requests yielding valid code that the
+security Oracle can evaluate and labels secure; it is not a security rate
+conditioned on successful generation.
 
-Before held-out outcomes exist, a successful bridge freezes
+The Oracle must be qualified for the admitted languages,
+task families, and code forms before formal use. Qualification includes
+representative secure, insecure, and unknown examples and checks for plausible
+differential errors. Separately, every syntax-valid program receives blinded
+functional review against the complete original task, not the edited prompt.
+Whole-task pass requires assessable material requirements and their fulfillment;
+unresolved requirements cannot be credited as satisfied.
 
-\[
-  h=\left\langle
-  \theta, o, Q_h, Y, d_h, \mathcal S_h, \Gamma_h
-  \right\rangle,
-\]
+No-code, invalid-code, and Oracle-unknown outcomes contribute no observed secure
+yield but keep their distinct labels. Unknown is not relabeled insecure.
+Missing infrastructure evidence is not a zero outcome: it blocks the affected
+analysis pending repair or replay of the same assignments. Every committed
+assignment otherwise remains under its assigned arm. Fidelity, semantic
+compliance, generation success, and non-target drift are diagnostics, not
+filters that redefine the analyzed population.
 
-where $o$ is ADD or REMOVE, $Q_h$ is a finite distribution over prompt-policy realizations, $Y$ is the target outcome, $d_h$ is the expected direction, $\mathcal S_h$ fixes the task, CWE, generator-model, and population scope, and $\Gamma_h$ fixes the primary and specificity contrasts, multiplicity family, and evidence rules. Thus Stage II freezes not only what to test, but also how the candidate will be tested. A selected slot that cannot be mapped or protocolized remains a failed slot within the original $K$; it is not replaced after inspecting held-out outcomes.
+Validity, Oracle coverage, unknown outcomes, functionality, and
+secure-and-functional joint success accompany the primary endpoint. Coverage
+sensitivity bounds distinguish gains in observed secure yield from changes in
+unobserved security outcomes. Thus, a higher secure yield alone is not reported
+as a lower underlying insecure-code rate when coverage changes.
 
-\subsection{Stage III: Evaluation of Requirement Effects}
-\label{sec:evaluation-effects}
+\subsubsection{Policy-Effect Estimation}
+The independent unit is the deduplicated task unit, not a generation request.
+For a fixed hypothesis $h$ and generator model, let $\bar Y_{ia}$ first average
+arm $a$'s request outcomes within each task instance and then combine instances
+within task unit $i$ using their frozen weights. A realization $r\in R_h$ has
+a prespecified weight $q_{hr}>0$, with $\sum_r q_{hr}=1$. If $n_{hr}$ eligible
+task units are allocated to that realization, the arm mean is
+\begin{equation}
+  \widehat\mu_{ha}
+  =\sum_{r\in R_h}q_{hr}
+     \left(\frac{1}{n_{hr}}\sum_{i:r_{hi}=r}\bar Y_{ia}\right).
+\end{equation}
+We average within each realization before applying its original weight.
+This preserves the declared policy mixture rather than letting realized sample
+counts or failures choose new weights.
 
-Stage III estimates what each frozen requirement policy does on cluster-disjoint held-out tasks. Randomization is the identification mechanism; effect evaluation is the scientific objective.
+The Atomic assigned-arm intention-to-treat (ITT) effect is the risk difference
+between target and no-op arm means:
+\begin{equation}
+  \widehat\tau_h=\widehat\mu_{hT}-\widehat\mu_{hN}.
+\end{equation}
+Unlike the observational RD used for prioritization, this contrast uses outcomes
+from assigned prompt interventions on held-out tasks. For a Pair, the primary
+RD interaction is the difference between two such contrasts:
+\begin{equation}
+  \widehat\delta_h
+  =(\widehat\mu_{h,11}-\widehat\mu_{h,01})
+   -(\widehat\mu_{h,10}-\widehat\mu_{h,00}).
+\end{equation}
+It asks whether the change associated with targeting one factor differs when
+the other factor is also targeted. A nonzero interaction alone does not show
+that the joint-target arm improves security. Both estimands remain specific
+to the frozen policy, population mixture, and generator model; they are not
+universal requirement effects or mediation claims.
 
-\subsubsection{Matched Prompt Arms}
+Uncertainty is computed by resampling whole task units within original source
+strata, carrying dependent arms, instances, effects, and models together and
+preserving the frozen realization/source weights. Atomic primary contrasts
+and Pair interactions use two separate simultaneous max-$|T|$ families.
+Their intervals distinguish positive-meaningful, negative-meaningful,
+practically null, and inconclusive effects relative to prespecified margins.
+Failed provenance, inadequate support, excessive unknown coverage, or invalid
+bootstrap support produces an explicit non-evaluable status, not an
+unadjusted fallback. Secondary specificity and functionality tests require
+separately frozen inference rules.
 
-For an ADD hypothesis, the target arm adds one scoped security requirement; for a REMOVE hypothesis, it replaces one existing requirement with the frozen task-preserving neutral counterpart. ADD and REMOVE remain separate hypotheses, protocols, and multiplicity coordinates. The no-op arm preserves the original factor state while undergoing a rewrite matched to the target arm. A length-matched placebo changes presentation without targeting $f$, and a direction-compatible generic control supplies security guidance without naming $f$. These arms separate the targeted prompt-policy effect from rewrite, presentation, and generic security-cue effects.
+Stage II supplies a model-bound policy-effect record linked to the source
+requirement, selected hypothesis, concrete edits, assignments, and measurements.
+These links allow an explanation to state exactly what was compared and what
+the resulting evidence supports. The observational reason for selection remains
+separate from the randomized finding, regardless of its direction or evaluability.
 
-Each hypothesis uses the finite realization distribution $Q_h$. A fixed executor materializes all required arms for every realization and eligible task. Before assignment, arm-blind validation checks task and context invariance, the permitted target/control delta, and matching requirements. No variant states an expected outcome or requests deliberately vulnerable code.
+\subsection{Stage III: Evidence-Grounded Explanations and Guidance}
+\label{sec:method-guidance}
 
-\subsubsection{Eligibility and Blocked Randomization}
+An effect estimate does not by itself tell a developer where to edit a prompt
+or whether the change is appropriate. We specify a fixed explanation format
+over the linked source, policy, and inference records. It connects the meaning
+of a requirement to a tested modification and the action its evidence can
+support. The explanation concerns observable effects of prompt policies,
+not the generator's internal reasoning.
 
-A task--hypothesis pair is arm-complete eligible only when its context and operation-source gates pass and every required arm and realization passes the pre-assignment checks. The complete eligible population is frozen before code generation. Blocked, balanced assignment operates within each task--hypothesis--realization--generator-model protocol block, while \texttt{semantic\_task\_cluster\_id} remains the highest independent sampling unit.
+\subsubsection{Evidence-to-Explanation Mapping}
+The explanation begins with the applicable task context and the requirement's
+operation, object, and condition bindings from Stage I. It identifies the
+source location or operation at which the requirement is expressed or would
+be added, together with the non-target behavior to preserve. The concrete
+target edit and its comparator then define the decision being explained.
+For an Atomic policy this is target versus operation-matched no-op; for a
+Pair, the explanation identifies both requirements and their four-cell design.
+An illustrative edit cannot silently replace the frozen policy mixture whose
+effect is reported.
 
-Target change, semantic compliance, and non-target drift measure realization fidelity after assignment. They are diagnostics, never denominator filters, adjustment variables, or substitutes for assigned arm $A$ in the primary ITT.
+The evidence portion distinguishes why the requirement was investigated from
+what the intervention established. Structural admission and observational RD
+provide the selection rationale. Randomized evidence provides the effect
+estimate, simultaneous interval, practical margin, and effect status for the
+tested generator and task population. Each statement draws on its corresponding
+record: semantic relationships do not become causal edges, and an observational
+rank does not become an estimated intervention effect. Missing evidence is
+identified as unavailable rather than supplied by a plausible narrative.
 
-\subsubsection{Assigned-Arm Effect Estimation}
+The explanation reports functionality and measurement limits alongside the
+security finding. It retains validity, Oracle coverage, unknown outcomes,
+functional pass/fail/unknown assessments, and joint success without treating
+them as interchangeable. Source incompleteness alone does not determine the
+functional label; the independent review of generated code against the original
+task does. Effect statements retain their model, endpoint, and frozen
+realization/population mixture. A task-local binding makes the explanation
+specific, but does not turn a population-average effect into a prediction for
+that individual task or establish transfer to a new task population.
 
-Generated code is measured by independent security and functional evaluators. The primary security outcome is oracle-evaluable secure-code yield: an assignment succeeds only when it produces valid code that the security Oracle supports and labels secure. Code validity, Oracle support, unknown coverage, functionality, and secure-and-functional joint success remain separate outcomes so that a production or coverage shift cannot masquerade as security.
+\subsubsection{Conditions for Security Guidance}
+Guidance states what action the available evidence warrants, including when
+no adoption advice can be given. Without formal randomized evidence, the
+output is an unconfirmed modification option with a reason to investigate it.
+Neither a high observational rank nor structural admission warrants describing
+that option as validated. With evaluable randomized evidence, the explanation
+can report the supported endpoint-specific effect even if other evidence
+needed for adoption is missing.
 
-For frozen hypothesis $h$, generator model $m$, and outcome $Y$, the primary contrast is the target-minus-no-op assigned-arm ITT risk difference
+A recommendation to adopt a tested edit additionally requires resolved
+applicability, the exact tested comparison, and security and task-preservation
+evidence meeting prospectively specified decision criteria. A favorable primary
+effect alone is insufficient: an increase in oracle-evaluable secure-code yield
+does not establish reduced underlying insecurity or preserved functionality.
+Likewise, absence of a detected functional loss does not establish preservation.
+The required secondary margins, coverage conditions, and joint decision rules
+must be fixed before inspecting the relevant confirmation outcomes. Where a
+required rule or result is unavailable, the explanation states that adoption
+advice is withheld and identifies the missing support; it still reports the
+available effect and uncertainty.
 
-\[
-  \Delta^{\mathrm{ITT}}_{h,m}
-  = \mathbb E[Y\mid A=\mathrm{target}]
-  - \mathbb E[Y\mid A=\mathrm{no\mbox{-}op}].
-\]
+For an Atomic contrast, negative-meaningful evidence supports a warning about
+the tested policy's effect on the named endpoint. Practically null evidence
+places that average policy effect within the declared margin and scope.
+For a Pair, these statuses instead describe the interaction: a negative or null
+interaction does not imply that the joint edit is harmful or ineffective.
+Inconclusive and non-evaluable evidence leave the corresponding estimand
+unresolved for different reasons.
+These findings are retained rather than converted into positive recommendations
+or omitted. A harmful removal cannot validate the reverse addition policy.
+For a Pair, a nonzero interaction describes how the two effects differ; advice
+to apply both requirements needs separately supported joint-benefit and
+task-preservation conclusions, not an interaction label alone.
 
-Every committed assignment enters under its assigned role. Terminal generation and syntax failures retain their predeclared outcome encoding; unavailable required evidence is non-evaluable and triggers replay of the same assignment rather than imputation. Point estimates average over the frozen task population and $Q_h$, and uncertainty resamples whole semantic task clusters. Target-minus-placebo and target-minus-generic contrasts assess specificity.
+In the SQL example, the resulting explanation links the supplied identifier
+and deletion operation to a proposed explicit parameterization requirement,
+states which deletion and return behavior the edit must preserve, and names
+the matched no-op comparison. It then reports the evidence available for that
+policy and its limits. Before confirmation, this is a task-grounded option to
+test. After confirmation, the same explanation format can present a supported
+effect or a reason to withhold advice. It never infers that the original code
+was insecure merely because the prompt left parameterization unexpressed.
 
-\subsubsection{Evidence Classification and Diagnostics}
-
-An effect is \textsc{Supported-Expected} only when its multiplicity-adjusted interval excludes zero in the prospectively frozen direction; interval exclusion in the other direction yields \textsc{Supported-Opposite}. Intervals that cross zero are \textsc{Inconclusive} unless the frozen practical margin supports the narrower \textsc{Null-Compatible} classification. Missing qualifying evidence yields \textsc{Non-Evaluable}. Realization heterogeneity, generator-model replication, fidelity, and non-target drift remain separate evidence or diagnostic dimensions and cannot promote the primary effect status.
-
-\subsection{Requirement Evidence Record}
-\label{sec:evidence-record}
-
-The requirement evidence record is the deterministic output interface of the three stages, not a fourth inference stage. For each hypothesis, it organizes
-
-\[
-  \mathcal E_h=
-  \left\langle
-  C_q,f,o,e_h^{\mathrm{selection}},Q_h,
-  \widehat{\Delta}^{\mathrm{ITT}}_h,CI_h,
-  s_h^{\mathrm{effect}},s_h^{\mathrm{specificity}},
-  s_h^{\mathrm{function}},\mathcal S_h,L_h
-  \right\rangle .
-\]
-
-The record states the applicable security context; editable requirement and operation; observational selection trace; tested policies; assigned-arm effect and interval; specificity and functionality evidence; claim scope; and the frozen study lineage $L_h$. Selection evidence is explicitly labeled as observational selection evidence, not an intervention-effect estimate.
-
-No single label collapses distinct conclusions. The effect axis distinguishes supported-expected, supported-opposite, inconclusive, null-compatible, and non-evaluable evidence. The specificity axis distinguishes supported, unsupported, inconclusive, not tested, and not applicable contrasts. The functionality axis distinguishes preserved, degraded, improved, inconclusive, and non-evaluable outcomes; ``preserved'' is used only when the frozen functionality rule supports that conclusion. These axes feed the RQ1--RQ3 analyses without hiding mixed evidence. RQ4 separately evaluates experts' perceived quality and usefulness of the explanation rendered from this record; those ratings do not validate discovery or intervention effects.
+This reporting step does not revise scientific effect statuses, remove
+assigned tasks, or rerank hypotheses. Computational evaluation assesses the
+evidence underlying proposed changes; the separate expert study assesses the
+perceived quality and utility of the explanation products.

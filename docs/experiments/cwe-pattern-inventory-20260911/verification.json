@@ -1,0 +1,45 @@
+{
+  "file": "D:\\MyCode\\Causal\\docs\\experiments\\cwe-pattern-inventory-20260911\\cwe-task-patterns.xlsx",
+  "date": "2026-09-11",
+  "sheets_checked": [
+    "说明",
+    "CWE总表",
+    "来源汇总",
+    "模式依据",
+    "任务清单",
+    "来源记录"
+  ],
+  "total_formulas": 620,
+  "tier_1": {
+    "status": "PASS_AFTER_MANUAL_FALSE_POSITIVE_REVIEW",
+    "hard_errors": 0,
+    "quoted_literal_false_positives": 236,
+    "reason": "The checker mistakes double-quoted criteria python, Weakness and Category for named ranges. Every diagnostic is a quoted string literal, not an undefined name."
+  },
+  "tier_2": {
+    "status": "SKIPPED",
+    "reason": "LibreOffice is not installed."
+  },
+  "independent_count_formula_replay": {
+    "status": "PASS",
+    "evaluated_formulas": 620,
+    "cached_values_match": true,
+    "supported_functions": [
+      "SUM",
+      "COUNTA",
+      "COUNTIF",
+      "COUNTIFS"
+    ],
+    "note": "Every formula was evaluated with a separate direct-XML counting evaluator before the final row-height adjustment; final values and source membership were independently rechecked. This is not a claim of testing an Excel engine."
+  },
+  "data_verification": {
+    "status": "PASS",
+    "cwe_rows": 117,
+    "source_task_identities": 2165,
+    "pool_tasks": 1992,
+    "source_examples_verified": 214,
+    "input_file_hashes_verified": 9
+  },
+  "final_status": "PASS",
+  "xlsx_sha256": "d6b0751f64ed96a9b4961a65edcce60f6fac01597af65ea382304d99915469f7"
+}

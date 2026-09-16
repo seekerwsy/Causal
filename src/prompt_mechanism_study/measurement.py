@@ -13,8 +13,11 @@ from prompt_mechanism_study.artifact_io import (
     require_sha256 as _digest,
 )
 from prompt_mechanism_study.functional_judge import (
+    JudgeGateError,
     build_review_request,
-    python_syntax_valid,
+    code_syntax_valid,
+    functional_source_scope,
+    syntax_parser_identity,
     validate_review_response,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
@@ -145,6 +148,18 @@ def measure_generated_code(
     """Execute the one active generated-code measurement sequence."""
 
     request = dict(generation_request)
+    language = functional_contract.get("language", request.get("language", "python"))
+    if not isinstance(language, str) or not language:
+        raise MeasurementExecutionError("functional contract language is invalid")
+    if request.get("language", language) != language:
+        raise MeasurementExecutionError("generation and measurement languages differ")
+    if not isinstance(security_profile_id, str) or not security_profile_id.startswith(language + "."):
+        raise MeasurementExecutionError("security profile language differs from the task")
+    if ("source_prompt_sha256" in functional_contract
+            and functional_contract["source_prompt_sha256"] != content_hash(source_task_prompt)):
+        raise MeasurementExecutionError("functional contract is bound to a different source prompt")
+    parser_identity = syntax_parser_identity(language)
+    functional_scope = functional_source_scope(functional_contract)
     raw = complete(request, generation_evaluator, generation_prompt)
     if not isinstance(raw, bytes):
         raise MeasurementExecutionError("generation provider response is not bytes")
@@ -153,16 +168,16 @@ def measure_generated_code(
         raise MeasurementExecutionError("generation response schema drift")
     code = response["code"]
     generator_digest = hashlib.sha256(raw).hexdigest()
-    language = functional_contract.get("language", request.get("language", "python"))
-    if not isinstance(language, str) or not language:
-        raise MeasurementExecutionError("functional contract language is invalid")
-    syntax_valid = language == "python" and python_syntax_valid(code)
+    syntax_valid = code_syntax_valid(code, language)
     evidence: dict[str, Any] = {
         "generation_request": request,
         "generation_response": raw.decode("utf-8"),
         "generation_response_sha256": generator_digest,
         "code": code,
         "syntax_valid": syntax_valid,
+        "syntax_parser": parser_identity,
+        "functional_source_scope": functional_scope,
+        "functional_review_policy": "judge_all_syntax_valid_source_scopes",
         "security": None,
         "functional_request": None,
         "functional_response": None,
@@ -200,38 +215,52 @@ def measure_generated_code(
             "security Oracle response does not replay from the frozen local profile"
         )
     requirements = _mapping_list(
-        functional_contract.get("requirements"),
+        functional_contract.get("requirements", []),
         "functional requirements",
     )
     dependencies = _string_list(
-        functional_contract.get("environment_dependencies"),
+        functional_contract.get("environment_dependencies", []),
         "functional environment dependencies",
     )
+    if not functional_contract.get("parent_contract_applies_to_current_input", True):
+        # A restored source is reviewed directly, without its former input's summary.
+        requirements, dependencies = [], []
     functional_request = build_review_request(
         code,
         source_task_prompt,
         requirements=requirements,
         environment_dependencies=dependencies,
         language=language,
+        source_scope=functional_scope,
     )
-    functional_raw = complete(
-        functional_request,
-        functional_evaluator,
-        functional_prompt,
-    )
-    if not isinstance(functional_raw, bytes):
-        raise MeasurementExecutionError("functional provider response is not bytes")
-    functional = validate_review_response(functional_raw, code)
-    functional_digest = hashlib.sha256(functional_raw).hexdigest()
+    functional_raw = None
+    functional_failure = None
+    try:
+        functional_raw = complete(functional_request, functional_evaluator, functional_prompt)
+        if not isinstance(functional_raw, bytes):
+            functional_raw = None
+            raise MeasurementExecutionError("functional provider response is not bytes")
+        functional = validate_review_response(functional_raw, code)
+    except (JudgeGateError, MeasurementExecutionError) as error:
+        # A failed secondary evaluator cannot erase the independently measured
+        # primary security endpoint. Keep functionality/joint unknown, with the
+        # exact failure and any raw response, rather than filtering the assignment.
+        functional_failure = {"error_type": type(error).__name__, "error_message": str(error)}
+        functional = {"status": "unknown", "reason": "functional_evaluator_failed",
+                      "failure": functional_failure}
+    functional_digest = (hashlib.sha256(functional_raw).hexdigest() if functional_raw is not None
+                         else content_hash(functional_failure))
     evidence.update(
         {
             "security": security,
             "functional_request": functional_request,
-            "functional_response": functional_raw.decode("utf-8"),
-            "functional_response_sha256": functional_digest,
+            "functional_response": functional_raw.decode("utf-8") if functional_raw is not None else None,
+            "functional_response_sha256": functional_digest if functional_raw is not None else None,
             "functional_validated": functional,
         }
     )
+    if functional_failure is not None:
+        evidence["functional_failure"] = functional_failure
     return (
         Measurement(
             assignment_id,
@@ -262,7 +291,7 @@ def close_target_measurements(
     if failures:
         raise ValueError("infrastructure failures require repair or replay before analysis")
     frozen_assignments = tuple(assignments)
-    if not frozen_assignments or any(
+    if any(
         not isinstance(getattr(item, "assignment_id", None), str)
         or not item.assignment_id
         for item in frozen_assignments

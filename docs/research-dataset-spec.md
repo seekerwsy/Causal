@@ -1,752 +1,307 @@
-# Prospective Research Dataset Specification
+# Prospective research dataset contract
 
-## Status and scope
+This document describes source admission and role capacity for the single
+[active protocol](protocol.md).
+It does not freeze a formal sample size, assign experimental roles, or authorize
+data acquisition. Earlier 240/296-task layouts and 100-Atomic/170-Pair suggestions
+are superseded planning history recoverable from Git.
 
-This document defines the prospective dataset design for the single active
-Prompt Mechanism Study path. The 240-task-unit Python population remains a
-coverage target, not a claim of current readiness. The previously reported
-1,222 quality-qualified tasks, 563 Python tasks, and 166 technically ready
-Python tasks belong to the frozen pre-successor v4 baseline; they are planning
-history, not the current quality authority. The active successor retains all
-2,165 task units and has completed the unanchored dual-subagent review, blind
-third adjudication, and repaired-subset re-review defined in
-[the contract content cleaning protocol](contract-content-cleaning.md). The
-independently verified successor contains 720 quality-included task units,
-1,284 source-insufficient exclusions, and 161 source-defect exclusions. Of the
-720 included units, 381 are Python; technical readiness remains a separate
-derived axis and currently marks 101 units ready under the existing stack.
-The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
-outcome-blind 60-task-unit sample as a historical population-feasibility and
-power-planning canary; it is not a frozen successor assignment manifest or
-evidence that an intervention effect exists.
+## Source authority
 
-Generator identities, assignment records, and the pilot split remain unfrozen.
-No generated-code outcome, model score, or historical per-task result may
-influence admission or sampling.
-
-## 1. Statistical units, terminology, and study layers
-
-The highest independent and resampling unit is the **task unit**, identified as
-`task_unit_id` in prospective protocols. A task unit is the cleaned dataset row
-seen by the experiment, but it may summarize several equivalent source records.
-Rows, prompt rewrites, source mutations, framework variants, language
-translations, request slots, and multiple hypotheses over the same semantic
-task are dependent descendants of that unit.
-
-The curation implementation groups source records into conservative semantic
-clusters before choosing a representative. Frozen artifacts therefore retain
-physical names such as `cluster_id` and `semantic_task_cluster_id`; these are
-legacy task-unit coordinates, not an additional paper-facing statistical
-concept. This document uses **task unit** for populations, sampling, assignment,
-resampling, and effect estimation, and reserves **cluster** for the internal
-deduplication group or an immutable legacy field/file name.
-
-The prospective dataset has three inferentially separate confirmation layers:
-
-| Layer | Target task units | Role | Primary pooling rule |
-| --- | ---: | --- | --- |
-| Python confirmatory core | 240 | primary assigned-arm ITT | may pool only under the frozen stratified estimator |
-| C/C++ memory-safety replication | 28 | cross-language replication | report separately |
-| backend-application replication | 28 | end-to-end functional/exploit replication | report separately |
-
-The planned evaluation population therefore contains 296 task units,
-but **296 is not one analysis denominator**. The two replication layers cannot
-be silently pooled with the Python core because their languages, task
-granularity, functional contracts, and security Oracles differ.
-
-Two additional outcome-excluded resources are planned:
-
-- 24 task-unit-disjoint tasks for intervention-executor development; and
-- 24 independent gold programs for functional-Judge and security-Oracle
-  calibration.
-
-Neither resource contributes to an intervention-effect estimate. Historical
-canaries, failed runs, Judge-tuning cases, and previously inspected
-confirmatory outcomes are also excluded.
-
-The observational discovery population is a fourth, non-confirmatory resource.
-It retains natural, unmanipulated Prompt variation, including explicit,
-implicit, and absent security requirements. It is task-unit-disjoint from every
-confirmation and replication layer. Discovery outcomes may rank hypotheses but
-never contribute to their held-out randomized effect estimates.
-
-## 2. Confirmatory security families
-
-The Python core targets four mechanism families with 60 task units per
-family. Leaf-CWE quotas are prospective balancing targets, not separate
-confirmatory estimands.
-
-### 2.1 Injection and interpreter boundaries
-
-Target 60 task units, approximately 15 per leaf:
-
-- CWE-78: OS command injection;
-- CWE-79: cross-site scripting;
-- CWE-89: SQL injection; and
-- CWE-94: code injection.
-
-### 2.2 File, parser, and external-resource boundaries
-
-Target 60 task units, approximately 10 per leaf:
-
-- CWE-22: path traversal;
-- CWE-434: unrestricted or dangerous file upload;
-- CWE-502: deserialization of untrusted data;
-- CWE-611: XML external entities;
-- CWE-776: recursive entity or resource amplification; and
-- CWE-918: server-side request forgery.
-
-### 2.3 Identity, authorization, permissions, and sensitive information
-
-The original planning target was 60 task units, approximately 10 per leaf:
-
-- CWE-200: exposure of sensitive information;
-- CWE-287: improper authentication;
-- CWE-306: missing authentication for critical function;
-- CWE-732: incorrect permission assignment;
-- CWE-798: hard-coded credentials; and
-- CWE-862: missing authorization.
-
-The pre-successor census contained 48 task units, but the stricter final v5
-quality authority retains 29 in this family: 6 CWE-200, 0 CWE-287, 3 CWE-306,
-2 CWE-732, 8 CWE-798, and 10 CWE-862. Because the seven-source census is
-complete, 60 is not an admission gate or a reason to manufacture, duplicate,
-or weaken tasks. Measurement support remains a separate derived axis. The
-older identities and source-test audit in
-`data/dataset-curation/identity-family-scope-v1.json` are retained as
-pre-successor planning history and cannot override the v5 quality disposition.
-
-### 2.4 Cryptography, randomness, and integrity
-
-Target 60 task units, approximately 12 per leaf:
-
-- CWE-295: improper certificate validation;
-- CWE-327: use of a broken or risky cryptographic algorithm;
-- CWE-328: use of a weak hash;
-- CWE-338: use of a cryptographically weak pseudo-random number generator;
-  and
-- CWE-347: improper verification of cryptographic signature.
-
-The primary paper-facing effect is the frozen overall, hypothesis-specific
-assigned-arm ITT over eligible Python-core task units. The four family results
-are preplanned heterogeneity estimates. Individual CWE results are descriptive
-unless a later, outcome-blind power simulation explicitly freezes a supported
-CWE-level family before generation.
-
-If a leaf quota cannot be filled by eligible, independent task units, the data
-gate fails for that planned coverage claim. Before any model outcome is read,
-the study may either acquire additional tasks, document an outcome-blind
-within-family redistribution, or narrow the prospective coverage. It may not
-duplicate tasks, count variants as independent, or pool unrelated CWEs to hide
-the shortfall.
-
-For Identity, the third option has now been taken prospectively: the paper may
-claim coverage of the final-v5 29-task census, but not balanced six-leaf or
-60-task coverage. Oracle qualification still controls which stratum can enter
-a particular confirmatory estimate; it does not remove the other units from
-the quality-qualified data set.
-
-## 3. Replication layers
-
-### 3.1 C/C++ memory safety
-
-The memory-safety layer targets four independent task units for each of
-CWE-119, CWE-120, CWE-125, CWE-190, CWE-416, CWE-476, and CWE-787, for 28
-task units total. Measurement requires compilation, a frozen functional test,
-and the applicable executable security check such as ASan/UBSan or a frozen
-exploit. A Python static-analysis result cannot substitute for this layer.
-
-### 3.2 Backend applications
-
-The backend layer targets 28 independent application scenarios with frozen
-functional tests and end-to-end security checks. BaxBench is the preferred
-initial source. Framework implementations of one scenario are dependent
-realizations of that scenario, not independent task units. The selected
-framework/language realizations and their weights must be frozen before any
-generation outcome is read.
-
-## 4. Candidate source policy
-
-The Python-core inventory retains eligible candidates from the current cleaned
-SecurityEval, LLMSecEval, SALLM, CWEval, CodeSecEval/SeCodePLT, and CyberSecEval
-Instruct collections. Source breadth is reported rather than used as a task
-quality threshold.
-
-`source_lineage_family` records derivation and task overlap, not merely dataset
-name or author institution. A copied, translated, reformatted, or mutated task
-remains in the same lineage unless independence is demonstrated.
-
-For the Python core:
-
-- lineage identity and concentration are diagnostics, not admission gates;
-- selection prefers an underrepresented lineage only after family and leaf-CWE
-  balance, without rejecting an otherwise qualified task;
-- the paper reports source-specific estimates and leave-one-lineage-out
-  sensitivity when the frozen sample makes them estimable;
-- exact and semantic duplicates across all sources count once; and
-- dataset availability or previous model performance cannot change the
-  selection rule after outcomes are visible.
-
-The local CyberSecEval source is the submission-provided **Instruct Prime**
-dataset snapshot at
-`datasets/Submission Code and Results/Data/Instruct Prime/instruct.json`.  It
-contains 1,404 records (251 Python) and has SHA-256
-`2bbc433c91a625dd82fa2f9e71d94b7318e1b6bbb077987d058d71a80a022788`.
-It is byte-identical to the `instruct.json` placed in the accompanying modified
-PurpleLlama working tree.  It is not byte-identical to that working tree's
-upstream commit `db023dcdf35971c8fb1def3a0ba460c7e1bbdf0c`, whose committed
-file contains 1,916 records and has SHA-256
-`c1ea5ca9a6e6aa4e9af8bcba701f78fb7077fbb859afd4d61b11b6cb9ed3f6a6`.
-The study treats this 1,404-record file directly as the external dataset version
-it received; it does not need to reconstruct how that external version was
-created.  The paper and artifact report the snapshot name, size, path, digest,
-citation, and upstream address, without calling it an official `instruct-v2`
-release.  Our own outcome-blind lineage, deduplication, contract, and Oracle
-gates start from these 1,404 records.  Bundled model
-responses, statistics, logs, and notebooks are never selection inputs.
-
-SecurityEval, CodeSecEval, and SeCodePLT follow the same scientific admission
-pipeline as the other candidate sources.  The final artifact records each
-source's citation, address, version, and content digest.  License metadata is
-descriptive provenance rather than a separate sampling stratum.  CodeSecEval
-SecEvalBase and its SecurityEval ancestors nevertheless remain one lineage for
-sampling and cannot be counted as independent tasks.
-
-The first cleaning pass proceeds in this order:
-
-1. SALLM and CWEval, to validate normalization and functional-contract import
-   against sources with explicit licenses and source-native tests;
-2. the local CyberSecEval Instruct Prime snapshot;
-3. LLMSecEval, to fill prospectively specified mechanism-family shortfalls;
-4. SecurityEval, CodeSecEval, and SeCodePLT; and
-5. BaxBench and C/C++ sources in their separate replication layers.
-
-## 5. Data quality and later study admission
-
-The field-level authority is `docs/task-unit-data.md` plus its executable
-verifier. This section states only the research boundary so that the data
-specification cannot drift into another hand-maintained schema.
-
-The prospective pipeline has separate records and freeze points:
-
-```text
-TaskUnitRecord
-  -> FunctionalContract
-  -> QualityDecision
-  -> RoleExposureRecord
-  -> provisional TechnicalReadiness
-  -> PromptTSG after method freeze
-  -> HypothesisEligibility after hypothesis freeze
-  -> Assignment after confirmation freeze
-```
-
-Admission to the quality-qualified curated corpus requires only:
-
-1. immutable and traceable source identity;
-2. complete representative model-visible input;
-3. a coherent software request with observable behavior;
-4. a source-bound functional contract that is faithful and sufficiently
-   evaluable under blind review; and
-5. no unrecoverable source defect or unresolved source-level insufficiency.
-
-CWE, mechanism, Oracle, runtime, exposure, ADD/REMOVE applicability, formal
-role, and split do not determine data quality. A task may therefore be
-`QUALITY_INCLUDED` while remaining outside the current study or unsupported by
-the current measurement stack.
-
-`ADD/REMOVE eligibility` is not an original task property. It is derived only
-after a concrete hypothesis freezes its target control, natural source state,
-operation, allowed requirement delta, Prompt TSG policy, and measurement
-profile. Discovery eligibility, confirmation eligibility, role assignment,
-and assignment are likewise separate successor artifacts and never appear in
-the source-data tables.
-
-The formal allocator must enforce zero task-unit overlap across roles and at
-most one selected task unit per frozen near-duplicate group across the union of
-all prospective formal roles. Development or outcome exposure restricts later
-role reuse but does not rewrite quality. A supported Oracle profile may still
-return `unknown` for generated code; that outcome remains explicit and is never
-recoded as secure or removed from assigned-arm ITT.
-
-## 6. Deduplication and clustering
-
-Deduplication proceeds before sampling and includes:
-
-1. exact source and prompt identity;
-2. normalized prompt identity;
-3. source-location and upstream-commit identity;
-4. known benchmark derivation and mutation relations; and
-5. conservative semantic clustering with frozen model/rules, thresholds, and
-   human-adjudication procedure.
-
-The implementation first emits lexical candidate pairs within the same
-language block. CWE labels are retained as attributes but cannot be retrieval
-blocks because copied tasks may carry inconsistent CWE annotations across
-sources. Those pairs are only a scalable retrieval stage: they do
-not become semantic duplicates until a separately frozen blind adjudication
-accepts them.  Exact duplicates require no model adjudication.
-
-The adjudication tests task identity rather than mechanism-family similarity:
-two records share a cluster only when their functional contracts are
-substitutable up to incidental naming, library, route, formatting, or
-presentation changes. Tasks that merely share an operation such as XML
-parsing, password hashing, command execution, or memory allocation remain
-independent when their required inputs, outputs, side effects, or user-visible
-goals differ. This prevents single-linkage chains from collapsing a broad
-mechanism family into one experimental unit.
-
-An outcome-blind retrieval benchmark compared character 3--5-gram TF--IDF with
-the frozen `BAAI/bge-base-en-v1.5` revision
-`b4595376fce1812665312d0557400026cdeb7739`.  Across 357 deterministic
-signature-and-contract views and 230 directed known-lineage queries, both
-methods reached Recall@10 = 1.0.  TF--IDF ranked contract-view targets more
-highly (MRR 0.983 versus 0.950), so the embedding method failed the prospective
-+0.05 Recall@10 admission threshold.  The artifact therefore keeps TF--IDF for
-candidate retrieval and the blind LLM for semantic adjudication; it does not
-add an embedding runtime dependency.  This is an artifact-specific engineering
-decision, not a claim that lexical retrieval dominates embeddings generally.
-The frozen setup and hashes are recorded in
-`docs/experiments/2026-08-22-dedup-retrieval-benchmark.md`.
-
-Uncertain semantic similarity is not sufficient to merge confirmatory units.
-Only exact-prompt identity and frozen source-lineage identity currently have
-merge authority. LLM and retrieval similarities are retained as diagnostics.
-Discover, development, calibration, confirmatory, and replication boundaries
-are cluster-disjoint under this conservative rule.
-
-### 6.1 Frozen seven-source curation artifact
-
-The outcome-blind curation covers 2,283 normalized task records from the seven
-candidate datasets. Language-blocked lexical retrieval produced 4,744
-candidate pairs, all classified by a frozen blind adjudication with
-`qwen3.5-flash-2026-02-23`. An independent stress-tail review later found that
-the LLM-positive edges were not precise enough to define confirmatory
-experimental units: only 8 of 30 lowest-similarity accepted edges were judged
-substitutable instances of the same task. That sample diagnoses over-merging;
-it is not a population precision estimate.
-
-The active assembly therefore applies only exact-prompt and known-lineage
-must-links. It produces 2,165 conservative clusters: 2,047 singletons and 118
-pairs, with no LLM edge applied. The earlier 1,844-cluster result is retained
-only as an engineering/sensitivity artifact. Of the 2,165 conservative cluster
-representatives, 1,844 matched an existing security-neutral functional contract
-by record ID and prompt hash. The remaining 321 contracts were extracted in 17
-blinded batches and all resolved, so the active contract set now covers all
-2,165 representatives. The frozen local bundles are:
-
-Here, `resolved` means that every representative received a schema-valid extracted
-contract; it does **not** mean that all 2,165 contracts passed an independent
-semantic-quality review. A later outcome-blind 25-contract development pilot found
-that one strong LLM reviewer was not accurate enough to serve as an automatic gate
-(fault precision and recall were both 4/6 on the pilot), while a deterministic scan
-found 71 contracts containing response-format instructions as functional
-requirements. The successor review therefore treats LLM output as triage and
-requires a corrected contract bundle plus independent adjudication for tasks that
-may enter a formal experiment. See
-`docs/experiments/2026-08-31-functional-contract-review-pilot.md`.
-
-The complete outcome-blind review has now processed all 2,165 contracts in 433
-closed batches. It labels 1,667 contracts `faithful` and 498 `faulty`; functional
-evaluability is 1,378 `sufficient`, 769 `limited`, and 18 `insufficient`. The
-strict conjunction of no deterministic issue, `faithful`, and `sufficient`
-contains 1,203 reviewer-qualified candidates, but the review explicitly records
-that semantic quality and final experiment eligibility are not established. A
-diagnostic audit of 30 reviewer-qualified Python candidates still found a clear
-material omission plus multiple evaluability and CWE/scope concerns. The
-pre-successor 373-task Python census intersected the original strict set in 216
-task units. These were review candidates, not an automatically admitted sample. Full
-counts, evidence identities, and protocol risks are recorded in
-`docs/experiments/2026-08-31-functional-contract-review-full.md`.
-
-A deterministic successor bundle removes the 71 pure response-format requirements,
-retains all 2,165 task units, and gives only the corrected contracts new content
-IDs. This repair does not resolve semantic faults. Its local path is
-`.codex-runtime/contract-repair-7c9dc1c-20260831-05`, with bundle SHA-256
-`1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`.
-Replaying the complete review against that explicit repair lineage yields 1,215
-strict contracts; the additional 12 are cases whose only deterministic issue
-was the removed response-format instruction.
-
-- semantic pair decisions:
-  `.codex-runtime/semantic-curation-seven-v9-strict-20260823-12/final`,
-  SHA-256 `ecd11b14e55241aa5bf912e90abb1b1b65e09c1543d5ffd47b63efdba46dea26`;
-- historical conflict-constrained clusters (engineering/sensitivity only):
-  `.codex-runtime/semantic-clusters-seven-v10-constrained-20260823-13`,
-  SHA-256 `f592bfcaf77b3c86a1bc96c2f191b65afbb2f4f3c74b4a6c87dc46e4f0c179da`;
-- active conservative clusters:
-  `.codex-runtime/semantic-problem-pilot-final`,
-  SHA-256 `88e22630523f571070be6427d91ad34106c72343ccdfed1b584da3790eccd263`;
-- independent outcome-blind review:
-  `.codex-runtime/semantic-cluster-independent-review-20260823-28`,
-  SHA-256 `3f663654595f342cf432f9ecebc357db0437c08285b5152c557a24d777a83d42`;
-- historical functional contracts available for exact representative reuse:
-  `.codex-runtime/contract-curation-seven-v7-20260823-20/final`,
-  SHA-256 `be661b9121830b4757eae86e766affba57aa59916347d1120b0bb3354b94b2ca`;
-- pre-repair complete functional contracts:
-  `.codex-runtime/gate-c-contracts-complete/contracts-full/final`,
-  SHA-256 `eef5ed574bc5bebcbee07ecaee9ff5e7dd24d8c8dba32cd75c5d103be3daa3e0`;
-- full functional-contract quality triage:
-  `.codex-runtime/contract-quality-triage-37acead-20260831-03-r6-closed/final`,
-  SHA-256 `137f94f6b629585f60308d927496b4ae980bd4b8e1efcadc50ebbb71478623cc`;
-- deterministic response-format repair successor:
-  `.codex-runtime/contract-repair-7c9dc1c-20260831-05`,
-  SHA-256 `1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`;
-- historical combined handoff:
-  `.codex-runtime/dataset-curation-seven-final-20260823-21`,
-  SHA-256 `e4617233d5c2b805aadcc3f1fe9f2b67ce73c66959e382f0d526ac0b594898d1`.
-
-No generated program, experimental arm, Security Oracle output, or experiment
-outcome was supplied to curation. The artifacts are preparation evidence and
-do not themselves support a scientific effect claim.
-
-### 6.2 Active all-task subagent successor
-
-The active content authority supersedes the pre-successor counts below. It
-reviewed every one of the 2,165 task units with two unanchored subagent reviews
-and a blind third review for disagreements. Repairs were limited to nonterminal
-contracts or contracts rejected by a deterministic protocol invariant, and
-every changed subset was independently re-reviewed. The final quality
-distribution is:
-
-| Disposition | All languages | Python |
-| --- | ---: | ---: |
-| `QUALITY_INCLUDED` | 720 | 381 |
-| excluded: insufficient source specification | 1,284 | not used as an admission pool |
-| excluded: source defect | 161 | not used as an admission pool |
-
-The included corpus spans Python 381, C 67, C++ 66, JavaScript 54, C# 55,
-Java 37, Rust 33, PHP 19, and Go 8. It also spans all seven source lineages:
-CyberSecEval Instruct Prime 313, CodeSecEval Plus 128, CWEval 70, SeCodePLT
-64, SALLM 56, SecurityEval 54, and LLMSecEval 35.
-
-The canonical reviewer artifact is tracked at
-`data/dataset-curation/reviewer-task-unit-dataset-v5`. It was copied
-byte-for-byte from `.codex-runtime/subagent-full-review/final-data-v7-a`; the
-independent `final-data-v7-b` build remains byte-identical execution evidence.
-All three copies share bundle SHA-256
+`data/dataset-curation/reviewer-task-unit-dataset-v5` is the immutable source/contract
+quality baseline. Its manifest SHA-256 is
 `33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
-The verifier status is
-`VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`. The review uses no
-CWE/readiness metadata, experimental role, arm, generated code, Oracle result,
-or outcome. Prompt TSG remains intentionally empty until the method is frozen.
+It retains 2,165 task units: 720 quality-included, 1,284 excluded for insufficient
+source specification and 161 excluded for source defects. Of the included tasks,
+381 are Python. The active data-preparation population now includes all 2,165
+tasks across the nine source languages and all three quality dispositions.
+Existing mechanism bindings, Oracle readiness and method scores do not determine
+which source tasks exist in that population. Current prompt-bound contracts and source-quality decisions come from the
+independently reviewed `research-source-use-v2` preparation package described
+below. Formal task-candidate admission is separate and remains unqualified.
 
-The prospective source-population decision selects exactly the 381
-`QUALITY_INCLUDED` Python task units from this bundle. Its sorted task-unit ID
-set hashes to
-`d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8`.
-The 101 records currently marked technically ready remain a diagnostic subset,
-not an admission condition or formal role.
+The task unit is the highest independent sampling/resampling unit. Source
+variants, paraphrases, repeated requests and multiple policies applied to a task
+are dependent descendants. Frozen `semantic_cluster_id` names belong to curation
+history and continue to identify those same units.
 
-During review, two protocol ambiguities were exposed and corrected only for
-their affected nonterminal subsets: response-envelope instructions are not
-software behavior, and `source_prompt_sha256` denotes the canonical-JSON
-content hash rather than raw unquoted bytes. The final frozen review protocol
-states both rules explicitly. Subagent decisions are the released curation
-authority, not human gold; reproducibility is defined by frozen packets,
-decisions, plans, prompts, and deterministic merges rather than future model
-sampling producing identical prose.
-
-A final corpus-wide invariant scan reopened 105 previously terminal contracts:
-87 contained a response-envelope residue, 19 were included while still marked
-`ambiguous`, and one met both conditions. Fresh source-only repair and separate
-dual review closed that defect class; five remaining extraction errors received
-one final bounded repair. The final verifier reports zero such residues and
-zero stale contract-quality blockers in readiness.
-
-### 6.3 Pre-successor frozen candidate ledger
-
-The frozen v4 outcome-blind audit emits one upstream record for each of the 2,165 task
-units. Its physical `final_dataset_status` and mutually exclusive
-`candidate_status` fields are retained only as legacy compiler inputs. The
-reviewer-facing v4 bundle replaces them with an explicit quality disposition,
-an exposure/role record, and a multi-axis derived readiness view. A failure on
-one axis never erases a task or silently hides another blocker.
-
-Applying the former quality-only rule to all 2,165 task units placed 1,222 in the
-quality-qualified curated corpus. It contains 563 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
-58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, six remain
-pending independent review of a known material
-omission or functional-evaluability concern. Another 930 task units remain pending
-contract-quality repair, and seven incoherent source prompts are excluded. All
-dispositions remain in the complete ledger.
-
-The old audit's 164 `READY_CONFIRMATORY` rows were a provisional implementation
-view, not the definition of the curated corpus or a formal experiment role.
-The response-format repair produced 1,215 strict contracts. A bounded
-outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
-that otherwise had mechanism, Oracle, and runtime support: eight stale or
-self-contradictory review labels were corrected, six contracts were repaired,
-and three source-inconsistent cases remained pending. That pre-successor population
-contains 1,229 strict and 936 repairable contracts.
-
-The deterministic registry matcher left 220 task units ambiguous or unresolved.
-A blind Qwen3.7-Max review saw only the source prompt, repaired functional
-contract, and finite same-CWE registry candidates. It produced 86 bindings to
-qualified local profiles, two bindings to a registered but unsupported
-contextual profile, and 132 not-applicable or unresolved decisions. All accepted
-bindings carry a literal source-prompt evidence span. Three spans were recovered
-by a deterministic case-insensitive contiguous-subspan projection; two weak
-anchors were conservatively downgraded to unresolved. This binding review is a
-single-model curation decision, not human gold.
-
-A subsequent outcome-blind case adjudication reviewed the 21 unresolved rows
-that affected quality-qualified tasks. Six were grounded to an existing
-realization with exact prompt evidence and 15 remained unresolved because the
-registered mechanism would narrow or change the task contract. The bounded
-Oracle extension then admitted only Python-literal dictionary parsing,
-Requests certificate validation, and explicit cipher/hash selection shapes; it
-did not generalize those profiles to arbitrary code execution, custom TLS
-contexts, dynamic algorithm names, or contextual identity policy.
-
-A second outcome-blind review then adjudicated all twelve quality flags from
-the earlier diagnostic sample. Five functionally coherent tasks were admitted:
-four remain `PENDING_SCOPE` because their source CWE does not match the prompt
-mechanism, and one remains `PENDING_BINDING`. One unresolved literal
-`<language>` prompt was reclassified as a source defect. Five genuinely
-under-specified contracts and one material contract omission remain pending.
-This review therefore increased data-quality coverage without changing the
-legacy compiler's 164-task `READY_CONFIRMATORY` count. The corrected v4 view
-derives 166 technically ready tasks because exposure is no longer conflated
-with technical support.
-
-For historical traceability, the upstream compiler input had these mutually
-exclusive candidate statuses:
-
-| Status | Task units |
-| --- | ---: |
-| `READY_CONFIRMATORY` | 164 |
-| `PENDING_CONTRACT` | 930 |
-| `PENDING_ORACLE` | 209 |
-| `PENDING_RUNTIME` | 174 |
-| `PENDING_BINDING` | 59 |
-| `PENDING_INDEPENDENT_REVIEW` | 15 |
-| `PENDING_SCOPE` | 607 |
-| `EXCLUDED_SOURCE_DEFECT` | 7 |
-
-They are not the current readiness protocol. The v4 reviewer bundle reports
-scope, mechanism registration, binding, Oracle, runtime, functionality, and
-quality-review axes independently. Its single workstream is only a
-deterministic `primary_next_action`. Exposure exists exclusively in the role
-record, so removing exposure from technical readiness can change the derived
-technical-ready count without changing any task, contract, or measurement
-support.
-
-The 166 technically ready Python task units cover seven source lineages and
-thirteen CWEs; 141 are unexposed. All remain quality-qualified regardless of
-lineage composition; exposure is a separate role coordinate. This historical
-population is planning evidence, not the active successor or a frozen confirmatory
-sample. CyberSecEval contributes
-57/166 (34.3%) of the technically ready pool; this is reported as a
-transportability diagnostic rather than an exclusion rule.
-
-The Security-Oracle registry published with the audit distinguishes 14
-qualified deterministic Python profiles, one registered contextual profile
-that remains unsupported, and 28 BaxBench source-native profiles pending Docker
-qualification. The target-schema producer delegates the 12 immutable legacy
-profiles and owns only the two new CWE-295/CWE-327 profiles. A task can be
-`READY_CONFIRMATORY` only with a qualified profile; an unsupported or missing
-profile remains `PENDING_ORACLE`.
-
-The priority-extension inventory contains 207 source-tested task units:
-
-| Priority tier | All candidates | Strict-contract subset | Remaining gate |
-| --- | ---: | ---: | --- |
-| Python mechanism extension | 113 | 89 | freeze a task-applicable MechanismSpec and Oracle profile |
-| C/C++/Go/JavaScript extension | 94 | 80 | freeze language runtime, intervention realization, and Oracle |
-
-The C/C++ memory-safety data pool contains 102 strict, non-exposed candidates
-across the seven planned CWEs and has at least four per CWE. Only six reference a
-source functional test, so compilation, frozen functional tests, and
-task-applicable sanitizer/exploit measurement remain a runtime gate. The audit
-does not prematurely choose four per CWE before those measurements exist.
-
-The BaxBench snapshot contains exactly 28 independent scenario files, 34
-source-native functional tests, 70 source-native security tests, and 14
-dependent framework realizations. Its data-coverage target is met, but every
-scenario remains `PENDING_RUNTIME_QUALIFICATION` until the frozen Docker replay
-passes and one framework realization per scenario is selected before outcomes.
-
-The active closed artifacts are:
-
-- adjudicated mechanism-binding run:
-  `.codex-runtime/mechanism-binding-adjudication-20260831-19`, SHA-256
-  `089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`;
-- targeted outcome-blind contract recovery:
-  `.codex-runtime/contract-recovery-adjudication-20260831-10`, SHA-256
-  `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`;
-- target Security-Oracle qualification:
-  `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`,
-  SHA-256
-  `fc4216dc7cb6e8f8e0377e69e300bded30485f1725b7d855504adab3b396ab75`;
-- schema-3 mechanism registry:
-  `data/method/phase-context-policy-v3-mechanism-registry-v1.json`, SHA-256
-  `bff8b78e67520725d7cdd644b77ad7c2d6df64531bee0479a2c08ba9d1874970`;
-- schema-3 eligibility policy:
-  `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`, SHA-256
-  `8d8401ad3c1a45b295d4febdef8a5fb3f524e11b88f28e7a447afcd0b97792fb`;
-- independent blind quality adjudication:
-  `data/dataset-curation/contract-quality-independent-adjudication-v1.json`, SHA-256
-  `d98983a1af79361a6f6b2d9ff49a3f3ff235f87d0650fd14a4de9bb26a812650`;
-- candidate-data audit after independent quality adjudication:
-  `.codex-runtime/dataset-final-quality-20260831-40-independent-quality`,
-  SHA-256
-  `2b74784e5917bd6a76f9bddc4aac0f24c0a332cc4ad60cd3113a4ab9c428f143`;
-- audit report:
-  `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
-
-No generated program, assigned arm, Security-Oracle output, Functional-Judge
-verdict, or experiment outcome was consulted. The ledger completes data
-disposition, but it does not authorize confirmatory generation while the Python
-population and both replication runtime gates remain closed.
-
-### 6.3 Historical outcome-blind eligibility audit (superseded)
-
-The previous implementation-readiness audit classified all 1,844 historical
-clusters
-against the frozen study layers, mechanism registry, qualified Functional
-Oracle, and available Security Oracle profiles. It did not require a
-source-native executable test because the frozen Python functional outcome is
-AST/compile validity plus a blinded whole-task LLM review; source tests remain
-an independently recorded evidence attribute.
-
-Its result was 204 `eligible`, 456 `calibration_only`, and 1,184 `excluded`
-clusters. The 204 historically runnable Python clusters covered only five
-registered CWEs: CWE-78 (84), CWE-89 (42), CWE-502 (22), CWE-328 (23), and
-CWE-338 (33). Their family support is:
-
-| Python family | Eligible | Target | Gate |
-| --- | ---: | ---: | --- |
-| injection and interpreter | 126 | 60 | count pass |
-| file, parser, external resource | 22 | 60 | count fail |
-| identity, authorization, permissions | 0 | 60 | count fail |
-| cryptography, randomness, integrity | 56 | 60 | count fail |
-
-These counts are not valid for sampling from the new 2,165-cluster population.
-Before the correction, the prospective 240-task-unit Python population gate did
-**not pass**. In addition, 148 of the 204 eligible representatives came from the
-CyberSecEval Instruct Prime lineage. That concentration remains evidence of a
-narrow source mixture, but it no longer invalidates otherwise qualified tasks.
-This is a transportability diagnostic, not an experiment result and not a
-reason to sample selectively from previously favorable tasks.
-
-The closed audit bundle is
-`.codex-runtime/dataset-eligibility-seven-v3-final-20260823-24`, SHA-256
-`a6b17780f6051e316d17500b5dd98b5de24b6b766a6a2f4d829b1d7bd1abbac1`.
-It contains separate eligible, calibration-only, and excluded manifests plus
-the complete per-cluster decision ledger.
-
-## 7. Arms and assignment budget
-
-The successor protocol uses one operation-specific four-arm family per frozen
-hypothesis. ADD uses `TARGET_PATCH`, `NOOP_REWRITE`,
-`LENGTH_MATCHED_PLACEBO`, and `GENERIC_SECURITY_REMINDER`. REMOVE uses
-`TARGET_REMOVE`, `NOOP_RETAIN`, `LENGTH_MATCHED_SHAM_EDIT`, and
-`GENERIC_SECURITY_REPLACEMENT`. The primary contrast is Target minus the
-operation-matched No-op. Placebo/sham and generic contrasts are secondary
-specificity evidence.
-
-The 60-task-unit canary contains 15 independent task units per mechanism
-family, but it does not imply 240 successor assignments. A task enters an ADD
-block only when its context is present and source feature is absent; it enters
-a REMOVE block only when the feature is present and its task-preserving neutral
-counterpart is frozen. The earlier `absent`, `specific`, `generic`, and
-`placebo` design and its `specific - placebo` contrast remain immutable legacy
-study coordinates and are not reused for successor confirmation.
-
-The dataset size does **not** determine the final assignment count. Assignment
-count is computed only after the hypothesis freeze as the sum over frozen
-hypotheses, their eligible task populations, realizations, models, request
-slots, and arm protocols. Therefore the earlier arithmetic of 592 or 688
-assignments is a budgeting illustration, not a frozen run contract.
-
-## 8. Outcome-blind sample-size gate
-
-The 240-task-unit Python core is a prospective design target, not a substitute
-for hypothesis-specific power analysis. Before confirmation, simulation must
-use plausible and documented values for:
-
-- baseline oracle-evaluable secure-code yield;
-- within-task-unit dependence among descendant records or realizations;
-- request-randomness and realization heterogeneity;
-- terminal-no-code and Oracle-unknown rates;
-- the minimum scientifically important effect;
-- the number of selected hypotheses and all primary contrasts; and
-- the frozen max-|T| multiplicity procedure.
-
-The simulation reports power and interval width for each selected hypothesis's
-actual eligible task-unit set. A total pool of 240 cannot rescue a hypothesis
-with sparse applicability. If the target design is insufficient, the study
-must acquire more eligible task units, reduce the prospectively selected
-hypothesis family, or report that confirmation is not supported. It cannot
-change the denominator, combine incompatible strata, or continue sampling in
-response to the observed effect.
-
-### 8.1 Frozen minimum validation design
-
-The active outcome-blind design bundle is
-`.codex-runtime/study-design-python-four-arm-v1-20260823-48`, SHA-256
-`f9df3a6ff55698914e9f515ab07249b8aea70c8c838be665544d9c2d36aeebe0`.
-It selects 60 unique task units with no co-selection violation and exactly 15
-per family. That immutable historical artifact happened to include at least
-three lineages per family and a maximum lineage contribution of 15/60 under its
-then-active hard constraints. Those constraints are not carried into the
-prospective successor. The active selector balances family and leaf CWE first,
-uses lineage only as a non-excluding tie-breaker, and then uses frozen hash
-order. Selection uses only frozen task, contract, lineage, mechanism, and
-Oracle-profile fields.
-
-The existing paired `specific - placebo` planning calculation used a
-20-percentage-point minimum effect, two-sided alpha 0.05, and a prospective
-discordant-pair probability of 0.30; its normal-approximation power was 0.807,
-falling to 0.688 if discordance was 0.40. This remains an
-assumption-conditional legacy planning diagnostic, not observed effect evidence
-and not a successor Target-Noop power authorization.
-
-Confirmatory generation is not yet authorized. The next successor gate must
-first freeze hypotheses, operation-specific eligibility, complete realization
-support, generator identity, arm texts, request slots, and the actual assignment
-count. It then reruns power simulation for each selected hypothesis's eligible
-task-unit set and Target-Noop primary contrast before any confirmation outcome
-is generated.
-
-The simulation assumptions, code, seeds, candidate curves, chosen design, and
-maximum authorized sample are frozen before the first confirmatory generation.
-
-## 9. Freeze sequence and acceptance gate
-
-The only accepted sequence is:
+The structural data contract is [task-unit data](task-unit-data.md); source-only
+contract review follows [contract content cleaning](contract-content-cleaning.md).
+The immutable v5 baseline can be verified without replaying development history:
 
 ```text
-source inventory and version lock
--> CWE normalization and source-lineage mapping
--> exact and semantic deduplication
--> functional-contract and Oracle-profile admission
--> outcome-blind power simulation
--> stratified task-unit sampling with a fixed seed
--> task, split, hypothesis-eligibility, and arm manifests frozen
--> confirmatory generation authorized
+prompt-mechanism-study curate finalize task-units verify data/dataset-curation/reviewer-task-unit-dataset-v5
 ```
 
-The final freeze must publish counts by layer, family, leaf CWE, language,
-granularity, source lineage, functional-contract type, Oracle profile, and
-eligibility status; all excluded and unresolved candidates remain counted with
-typed reasons.
+## Disjoint roles
 
-The planned design is accepted only when:
+The formal manifest must distinguish `QUAL_DEV`, one-shot `QUAL_ACCEPT`,
+`DISCOVERY`, `CONFIRMATION` and `LEGACY_ONLY`, with task-unit and near-duplicate
+firewalls. Development exposure is recorded and cannot be erased by changing a
+dataset name. Source-only curation alone is not a model-development exposure;
+using task-level feedback to revise the method is.
 
-- all 240 core, 28 memory, and 28 backend targets are either filled by eligible
-  independent task units or a prospective shortfall amendment is documented
-  before outcomes;
-- the primary hypothesis-specific power gate passes;
-- development, calibration, and all scientific layers are task-unit-disjoint;
-- source-lineage composition is published and the prespecified source
-  sensitivity analyses are run when estimable;
-- every admitted task has a functional contract and calibrated Oracle profile;
-- the assignment budget is recomputed from the frozen hypothesis and arm
-  manifests; and
-- no selector, generator, Judge, Oracle, or historical per-task outcome was
-  consulted during admission or sampling.
+The source-only review-candidate reservation bundle
+`data/method/qwen37flash-qualification-source-review-candidates-v1` reserves 28
+tasks for each qualification role, with manifest SHA-256
+`1912f9c5cad5d43ddfdc44aff688c3eee62891184dc39aa6bb7e1a61ab4860ff`.
+Those reservations do not constitute a complete formal role manifest or permit
+an acceptance call. Their source labels, any subsequent development results,
+and role authorization are separate records.
 
-Until those conditions pass, this document specifies the intended study design
-but does not authorize a confirmatory run or a paper claim that the final
-dataset has been frozen.
+## Full-source preparation and candidate sufficiency
+
+The current broad research pool is
+`data/dataset-curation/research-candidate-pool-v4`, derived from the prepared
+inputs below and the recorded qualification/development exposures. It includes
+**1,954 independent tasks** across all nine languages: 775 complete, 1,178 partial
+and one unresolved functional specification. The 1,179 non-complete specifications
+are retained for task-relative functional review, not assigned unknown in advance.
+It preserves 163 protected tasks outside this pool, leaves 47 unprotected source
+defects pending correction, and retains one duplicate only as a dependent variant.
+Thus all 2,165 source task identities remain accounted for.
+
+The same pass reuses existing source evidence for context, security boundary and
+non-target invariants: **144 Atomic task-policy combinations on 65 tasks** pass
+these three axes. Original target-operation and control judgments are retained
+for intervention review, not converted to success. Pair has no supported joint
+source combination in the existing review book. Missing policy definitions and
+Oracle support do not remove tasks from the broad pool. Pool membership is not
+candidate eligibility or formal admission. See the
+[current preparation record](experiments/2026-09-11-main-study-preparation.md) for
+the original command, input identity and validation. The
+[natural-source preflight](experiments/2026-09-16-tsg-natural-source-preflight.md)
+adds eight prospectively recorded development exposures, taking the additional
+exposure count from 33 to 41 and the Python pool from 692 to 684. All 30 additional exposures in
+the [open-TSG development comparison](experiments/2026-09-11-open-tsg-effects.md)
+are protected, including tasks that were not assigned experimental arms. The
+earlier 1,995-, 1,992- and 1,962-task snapshots retain their original exposure boundaries.
+
+`data/dataset-curation/research-source-use-v2` is the single active preparation
+package. Its manifest SHA-256 is
+`2015d760cbeaacff16e701ad25a507e5973960a31b0ecd7de8d4b769bf7a741c`.
+It contains nine data files plus the exact-byte manifest. `prepared-tasks.json`
+contains every actual prompt, unchanged parent task identity, language, near-duplicate
+group, protected use and current measurement contract. `task-uses.json` records
+current source quality, restrictions and pending requirements. `source-material.json`
+contains inert source assets and exact recovery provenance.
+`source-contract-reviews.json` carries eight complete independent review rounds;
+`native-source-reviews.json`, `candidate-context-reviews.json` and
+`candidate-source-reviews.json` preserve the separate source-only judgments.
+`source-use-rule.json` fixes their rules and `report.json` records reproducible
+counts, environment and input identities.
+
+The package's frozen rule requires source-supported context, target operation, security boundary,
+non-target invariants and arm compatibility for each exact Atomic or Pair policy.
+Missing facts remain unresolved; Pair review does not require selected Atomic
+parents. A partially specified task may pass this source-only rule while complete
+functionality remains unknown. Source defects require correction and independent
+review. Passing source sufficiency alone grants no representation, intervention,
+Oracle or formal design qualification.
+
+The prospective revision in [protocol Section 19](protocol.md#19-prospective-sample-size-and-data-gate)
+separates three source axes (context, operation/security boundary and non-target
+invariants) from operation and control design. The frozen package remains the
+current prepared input source, with its original review counts; it has not been
+rescored under the revision. Its builder/verifier reproduce the earlier rule only.
+The [bounded development check](experiments/2026-09-10-proportional-prototype.md)
+uses already exposed material to examine the new semantics before any expanded
+qualification or formal admission.
+
+The executed preparation and independent byte replay cover all 2,165 tasks and
+2,283 source members. Original source quality and role files are unchanged.
+SeCodePLT's upstream default prompt includes the function name, security policy
+and setup code; the earlier import omitted parts of these original inputs.
+The package records 134 restored input candidates, applies 124 to unexposed,
+unreserved tasks, and withholds 10 to preserve frozen role/reservation inputs.
+Each applied restoration retains its parent task and has fresh independent
+source-contract review; it cannot inherit the old prompt's qualification.
+No independent task is added.
+
+An additional 893 original asset references are recovered: 765 CodeSecEval
+functional-test/security-test/entry-point references and 128 SeCodePLT setup or
+dependency references. There are now 1,645 bindings to 1,458 unique byte assets
+across 606 tasks. Source test roles are upstream declarations, not verified coverage;
+reference answers are excluded and no source code is executed.
+
+| Preparation boundary | Tasks |
+|---|---:|
+| All Python sources | 853 |
+| All non-Python sources | 1,312 |
+| Preserve existing QUAL_DEV / LEGACY_ONLY | 25 / 41 |
+| Preserve QUAL_DEV / QUAL_ACCEPT reservations | 28 / 28 |
+| Unexposed and unreserved, before any eligibility decision | 2,043 |
+| Independent near-duplicate groups in that remainder | 2,042 |
+| Originally quality-included in that remainder | 638 |
+| Of those: Python / other languages | 306 / 332 |
+| Of those: unchanged input / restored input | 584 / 54 |
+| Currently source-quality included in that remainder | 789 |
+| Of those: Python / other languages | 397 / 392 |
+
+The four authorized cohorts were processed in order, with disjoint task membership:
+
+| Cohort | Tasks | Current source quality: included / insufficient / defect |
+|---|---:|---|
+| Restored upstream inputs | 124 | 88 / 31 / 5 |
+| Unchanged insufficient sources with native assets | 124 | 61 / 61 / 2 |
+| Other unchanged insufficient sources | 1,055 | Original insufficient quality retained |
+| Unchanged source defects | 156 | 56 / 60 / 40 |
+
+The first, second and fourth cohorts have 404 current contracts that are faithful,
+evidence-supported and terminal after independent review and required repairs.
+The third cohort received candidate-level review while retaining its source
+quality. Across all 2,165 tasks, current quality is 871 included, 1,246 insufficient
+and 48 source defects. The corresponding functional scope is 871 complete, 1,245
+partial and 49 unresolved; these are specification scopes, not observed functional
+success. The 789 available quality-included tasks comprise 584 unchanged tasks
+outside this follow-up and 205 included tasks from the reviewed cohorts.
+
+All 1,459 cohort tasks have context screening over all 22 frozen proposal groups
+(32,098 group decisions) and 1,482 required candidate records. Eleven Atomic
+records on 11 distinct tasks pass source sufficiency only; no Pair record passes.
+The proposal book contains 48 Atomic and eight Pair proposals
+with concrete definitions currently limited to Python. All 964 retained non-Python
+tasks in this follow-up have explicit missing-definition states (21,208 group
+decisions). They are not declared semantically inapplicable. Likewise,
+`NO_SOURCE_CONTEXT` means no supported context in this finite book, not feature
+absence or universal ineligibility. Pair review is independent of Atomic selection
+or support. The other 584 available tasks still need this candidate review.
+
+Native content review covers 284 tasks and all 662 of their bindings. It records
+450 functional-assertion mappings and 123 security-assertion mappings, each tied to
+exact source and asset evidence. Mappings do not establish passing tests or complete
+coverage; no source asset was executed and no measurement qualification was granted.
+The preparation retains every source-quality disposition, adds no task units and
+has zero formal admissions. Source-CWE routing remains diagnostic and cannot
+replace these semantic judgments.
+
+`measure_generated_code` now parses exact source in Python, C, C++, C#, Go, Java,
+JavaScript, PHP and Rust through the same measurement path. Python uses AST/compile;
+the other languages use pinned Tree-sitter grammars from the `languages` extra.
+These are nonexecuting syntax checks, not compiler, security or functional
+qualification. Profiles must match the source language before generation.
+An incomplete or restored-unreviewed source keeps functionality and joint success
+unknown even if independently measured security is evaluable. Non-Python target
+interventions and security/functional qualification remain pending.
+
+After installing `.[dev,selectors,languages]`, independently verify the released
+prepared inputs, role firewall, current contracts, complete review lineage, source
+assets and counts:
+
+```text
+prompt-mechanism-study curate finalize source-use data/dataset-curation/reviewer-task-unit-dataset-v5 data/method/qwen37flash-qualification-source-review-candidates-v1 data/method/prompt-tsg-catalog-source-contract-v2.json data/method/phase-context-policy-v3-mechanism-registry-v1.json data/dataset-curation/research-source-use-v2
+```
+
+Without raw source locations this reports `SOURCE_USE_STRUCTURE_VERIFIED`. The
+report's `reproduction.command` records the exact producer invocation, seven
+source roots, two pinned archives and review inputs; use a new output directory
+to reproduce preparation. Add the recorded `--source-root` and `--source-archive`
+arguments to the verification command above for full `SOURCE_USE_VERIFIED`
+replay. Review-lineage verification reads the complete embedded judgments and
+does not require the original development review directories.
+The recorded environment is Python 3.12.13 on Windows 11 build 26200. Parser
+versions and producer-file hashes are recorded in the package. No provider calls,
+new roles or scientific effects were produced.
+
+Validation on 2026-09-10 used a fresh Python 3.12.13 environment with a
+non-editable installation of `.[dev,selectors,languages]`. The retained suite uses
+the released v2 preparation and then-current configuration references. The commands
+below record that historical validation, before the minimum-suite cleanup; current
+checks use the [test guide](../tests/README.md). Its exact command was:
+
+```text
+python -m pytest -q -o addopts= -o cache_dir=.tmp/sequential-source-review-20260909/v2-release-pytest-cache --basetemp .tmp/sequential-source-review-20260909/v2-release-test-01
+```
+
+Use a new temporary output directory for a new run. A default-temp attempt was
+blocked during fixture setup by existing Windows directory permissions; the
+command above keeps temporary files and cache in the workspace.
+The full run passed 272 checks and found one obsolete test assumption: it searched
+for an unreviewed restored contract, while v2 has reviewed all 124 restorations.
+The existing test now replaces a current reviewed-contract reference with its
+original v5 reference and verifies rejection. Its focused rerun passed, completing
+validation of all 273 retained checks:
+
+```text
+python -m pytest -q -o addopts= -p no:cacheprovider --basetemp .tmp/sequential-source-review-20260909/v2-restored-contract-recheck "tests/test_datasets.py::test_released_source_use_replays_and_rejects_permission_drift[restored_contract]"
+```
+
+The installed-package commands `study smoke` and `study verify-result` ran against
+`.tmp/sequential-source-review-20260909/final-reviewer-smoke`.
+The seven-stage smoke produced 80 assignments, measurements and outcomes across
+20 synthetic task units; independent verification returned
+`TARGET_RESULT_BUNDLE_VERIFIED`. The artifact remains `NON_CLAIM_TEST_ARTIFACT`,
+with zero provider calls. Its bundle SHA-256 is
+`3c63bb76176af0f344b40cab8e388917005a9d7895e7e57d29e9afcb7a8e073e`.
+
+## Prior bounded Python capacity diagnostic
+
+`qualification_data.summarize_source_role_capacity` verifies both source and
+reservation bundles, reads source quality, CWE routing and exposure metadata,
+and counts the prior 21-CWE residual population. It does not read Prompt TSG results,
+candidate ranks, generated code, experimental arms or outcomes. The checked
+2026-09-07 census is:
+
+| Population | Task units |
+|---|---:|
+| Quality-included Python | 381 |
+| In the current 21-CWE layer | 227 |
+| Unexposed before the qualification reservations | 211 |
+| Reserved in the two qualification candidates | 56 |
+| Prior scoped residual capacity before candidate eligibility | 155 |
+
+The 155 residual tasks also have 155 distinct near-duplicate groups.
+
+| Source family | Residual task units |
+|---|---:|
+| Injection/interpreter | 64 |
+| File/parser/external resource | 52 |
+| Identity/authorization/permissions | 25 |
+| Cryptography/randomness/integrity | 14 |
+
+These remain reproducible subset diagnostics, not the active full-source selection
+rule. They are pre-eligibility upper bounds. A policy scoped to one CWE or context
+cannot treat the entire pool as eligible. Actual support additionally requires
+qualified representation, context/operation-source rules, independent Oracle
+coverage, complete arm protocolization, realization support and frozen folds.
+No candidate-specific Confirmation population has passed those checks.
+
+## Capacity and power gates
+
+Formal task counts must come from an accepted task-level power simulation of the
+actual weighted family bootstrap. The former Gaussian planning figures no longer
+qualify any sample size. The study cannot currently claim either that 155 tasks
+are sufficient or that a particular new acquisition count is scientifically required.
+Global counts cannot replace candidate-specific eligibility, and extra request
+slots cannot create independent task units.
+
+Discovery supplementation is optional pre-Discovery preparation only. After
+representation qualification and a frozen outcome-blind coverage target, D0 may
+use one bounded round of independently sourced natural tasks. It may not use
+paraphrases, synthetic cell filling, interventions, outcome/selector scores or
+relation support to choose acquisitions. D0 does not supply or relabel a
+Confirmation population. Any separate Confirmation acquisition or scope change
+needs a prospective source/role decision before its outcomes.
+
+An authorized D0 round keeps its original role manifest and appends new Discovery
+bindings in a successor manifest. The receipt binds both versions; all existing
+bindings, qualification identities, Confirmation reservations and exposure records
+remain exact. New units must match the receipt, be independent of every existing
+role, and lie within the frozen qualification/source scope.
+
+Power planning now supports exact task-effect membership, including partial
+overlap. Before Confirmation, the existing preflight reconstructs actual support
+and realization allocation and reruns the frozen assumptions. This changes no
+target power, K, task counts, margins or budget after Discovery. Failure blocks
+execution; it does not justify replacing tasks or hypotheses. This capability
+does not establish that the present source capacity has adequate scientific power.
+
+The present status is blocked on qualification, candidate coverage, role allocation
+and the scientific power/budget freeze. No source records, exclusions or historical
+results are changed to make a numerical target pass.
+
+The [data preparation follow-up](experiments/2026-09-09-data-preparation-next-steps.md)
+records an import repair for five additional source records, a mislabeled external
+snapshot, and a metadata-only worklist. These pending records and source inventories
+do not change the frozen v5 population. The five additional records remain outside
+the 2,165-task preparation package; the 155-task count above retains its prior scope.

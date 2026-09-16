@@ -11,6 +11,7 @@ from prompt_mechanism_study.artifact_io import (
     verify_bundle,
 )
 from prompt_mechanism_study.inference import (
+    EvidenceLevel,
     SharedEvidenceRecord,
     TargetSelectorYieldResult,
 )
@@ -30,11 +31,11 @@ from prompt_mechanism_study.study_design import (
     DiscoveryDesignFreeze,
     FormalBudgetPreflight,
     FormalReportAuthorization,
-    RQ1BudgetQualification,
     StudyFreezeIndex,
 )
+from prompt_mechanism_study.study_planning import RQ1BudgetQualification
 
-from prompt_mechanism_study.verification.design import verify_target_study_freezes
+from prompt_mechanism_study.verification.design import _check_target_study_freezes
 from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
 from prompt_mechanism_study.verification.integrity import (
     TARGET_RESULT_PACKAGE_FILES,
@@ -43,12 +44,13 @@ from prompt_mechanism_study.verification.integrity import (
     target_result_package_index,
 )
 from prompt_mechanism_study.verification.qualification import (
-    verify_formal_budget_preflight,
+    _check_formal_budget_preflight,
     verify_rq1_budget_qualification,
 )
 from prompt_mechanism_study.verification.reporting import (
-    verify_formal_report_authorization,
-    verify_target_rq_tables,
+    _check_formal_authorization,
+    _check_target_rq_tables,
+    verify_target_execution_artifacts,
 )
 
 def verify_target_result_components(
@@ -69,6 +71,52 @@ def verify_target_result_components(
     yields: TargetSelectorYieldResult,
     report: Mapping[str, object],
     authorization: FormalReportAuthorization | None = None,
+    execution_artifacts: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Independently verify every component, including shared statistical evidence."""
+    evidence_verification = verify_target_shared_evidence(evidence, yields)
+    return _check_target_result_components(
+        manifest=manifest,
+        budget=budget,
+        discovery=discovery,
+        ledger=ledger,
+        union=union,
+        dispatch=dispatch,
+        randomization_plan=randomization_plan,
+        task_bundles=task_bundles,
+        assignments=assignments,
+        preflight=preflight,
+        confirmation=confirmation,
+        index=index,
+        evidence=evidence,
+        yields=yields,
+        report=report,
+        authorization=authorization,
+        execution_artifacts=execution_artifacts,
+        evidence_verification=evidence_verification,
+    )
+
+
+def _check_target_result_components(
+    *,
+    manifest: DataRoleManifest,
+    budget: RQ1BudgetQualification,
+    discovery: DiscoveryDesignFreeze,
+    ledger: FixedSlotLedger,
+    union: SharedConfirmationUnion,
+    dispatch: ConfirmationDispatchManifest,
+    randomization_plan: TargetRandomizationPlan,
+    task_bundles: Sequence[TargetTaskBundle],
+    assignments: Sequence[AssignedArmITTRecord],
+    preflight: FormalBudgetPreflight,
+    confirmation: ConfirmationFreeze,
+    index: StudyFreezeIndex,
+    evidence: SharedEvidenceRecord,
+    yields: TargetSelectorYieldResult,
+    report: Mapping[str, object],
+    evidence_verification: Mapping[str, object],
+    authorization: FormalReportAuthorization | None = None,
+    execution_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Independently close every scientific boundary in one target result package."""
 
@@ -91,6 +139,10 @@ def verify_target_result_components(
             raise TypeError(f"target result package requires a typed {label}")
     if authorization is not None and type(authorization) is not FormalReportAuthorization:
         raise TypeError("target result package authorization must be typed or null")
+    if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED} and authorization is None:
+        raise ValueError("executed result packages require verified execution evidence and authorization")
+    if authorization is None and execution_artifacts is not None:
+        raise ValueError("test result packages cannot attach formal execution artifacts")
 
     frozen_assignments = tuple(assignments)
     if any(type(item) is not AssignedArmITTRecord for item in frozen_assignments):
@@ -102,13 +154,13 @@ def verify_target_result_components(
         raise ValueError("target result package assignments must use canonical order")
 
     budget_verification = verify_rq1_budget_qualification(budget)
-    preflight_verification = verify_formal_budget_preflight(
+    preflight_verification = _check_formal_budget_preflight(
         budget,
         dispatch,
         canonical_assignments,
         preflight,
     )
-    freeze_verification = verify_target_study_freezes(
+    freeze_verification = _check_target_study_freezes(
         manifest=manifest,
         budget=budget,
         discovery=discovery,
@@ -134,35 +186,25 @@ def verify_target_result_components(
         evidence.ledger.dispatch != dispatch
         or evidence.ledger.assignments != canonical_assignments
         or evidence.plan != expected_plan
-        or not assigned_task_units
         or not assigned_task_units <= confirmation_task_units
     ):
         raise ValueError("target result evidence is outside the frozen confirmation boundary")
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
     authorization_verification = None
     if authorization is not None:
-        authorization_verification = verify_formal_report_authorization(
-            manifest=manifest,
-            budget=budget,
-            discovery=discovery,
-            ledger=ledger,
-            union=union,
-            dispatch=dispatch,
-            randomization_plan=randomization_plan,
-            task_bundles=task_bundles,
-            assignments=canonical_assignments,
-            preflight=preflight,
-            confirmation=confirmation,
-            index=index,
-            evidence=evidence,
-            yields=yields,
-            authorization=authorization,
+        if preflight.actual_power_results is None:
+            raise ValueError("formal claims require independently verified actual task-support power")
+        verify_target_execution_artifacts(
+            discovery=discovery, confirmation=confirmation, evidence=evidence,
+            environment_reference=authorization.execution_environment,
+            command_reference=authorization.execution_command,
+            provider_ledger_reference=authorization.provider_call_ledger,
+            execution_artifacts=execution_artifacts,
         )
-    table_verification = verify_target_rq_tables(
-        evidence,
-        yields,
-        report,
-        authorization,
+        authorization_verification = _check_formal_authorization(
+            index, evidence, yields, authorization, freeze_verification, evidence_verification,
+        )
+    table_verification = _check_target_rq_tables(
+        evidence, yields, report, authorization, evidence_verification,
     )
     return {
         "status": "TARGET_RESULT_COMPONENTS_VERIFIED",
@@ -250,6 +292,7 @@ def load_and_verify_target_result_bundle(root: Path) -> dict[str, object]:
         TargetSelectorYieldResult,
     )
     raw_authorization = read_json_exact(root / "formal_report_authorization.json")
+    execution_artifacts = read_json_exact(root / "execution_artifacts.json")
     authorization = (
         None
         if raw_authorization is None
@@ -287,6 +330,7 @@ def load_and_verify_target_result_bundle(root: Path) -> dict[str, object]:
         yields=yields,
         report=report,
         authorization=authorization,
+        execution_artifacts=execution_artifacts,
     )
     if stored_verification != verification:
         raise ValueError("target result verification receipt failed independent replay")
@@ -308,6 +352,7 @@ def load_and_verify_target_result_bundle(root: Path) -> dict[str, object]:
         report=report,
         verification=verification,
         authorization=authorization,
+        execution_artifacts=execution_artifacts,
     )
     if stored_index != expected_index:
         raise ValueError("target result package index failed independent replay")

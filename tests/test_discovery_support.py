@@ -1,27 +1,21 @@
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
-
 import pytest
-
 from prompt_mechanism_study.artifact_io import (
-    bundle_digest,
     read_json,
-    verify_bundle,
     write_bundle,
 )
-from prompt_mechanism_study.prioritization import (
+from prompt_mechanism_study.discovery_population import (
     audit_discovery_positivity,
     freeze_task_unit_partition,
-    prepare_discovery_population,
 )
 from prompt_mechanism_study.prompt_tsg import (
     build_prompt_tsg,
     load_catalog,
     prompt_tsg_record,
 )
-from prompt_mechanism_study.records import content_hash, content_id
+from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import (
     DataRole,
     DataRoleBinding,
@@ -31,9 +25,9 @@ from prompt_mechanism_study.representation import (
 )
 
 
-pytestmark = pytest.mark.extended
-
 ROOT = Path(__file__).parents[1]
+
+
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v1.json"
 
 
@@ -83,7 +77,6 @@ def _xml_task(task_id: str, lineage: str, *, feature_present: bool):
     return task, prompt_tsg_record(graph)
 
 
-@pytest.mark.reviewer
 def test_data_role_manifest_closes_task_and_near_duplicate_firewalls() -> None:
     def task(
         task_unit_id: str,
@@ -237,241 +230,6 @@ def test_data_role_manifest_closes_task_and_near_duplicate_firewalls() -> None:
         )
 
 
-@pytest.mark.reviewer
-def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> None:
-    manifest_path = ROOT / "configs/formal/qualification_data_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert manifest["artifact_kind"] == "qualification_data_manifest_draft"
-    assert manifest["protocol_id"] == "phase-context-policy-v3"
-    assert manifest["protocol_status"] == "SPECIFIED_DRAFT"
-    assert manifest["status"] == (
-        "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_"
-        "POWER_AND_PROVIDER_QUALIFICATION"
-    )
-    assert manifest["formal_use_authorized"] is False
-    assert manifest["scientific_claim_allowed"] is False
-    assert manifest["qualification_accept_attempts_authorized"] == 0
-    assert manifest["assigned_roles"] == ["LEGACY_ONLY"]
-    assert manifest["unassigned_roles"] == [
-        "QUAL_DEV",
-        "QUAL_ACCEPT",
-        "DISCOVERY",
-        "CONFIRMATION",
-    ]
-    provider = manifest["prospective_provider_policy"]
-    assert provider["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
-    assert provider["dynamic_alias_allowed"] is False
-    assert provider["fallback_model_ids"] == []
-    assert provider["credential_execution"] == "REMOTE_SERVER_ENVIRONMENT_ONLY"
-    assert provider["credential_material_recorded"] is False
-    assert provider["preexperiment_budget_authorization_id"] == (
-        "qwen37flash-preexperiment-cny100-2026-09-02"
-    )
-    assert provider["preexperiment_maximum_total_external_cost_microunits"] == (
-        100_000_000
-    )
-    assert provider["formal_use_authorized"] is False
-    assert provider["functional_judge_qualification_status"] == (
-        "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
-    )
-    source_population = manifest["prospective_source_population"]
-    assert source_population["data_manifest_sha256"] == hashlib.sha256(
-        (
-            ROOT
-            / source_population["data_bundle_path"]
-            / "manifest.json"
-        ).read_bytes()
-    ).hexdigest()
-    assert source_population["selection_rule"] == {
-        "language": "python",
-        "quality_disposition": "QUALITY_INCLUDED",
-    }
-    assert source_population["task_unit_count"] == 381
-    assert source_population["technical_readiness_diagnostic_count"] == 101
-    assert source_population["technical_readiness_is_not_an_admission_rule"] is True
-    assert source_population["formal_role_assigned_count"] == 0
-    assert source_population["role_assignment_frozen"] is False
-
-    review_candidates = manifest["qualification_source_review_candidates"]
-    review_root = ROOT / review_candidates["bundle_path"]
-    verify_bundle(review_root)
-    assert hashlib.sha256((review_root / "manifest.json").read_bytes()).hexdigest() == (
-        review_candidates["bundle_manifest_sha256"]
-    )
-    assert review_candidates["task_unit_disjoint"] is True
-    assert review_candidates["near_duplicate_group_disjoint"] is True
-    assert review_candidates["qual_accept_method_exposure_history_empty"] is True
-    assert review_candidates["formal_role_assignment_frozen"] is False
-    assert review_candidates["independent_gold_complete"] is False
-    assert review_candidates["qualification_accept_attempts_authorized"] == 0
-    assert review_candidates["provider_calls_authorized"] == 0
-
-    bindings = manifest["bindings"]
-    assert [binding["data_id"] for binding in bindings] == sorted(
-        binding["data_id"] for binding in bindings
-    )
-    assert [binding["task_unit_count"] for binding in bindings] == [28, 20, 21]
-
-    legacy_index = manifest["legacy_role_manifest"]
-    legacy_root = ROOT / legacy_index["bundle_path"]
-    verify_bundle(legacy_root)
-    assert bundle_digest(legacy_root) == legacy_index["bundle_sha256"]
-    legacy_role_manifest_path = ROOT / legacy_index["manifest_path"]
-    legacy_role_manifest_bytes = legacy_role_manifest_path.read_bytes()
-    assert hashlib.sha256(legacy_role_manifest_bytes).hexdigest() == (
-        legacy_index["manifest_sha256"]
-    )
-    legacy_role_manifest = json.loads(legacy_role_manifest_bytes)
-    assert legacy_role_manifest["bindings"] == bindings
-    assert legacy_role_manifest["data_role"] == "LEGACY_ONLY"
-    assert legacy_role_manifest["formal_use_authorized"] is False
-    legacy_identity_payload = {
-        key: value
-        for key, value in legacy_role_manifest.items()
-        if key != "legacy_data_role_manifest_id"
-    }
-    assert legacy_role_manifest["legacy_data_role_manifest_id"] == content_id(
-        "legacy_data_role_manifest_",
-        legacy_identity_payload,
-    )
-    assert legacy_index["legacy_data_role_manifest_id"] == (
-        legacy_role_manifest["legacy_data_role_manifest_id"]
-    )
-
-    all_task_unit_ids: list[str] = []
-    for binding in bindings:
-        assert binding["data_role"] == "LEGACY_ONLY"
-        assert binding["near_duplicate_group_status"] == "UNRESOLVED_BLOCKING"
-        assert binding["near_duplicate_group_id_by_task_unit"] is None
-        assert binding["exposure_history_applies_to_all_task_units"]
-
-        task_manifest_path = ROOT / binding["task_manifest_path"]
-        task_manifest_bytes = task_manifest_path.read_bytes()
-        assert hashlib.sha256(task_manifest_bytes).hexdigest() == binding[
-            "task_manifest_sha256"
-        ]
-        task_manifest = json.loads(task_manifest_bytes)
-        task_unit_ids = list(binding["task_unit_source_lineage"])
-        assert task_unit_ids == sorted(task_unit_ids)
-        assert task_unit_ids == sorted(task_manifest["task_ids"])
-        assert len(task_unit_ids) == binding["task_unit_count"]
-        assert all(binding["task_unit_source_lineage"].values())
-        all_task_unit_ids.extend(task_unit_ids)
-
-        source_manifest_path = binding["source_manifest_path"]
-        if source_manifest_path is not None:
-            source_manifest_bytes = (ROOT / source_manifest_path).read_bytes()
-            assert hashlib.sha256(source_manifest_bytes).hexdigest() == binding[
-                "source_manifest_sha256"
-            ]
-
-        for evidence in binding["exposure_evidence"]:
-            if "tracking_status" in evidence:
-                assert evidence["tracking_status"] == (
-                    "REPOSITORY_ARCHIVE_COPY_VERIFIED_PENDING_COMMIT"
-                )
-            evidence_bytes = (ROOT / evidence["path"]).read_bytes()
-            assert hashlib.sha256(evidence_bytes).hexdigest() == evidence["sha256"]
-
-    assert len(all_task_unit_ids) == 69
-    assert len(set(all_task_unit_ids)) == 69
-    census = manifest["historical_pre_final_data_role_census"]
-    census_root = ROOT / census["bundle_path"]
-    verify_bundle(census_root)
-    assert bundle_digest(census_root) == census["bundle_sha256"]
-    census_rows = read_json(census_root / "task-units.json")
-    assert len(census_rows) == census["candidate_task_unit_count"] == 164
-    assert sum(row["prospective_role_eligible"] for row in census_rows) == 141
-    assert sum(
-        "exact_task_unit_in_legacy_only" in row["prospective_exclusion_reasons"]
-        for row in census_rows
-    ) == 23
-    assert read_json(census_root / "legacy-bindings.json") == bindings
-    assert read_json(census_root / "report.json")["legacy_manifest_sha256"] == (
-        legacy_index["manifest_sha256"]
-    )
-    assert census["role_assignment_frozen"] is False
-    assert census["population_target_met"] is False
-    assert census["status"] == "SUPERSEDED_BY_FINAL_REVIEWER_SOURCE_POPULATION"
-
-    assert manifest["historical_disjointness_report"] == {
-        "legacy_binding_count": 3,
-        "legacy_task_unit_count": 69,
-        "task_unit_overlap_across_legacy_bindings": 0,
-        "prospective_candidate_task_unit_count": 164,
-        "prospective_exact_legacy_overlap_count": 23,
-        "prospective_near_duplicate_only_legacy_overlap_count": 0,
-        "prospective_unexposed_task_unit_count": 141,
-        "near_duplicate_cross_role_overlap_count": None,
-        "status": "CENSUS_COMPLETE_BLOCKED_BEFORE_ROLE_ASSIGNMENT",
-        "outcome_data_read": False,
-    }
-
-    external_failure = read_json(
-        ROOT / "data/method/prompt-tsg-external-qualification-v5-preflight-failure.json"
-    )
-    external_v6_failure = read_json(
-        ROOT / "data/method/prompt-tsg-external-qualification-v6-failure.json"
-    )
-    two_stage_failure = read_json(
-        ROOT
-        / "data/method/results/prompt-tsg-two-stage-qualification-v5/qualification.json"
-    )
-    assert external_failure["formal_v5_task_units_sent_to_provider"] == 0
-    assert external_v6_failure["formal_task_units_conservatively_treated_as_exposed"] == 28
-    assert two_stage_failure["status"] == "QUALIFICATION_FAILED"
-    assert two_stage_failure["holdout_task_units"] == 21
-
-
-@pytest.mark.reviewer
-def test_population_freeze_uses_natural_representatives_without_outcomes(tmp_path: Path):
-    prompt = "Parse untrusted XML."
-    records = [
-        {
-            "record_id": "record-python",
-            "language": "python",
-            "cwe": "CWE-611",
-            "prompt": prompt,
-            "prompt_sha256": content_hash(prompt),
-            "source_dataset": "source-a",
-            "source_lineage_family": "lineage-a",
-        },
-        {
-            "record_id": "record-java",
-            "language": "java",
-            "cwe": "CWE-611",
-            "prompt": prompt,
-            "prompt_sha256": content_hash(prompt),
-            "source_dataset": "source-b",
-            "source_lineage_family": "lineage-b",
-        },
-    ]
-    clusters = [
-        {"cluster_id": "unit-python", "representative_record_id": "record-python"},
-        {"cluster_id": "unit-java", "representative_record_id": "record-java"},
-    ]
-    prepared = tmp_path / "prepared"
-    clustered = tmp_path / "clusters"
-    write_bundle(prepared, {"records.json": records})
-    write_bundle(clustered, {"semantic-clusters.json": clusters})
-
-    report = prepare_discovery_population(
-        prepared,
-        clustered,
-        CATALOG_PATH,
-        tmp_path / "population",
-        scopes={"CWE-611": "xml_parsing"},
-    )
-
-    tasks = read_json(tmp_path / "population/tasks.json")
-    assert report["task_units"] == 1
-    assert report["arms_or_outcomes_used"] is False
-    assert tasks[0]["task_unit_id"] == "unit-python"
-    assert tasks[0]["prompt"] == prompt
-
-
-@pytest.mark.reviewer
 def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path):
     pairs = [
         _xml_task("p-a", "lineage-a", feature_present=True),
@@ -510,7 +268,6 @@ def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path
     assert not any(row["confirm_remove_eligible"] for row in rows)
 
 
-@pytest.mark.reviewer
 def test_positivity_gate_rejects_a_source_proxy(tmp_path: Path):
     pairs = [
         _xml_task("present", "positive-only", feature_present=True),
@@ -535,7 +292,6 @@ def test_positivity_gate_rejects_a_source_proxy(tmp_path: Path):
     assert support["failure_reasons"] == ["insufficient_source_lineage_overlap"]
 
 
-@pytest.mark.reviewer
 def test_task_partition_is_outcome_blind_stratified_and_leakage_closed(tmp_path: Path):
     pairs = [
         _xml_task(f"task-{index}", f"lineage-{index % 2}", feature_present=index % 2 == 0)

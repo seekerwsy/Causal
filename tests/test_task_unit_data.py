@@ -1,8 +1,5 @@
 import hashlib
 import json
-
-import pytest
-
 from prompt_mechanism_study.artifact_io import write_bundle
 from prompt_mechanism_study.contract_cleaning import (
     finalize_contract_content_data,
@@ -93,7 +90,6 @@ def _ledger(task_id, representative, contract_id, status, candidate_status):
     }
 
 
-@pytest.mark.reviewer
 def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path):
     records = [
         _record("record-a", "prompt A", "source-a", "one", tests=("tests/a.py",)),

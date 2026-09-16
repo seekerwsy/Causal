@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,6 @@ from prompt_mechanism_study.representation import DataRole, DataRoleManifest
 from prompt_mechanism_study.verification import (
     load_and_verify_target_result_bundle,
     target_result_package_index,
-    verify_target_result_components,
     verify_target_shared_evidence,
     verify_target_study_freezes,
 )
@@ -40,11 +39,15 @@ from prompt_mechanism_study.study_design import (
     DiscoveryDesignFreeze,
     FormalBudgetPreflight,
     FormalReportAuthorization,
+    StudyFreezeIndex,
+)
+from prompt_mechanism_study.study_planning import (
     FreezeArtifactReference,
     RQ1BudgetQualification,
     StudyDesignError,
-    StudyFreezeIndex,
 )
+from prompt_mechanism_study.verification.verifier import _check_target_result_components
+from prompt_mechanism_study.verification.reporting import verify_target_execution_artifacts
 
 
 def authorize_target_report(
@@ -66,6 +69,7 @@ def authorize_target_report(
     execution_environment: FreezeArtifactReference,
     execution_command: FreezeArtifactReference,
     provider_call_ledger: FreezeArtifactReference,
+    execution_artifacts: Mapping[str, object] | None = None,
 ) -> FormalReportAuthorization:
     """Authorize claim-bearing tables only after the exact formal chain verifies."""
 
@@ -75,6 +79,13 @@ def authorize_target_report(
         raise TypeError("formal report authorization requires target selector yields")
     if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
         raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
+    if preflight.actual_power_results is None:
+        raise StudyDesignError("formal claims require the actual task-support power check")
+    verify_target_execution_artifacts(
+        discovery=discovery, confirmation=confirmation, evidence=evidence,
+        environment_reference=execution_environment, command_reference=execution_command,
+        provider_ledger_reference=provider_call_ledger, execution_artifacts=execution_artifacts,
+    )
     frozen_assignments = tuple(
         sorted(assignments, key=lambda item: item.assignment_id)
     )
@@ -91,7 +102,7 @@ def authorize_target_report(
         for task in binding.task_units
     }
     assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    if not assigned_task_units or not assigned_task_units <= confirmation_task_units:
+    if not assigned_task_units <= confirmation_task_units:
         raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
     freeze_verification = verify_target_study_freezes(
         manifest=manifest,
@@ -152,6 +163,16 @@ def build_target_rq_tables(
     verification = verify_target_shared_evidence(evidence, yields)
     if verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED":
         raise ValueError("target shared evidence did not verify")
+    return _build_target_rq_tables(evidence, yields, authorization, verification)
+
+
+def _build_target_rq_tables(
+    evidence: SharedEvidenceRecord,
+    yields: TargetSelectorYieldResult,
+    authorization: FormalReportAuthorization | None,
+    verification: Mapping[str, object],
+) -> dict[str, Any]:
+    """Assemble tables from evidence independently checked by this invocation."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[Any]] = {}
     for slot in yields.slots:
         slots_by_selector.setdefault(
@@ -415,6 +436,7 @@ def write_target_result_bundle(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
     authorization: FormalReportAuthorization | None = None,
+    execution_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Write the one exact target-v3 reviewer package and verify its stored bytes."""
 
@@ -427,8 +449,9 @@ def write_target_result_bundle(
             key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
         )
     )
-    report = build_target_rq_tables(evidence, yields, authorization)
-    verification = verify_target_result_components(
+    evidence_verification = verify_target_shared_evidence(evidence, yields)
+    report = _build_target_rq_tables(evidence, yields, authorization, evidence_verification)
+    verification = _check_target_result_components(
         manifest=manifest,
         budget=budget,
         discovery=discovery,
@@ -444,7 +467,9 @@ def write_target_result_bundle(
         evidence=evidence,
         yields=yields,
         report=report,
+        evidence_verification=evidence_verification,
         authorization=authorization,
+        execution_artifacts=execution_artifacts,
     )
     package_index = target_result_package_index(
         manifest=manifest,
@@ -464,6 +489,7 @@ def write_target_result_bundle(
         report=report,
         verification=verification,
         authorization=authorization,
+        execution_artifacts=execution_artifacts,
     )
     write_bundle(
         output,
@@ -484,6 +510,7 @@ def write_target_result_bundle(
             "shared_evidence_record.json": evidence,
             "target_selector_yield_result.json": yields,
             "formal_report_authorization.json": authorization,
+            "execution_artifacts.json": execution_artifacts,
             "rq_tables.json": report,
             "verification.json": verification,
         },

@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
-from prompt_mechanism_study.prompt_tsg import QueryState
+from prompt_mechanism_study.prompt_tsg import (
+    FeatureScope, PromptTSG, QueryState, feature_state as scoped_state,
+    query_bindings, query_context, scoped_feature_assessment,
+    validate_feature_scope, validate_prompt_tsg,
+)
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 
 
@@ -397,21 +401,24 @@ class SourceEligibilityDecision(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SourceEligibility:
-    """Outcome-blind ADD/REMOVE source-state decision for one Atomic policy."""
+    """Source-state gate for one exact factor scope; controls are designed later.
+
+    Pair factors use their own scopes and the Pair policy identity directly.
+    This is neither intervention readiness nor proof of independent qualification.
+    """
 
     policy_key: str
     context_query_id: str
     actionable_feature_id: str
     task_id: str
     task_unit_id: str
-    prompt_tsg_id: str
+    prompt_tsg_id: str | None
     prompt_sha256: str
     operation: Operation
     context_state: QueryState
     feature_state: QueryState
+    factor_scope: FeatureScope | None
     target_evidence_node_ids: tuple[str, ...]
-    neutral_counterpart: str | None
-    neutral_counterpart_sha256: str | None
     eligibility_policy_sha256: str
     decision: SourceEligibilityDecision
     exclusion_reason: str | None
@@ -423,10 +430,15 @@ class SourceEligibility:
             "actionable_feature_id",
             "task_id",
             "task_unit_id",
-            "prompt_tsg_id",
         ):
             require_text(getattr(self, name), name)
         _require_digest(self.prompt_sha256, "prompt_sha256")
+        if self.prompt_tsg_id is not None:
+            require_text(self.prompt_tsg_id, "prompt_tsg_id")
+        if self.factor_scope is not None and type(self.factor_scope) is not FeatureScope:
+            raise TypeError("source eligibility requires an exact typed factor scope")
+        if self.prompt_tsg_id is None and self.factor_scope is not None:
+            raise ValueError("a source scope cannot bind an unavailable graph")
         _require_digest(self.eligibility_policy_sha256, "eligibility_policy_sha256")
         if type(self.operation) is not Operation:
             raise TypeError("operation must be an Operation")
@@ -439,15 +451,6 @@ class SourceEligibility:
             raise ValueError("target evidence node ids must use canonical order")
         for node_id in self.target_evidence_node_ids:
             require_text(node_id, "target evidence node id")
-        if self.neutral_counterpart is None:
-            if self.neutral_counterpart_sha256 is not None:
-                raise ValueError("neutral counterpart digest requires counterpart text")
-        else:
-            require_text(self.neutral_counterpart, "neutral_counterpart")
-            _require_digest(self.neutral_counterpart_sha256, "neutral_counterpart_sha256")
-            if content_hash(self.neutral_counterpart) != self.neutral_counterpart_sha256:
-                raise ValueError("neutral counterpart digest drift")
-
         gate_reason = self._gate_failure_reason()
         if self.decision is SourceEligibilityDecision.ELIGIBLE:
             if gate_reason is not None or self.exclusion_reason is not None:
@@ -460,6 +463,10 @@ class SourceEligibility:
                 raise ValueError("source exclusion reason does not match the failed gate")
 
     def _gate_failure_reason(self) -> str | None:
+        if self.prompt_tsg_id is None:
+            return "source_graph_unavailable"
+        if self.factor_scope is None:
+            return "factor_scope_unresolved"
         if self.context_state is not QueryState.PRESENT:
             return f"context_{self.context_state.value}"
         if self.operation is Operation.ADD:
@@ -468,8 +475,6 @@ class SourceEligibility:
             return f"remove_source_{self.feature_state.value}"
         if not self.target_evidence_node_ids:
             return "remove_target_evidence_missing"
-        if self.neutral_counterpart is None:
-            return "remove_neutral_counterpart_missing"
         return None
 
     @property
@@ -482,28 +487,61 @@ class SourceEligibility:
 
 
 def freeze_source_eligibility(
-    policy: AtomicPolicyKey,
+    policy: AtomicPolicyKey | PairPolicyKey,
     *,
     task_id: str,
     task_unit_id: str,
-    prompt_tsg_id: str,
-    prompt_sha256: str,
-    context_state: QueryState,
-    feature_state: QueryState,
-    target_evidence_node_ids: Iterable[str] = (),
-    neutral_counterpart: str | None = None,
+    prompt: str,
+    graph: PromptTSG | None,
+    catalog: Mapping,
+    factor_scope: FeatureScope | None,
+    factor_feature_id: str | None = None,
     eligibility_policy_sha256: str,
 ) -> SourceEligibility:
-    """Evaluate and freeze the target protocol's operation-specific source gate."""
+    """Derive states and evidence from the graph, never from caller-authored flat labels.
 
-    if type(policy) is not AtomicPolicyKey:
-        raise TypeError("source eligibility requires an AtomicPolicyKey")
-    if type(context_state) is not QueryState or type(feature_state) is not QueryState:
-        raise TypeError("context_state and feature_state must be QueryState values")
-    evidence = tuple(sorted(target_evidence_node_ids))
-    counterpart_sha256 = None if neutral_counterpart is None else content_hash(neutral_counterpart)
-    operation = policy.factor.operation
-    if context_state is not QueryState.PRESENT:
+    Scope selection must already be frozen under the global factor definition.
+    This function does not select among operations using their feature states.
+    """
+    if type(policy) not in {AtomicPolicyKey, PairPolicyKey}:
+        raise TypeError("source eligibility requires an Atomic or Pair policy")
+    factors = (policy.factor,) if type(policy) is AtomicPolicyKey else policy.factors
+    if factor_feature_id is None and len(factors) == 1:
+        factor_feature_id = factors[0].actionable_feature_id
+    selected = [factor for factor in factors if factor.actionable_feature_id == factor_feature_id]
+    if len(selected) != 1:
+        raise ValueError("source eligibility must identify its own policy factor")
+    operation = selected[0].operation
+    queries = [query for query in catalog["queries"]
+               if query["query_id"] == policy.analysis_scope.context_query_id]
+    if len(queries) != 1 or catalog.get("schema_version") != "2.0":
+        raise ValueError("source eligibility requires one frozen open-graph context query")
+    query = queries[0]
+    context_semantics = set(query["required_semantics"]) | set(query["forbidden_semantics"])
+    context_semantics |= {item for source, _, target in query["required_relations"] for item in (source, target)}
+    if context_semantics & {factor.actionable_feature_id for factor in factors}:
+        raise ValueError("source context must be independent of all policy feature states")
+    context_state = feature_state = QueryState.UNRESOLVED
+    evidence = ()
+    if graph is not None:
+        if graph.task_id != task_id:
+            raise ValueError("source graph belongs to a different task")
+        validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
+        context_state = query_context(graph, query=query, cwe="", task_family="").state
+        if factor_scope is not None:
+            validate_feature_scope(graph, factor_scope)
+            if context_state is QueryState.PRESENT and not any(
+                factor_scope.operation_node_id in nodes for nodes, _ in query_bindings(graph, query=query)
+            ):
+                context_state = QueryState.UNRESOLVED
+            feature_state = scoped_state(graph, factor_feature_id, scope=factor_scope)
+            assessment = scoped_feature_assessment(graph, factor_feature_id, factor_scope)
+            evidence = assessment.requirement_node_ids if assessment else ()
+    if graph is None:
+        reason = "source_graph_unavailable"
+    elif factor_scope is None:
+        reason = "factor_scope_unresolved"
+    elif context_state is not QueryState.PRESENT:
         reason = f"context_{context_state.value}"
     elif operation is Operation.ADD:
         reason = None if feature_state is QueryState.ABSENT else f"add_source_{feature_state.value}"
@@ -511,24 +549,21 @@ def freeze_source_eligibility(
         reason = f"remove_source_{feature_state.value}"
     elif not evidence:
         reason = "remove_target_evidence_missing"
-    elif neutral_counterpart is None:
-        reason = "remove_neutral_counterpart_missing"
     else:
         reason = None
     return SourceEligibility(
         policy.policy_key,
         policy.analysis_scope.context_query_id,
-        policy.factor.actionable_feature_id,
+        factor_feature_id,
         task_id,
         task_unit_id,
-        prompt_tsg_id,
-        prompt_sha256,
+        graph.tsg_id if graph else None,
+        content_hash(prompt),
         operation,
         context_state,
         feature_state,
+        factor_scope,
         evidence,
-        neutral_counterpart,
-        counterpart_sha256,
         eligibility_policy_sha256,
         SourceEligibilityDecision.ELIGIBLE if reason is None else SourceEligibilityDecision.EXCLUDED,
         reason,

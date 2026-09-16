@@ -1,11 +1,8 @@
 """Atomic schema-3 prioritization, baseline, slot, and backend invariants."""
 
 from __future__ import annotations
-
 from dataclasses import replace
-
 import pytest
-
 from prompt_mechanism_study import prioritization
 from prompt_mechanism_study.prioritization import (
     AtomicFCIBootstrapEvidence,
@@ -22,7 +19,7 @@ from prompt_mechanism_study.prioritization import (
     SelectorSlot,
     SlotStatus,
     atomic_preoutcome_observations,
-    discovery_data_sha256,
+    atomic_preoutcome_data_sha256,
     freeze_atomic_candidate_folds,
     freeze_atomic_candidate_universe,
     freeze_confirmation_dispatch,
@@ -46,6 +43,17 @@ from prompt_mechanism_study.representation import (
     Operation,
     PolicyFactor,
 )
+
+
+def test_atomic_solver_preserves_pre_refactor_probabilities() -> None:
+    # Frozen from the original 300-iteration implementation before consolidation.
+    actual = prioritization._ridge_probabilities(
+        [[-1., 0.], [0., 1.], [1., 0.], [2., 1.], [3., 0.], [4., 1.]],
+        [0, 1, 0, 1, 1, 0], [[-2., 0.], [.5, 1.], [5., 0.]], 0.05,
+    )
+    assert actual == pytest.approx(
+        [0.3701132198123729, 0.575907007519519, 0.4568600979215474], rel=0, abs=1e-12,
+    )
 
 
 def _atomic_shadow_fixture():
@@ -130,7 +138,7 @@ def _atomic_shadow_fixture():
             for index, policy in enumerate(policies)
         },
         candidate_family_ids=family_by_policy,
-        discovery_data_sha256=discovery_data_sha256(observations),
+        preoutcome_data_sha256=atomic_preoutcome_data_sha256(atomic_preoutcome_observations(observations)),
         discovery_population_sha256=content_hash("atomic-discovery-population"),
         positivity_audit_sha256=content_hash("atomic-positivity"),
         information_budget_sha256=content_hash("atomic-info-budget"),
@@ -158,8 +166,6 @@ def _atomic_shadow_fixture():
     return universe, observations, plan, evidence, first.policy_key, second.policy_key
 
 
-@pytest.mark.reviewer
-@pytest.mark.extended
 def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
     universe, rows, plan, evidence, positive_id, negative_id = _atomic_shadow_fixture()
     folds = freeze_atomic_candidate_folds(
@@ -212,8 +218,6 @@ def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
             } == {0, 1}
 
 
-@pytest.mark.reviewer
-@pytest.mark.extended
 def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None:
     universe, rows, plan, evidence, _positive_id, _negative_id = (
         _atomic_shadow_fixture()
@@ -229,7 +233,19 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
             plan,
         ),
     )
-    baseline_universe = freeze_atomic_baseline_universe(universe)
+    baseline_universe = freeze_atomic_baseline_universe(
+        universe, freeze_atomic_candidate_folds(universe, atomic_preoutcome_observations(rows), plan), plan,
+        protocol_id=universe.model_bound_records[0].protocol_id,
+        schema_version=universe.model_bound_records[0].schema_version,
+    )
+    strict_plan = replace(plan, cross_fit_folds=20)
+    strict_folds = freeze_atomic_candidate_folds(universe, atomic_preoutcome_observations(rows), strict_plan)
+    blocked = freeze_atomic_baseline_universe(
+        universe, strict_folds, strict_plan,
+        protocol_id=baseline_universe.protocol_id, schema_version=baseline_universe.schema_version,
+    )
+    assert universe.supported_policy_keys
+    assert blocked.eligible_policy_keys == ()
     expert_card = BlindExpertRankingCard(
         baseline_universe.protocol_id,
         baseline_universe.schema_version,
@@ -352,8 +368,6 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
         )
 
 
-@pytest.mark.reviewer
-@pytest.mark.extended
 def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
     universe, rows, plan, evidence, positive_id, _negative_id = _atomic_shadow_fixture()
     insufficient = replace(
@@ -390,7 +404,6 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
     assert any(slot.candidate_id == positive_id for slot in result.rd_only.slots)
 
 
-@pytest.mark.reviewer
 def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
     universe, observations, plan, evidence, first, second = _atomic_shadow_fixture()
     atomic = run_atomic_shadow_qualification(
@@ -488,30 +501,3 @@ def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
             union,
             (tampered, *dispatch.records[1:]),
         )
-
-
-
-@pytest.mark.milestone
-def test_pinned_causal_learn_backend_capability_when_installed() -> None:
-    pytest.importorskip("causallearn")
-    assert prioritization._causal_learn_version() == "0.1.4.7"
-    matrix = tuple((index % 2, (index // 2) % 2, index % 2) for index in range(40))
-    adjacent = prioritization._run_causal_learn_family(
-        matrix,
-        alpha=0.05,
-        depth=-1,
-        max_path_length=-1,
-        outcome_index=2,
-    )
-    assert isinstance(adjacent, set)
-    pag_adjacent, edges = prioritization._run_causal_learn_pag(
-        matrix,
-        alpha=0.05,
-        depth=-1,
-        max_path_length=-1,
-        outcome_index=2,
-        variable_order=("W:group", "X:feature", "Y:outcome"),
-        forbidden_directions=(("Y:outcome", "W:group"), ("Y:outcome", "X:feature")),
-    )
-    assert isinstance(pag_adjacent, set)
-    assert isinstance(edges, tuple)

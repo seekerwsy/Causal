@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
@@ -35,6 +35,7 @@ from prompt_mechanism_study.prioritization import (
     SelectorSlot,
     SlotStatus,
 )
+from prompt_mechanism_study.selector_numerics import fit_ridge_logit, sigmoid as _sigmoid
 from prompt_mechanism_study.records import content_hash, content_id, require_text
 from prompt_mechanism_study.representation import (
     ModelBoundCandidateRecord,
@@ -162,14 +163,14 @@ class PairCandidateUniverseManifest:
     coverage_summaries: tuple[CandidateCoverageSummary, ...]
     model_bound_records: tuple[ModelBoundCandidateRecord, ...]
     candidate_family_ids: tuple[tuple[str, str], ...]
-    discovery_data_sha256: str
+    preoutcome_data_sha256: str
     discovery_population_sha256: str
     compatibility_evidence_sha256: str
     information_budget_sha256: str
     top_k: int
 
     def __post_init__(self) -> None:
-        if not self.policy_keys or any(type(item) is not PairPolicyKey for item in self.policy_keys):
+        if any(type(item) is not PairPolicyKey for item in self.policy_keys):
             raise TypeError("Pair universe requires typed policy keys")
         candidate_ids = tuple(item.policy_key for item in self.policy_keys)
         if candidate_ids != tuple(sorted(set(candidate_ids))):
@@ -199,7 +200,7 @@ class PairCandidateUniverseManifest:
         if any(not isinstance(value, str) or not value.strip() for _, value in self.candidate_family_ids):
             raise ValueError("Pair family bindings must be non-empty")
         for value in (
-            self.discovery_data_sha256,
+            self.preoutcome_data_sha256,
             self.discovery_population_sha256,
             self.compatibility_evidence_sha256,
             self.information_budget_sha256,
@@ -242,6 +243,8 @@ class PairShadowObservation:
     factor_reliabilities: tuple[tuple[str, float], tuple[str, float]]
     covariates: tuple[tuple[str, float], ...]
     outcome: int
+    source_binding_sha256: str | None = field(default=None, metadata={"omit_if_none": True})
+    source_gate_failures: tuple[str, ...] | None = field(default=None, metadata={"omit_if_none": True})
 
     def __post_init__(self) -> None:
         _validate_pair_preoutcome_fields(self)
@@ -269,6 +272,8 @@ class PairPreOutcomeObservation:
     factor_states: tuple[tuple[str, QueryState], tuple[str, QueryState]]
     factor_reliabilities: tuple[tuple[str, float], tuple[str, float]]
     covariates: tuple[tuple[str, float], ...]
+    source_binding_sha256: str | None = field(default=None, metadata={"omit_if_none": True})
+    source_gate_failures: tuple[str, ...] | None = field(default=None, metadata={"omit_if_none": True})
 
     def __post_init__(self) -> None:
         _validate_pair_preoutcome_fields(self)
@@ -277,8 +282,21 @@ class PairPreOutcomeObservation:
     def preoutcome_observation_id(self) -> str:
         return content_id("pair_preoutcome_observation_", self)
 
+    def with_outcome(self, outcome: int) -> PairShadowObservation:
+        """Attach a measured label while preserving the exact factor-source and Gate binding."""
+        return PairShadowObservation(self.policy_key, self.task_unit_id, self.model_id,
+            self.source_lineage_id, self.language, self.task_archetype, self.api_family,
+            self.context_query_id, self.context_state, self.factor_states, self.factor_reliabilities,
+            self.covariates, outcome, self.source_binding_sha256, self.source_gate_failures)
+
 
 def _validate_pair_preoutcome_fields(item: object) -> None:
+    if getattr(item, "source_binding_sha256", None) is not None:
+        _require_digest(item.source_binding_sha256)
+    if getattr(item, "source_gate_failures", None) is not None:
+        if (item.source_binding_sha256 is None or item.source_gate_failures != tuple(sorted(set(item.source_gate_failures)))
+            or any(not isinstance(reason, str) or not reason for reason in item.source_gate_failures)):
+            raise ValueError("Pair source Gate failures must bind its source and use canonical reasons")
     for name in (
         "policy_key",
         "task_unit_id",
@@ -733,7 +751,7 @@ def freeze_pair_candidate_universe(
     *,
     coverage_summaries: Mapping[str, CandidateCoverageSummary],
     candidate_family_ids: Mapping[str, str],
-    discovery_data_sha256: str,
+    preoutcome_data_sha256: str,
     discovery_population_sha256: str,
     information_budget_sha256: str,
     top_k: int,
@@ -761,7 +779,7 @@ def freeze_pair_candidate_universe(
         tuple(coverage_summaries[candidate_id] for candidate_id in candidate_ids),
         tuple(records[candidate_id] for candidate_id in candidate_ids),
         tuple((candidate_id, candidate_family_ids[candidate_id]) for candidate_id in candidate_ids),
-        discovery_data_sha256,
+        preoutcome_data_sha256,
         discovery_population_sha256,
         content_hash(frozen_decisions),
         information_budget_sha256,
@@ -796,9 +814,9 @@ def run_pair_shadow_qualification(
         raise TypeError("universe must be a PairCandidateUniverseManifest")
     if type(plan) is not PairShadowPlan:
         raise TypeError("plan must be a PairShadowPlan")
-    if not universe.compatible_policy_keys:
-        raise ValueError("Pair shadow qualification has no compatible policy")
-    if pair_shadow_data_sha256(observations) != universe.discovery_data_sha256:
+    if universe.model_bound_records and {item.discovery_model_id for item in universe.model_bound_records} != {plan.model_id}:
+        raise ValueError("Pair discovery plan model must match every model-bound candidate")
+    if pair_preoutcome_data_sha256(pair_preoutcome_observations(observations)) != universe.preoutcome_data_sha256:
         raise ValueError("Pair observations drift from the compatibility-first universe")
     compatible = set(universe.compatible_policy_keys)
     if any(row.policy_key not in compatible for row in observations):
@@ -904,7 +922,7 @@ def run_pair_shadow_qualification(
     sole_difference = PairSoleDifferenceAudit(
         universe.universe_id,
         plan.plan_id,
-        universe.discovery_data_sha256,
+        pair_shadow_data_sha256(observations),
         support_sha256,
         fold_sha256,
         rd_sha256,
@@ -936,8 +954,12 @@ def freeze_pair_preoutcome_design(
         raise TypeError("universe must be a PairCandidateUniverseManifest")
     if type(plan) is not PairShadowPlan:
         raise TypeError("plan must be a PairShadowPlan")
+    if universe.model_bound_records and {item.discovery_model_id for item in universe.model_bound_records} != {plan.model_id}:
+        raise ValueError("Pair discovery plan model must match every model-bound candidate")
     if any(type(item) is not PairPreOutcomeObservation for item in observations):
         raise TypeError("Pair pre-outcome freeze requires outcome-free observations")
+    if pair_preoutcome_data_sha256(observations) != universe.preoutcome_data_sha256:
+        raise ValueError("pre-outcome observations drift from the frozen universe")
     compatible = set(universe.compatible_policy_keys)
     if any(row.policy_key not in compatible for row in observations):
         raise ValueError("Pair fold row falls outside the compatible common universe")
@@ -1040,7 +1062,7 @@ def pair_preoutcome_observations(
 ) -> tuple[PairPreOutcomeObservation, ...]:
     """Project Pair discovery records before their outcome field is opened."""
 
-    if not observations or any(
+    if any(
         type(item) is not PairShadowObservation for item in observations
     ):
         raise TypeError("Pair pre-outcome projection requires discovery observations")
@@ -1060,6 +1082,8 @@ def pair_preoutcome_observations(
                     item.factor_states,
                     item.factor_reliabilities,
                     item.covariates,
+                    item.source_binding_sha256,
+                    item.source_gate_failures,
                 )
                 for item in observations
             ),
@@ -1076,7 +1100,7 @@ def pair_preoutcome_data_sha256(
     frozen = tuple(
         sorted(observations, key=lambda item: item.preoutcome_observation_id)
     )
-    if not frozen or any(
+    if any(
         type(item) is not PairPreOutcomeObservation for item in frozen
     ):
         raise TypeError("Pair pre-outcome data requires typed observations")
@@ -1088,6 +1112,7 @@ def pair_preoutcome_data_sha256(
 
 def _pair_discoverability_reason(reason: str) -> DiscoverabilityReason:
     mapping = {
+        "source_scope_support_failed": DiscoverabilityReason.SOURCE_SCOPE_SUPPORT_FAILED,
         "missing_observations": DiscoverabilityReason.MISSING_OBSERVATIONS,
         "duplicate_task_unit": DiscoverabilityReason.DUPLICATE_TASK_UNIT,
         "candidate_coordinate_mismatch": (
@@ -1132,6 +1157,8 @@ def _pair_shared_support_gate(
         cell: [] for cell in ("00", "01", "10", "11")
     }
     for row in rows:
+        if row.source_gate_failures:
+            reasons.add("source_scope_support_failed")
         if (
             row.policy_key != policy.policy_key
             or row.context_query_id != policy.analysis_scope.context_query_id
@@ -1549,27 +1576,9 @@ def _fit_logit(
             for index in range(len(covariates))
         ]
         design.append([1.0, *normalized, x1, x2, x1 * x2])
-    weights = [0.0] * len(design[0])
-    max_norm = max(sum(value * value for value in row) for row in design)
-    step = 1.0 / (0.25 * max_norm + ridge_lambda + 1.0)
-    for _ in range(800):
-        gradient = [0.0] * len(weights)
-        for values, row in zip(design, rows, strict=True):
-            probability = _sigmoid(
-                sum(weight * value for weight, value in zip(weights, values, strict=True))
-            )
-            for index, value in enumerate(values):
-                gradient[index] += (probability - row.outcome) * value / len(rows)
-        for index in range(1, len(weights)):
-            gradient[index] += ridge_lambda * weights[index]
-        updated = [
-            weight - step * derivative
-            for weight, derivative in zip(weights, gradient, strict=True)
-        ]
-        if max(abs(left - right) for left, right in zip(updated, weights, strict=True)) < 1e-10:
-            weights = updated
-            break
-        weights = updated
+    weights = fit_ridge_logit(
+        design, [row.outcome for row in rows], ridge_lambda, maximum_iterations=800,
+    )
     return _RidgeLogitModel(
         covariate_names,
         tuple(means),
@@ -1602,11 +1611,6 @@ def _sign(value: float) -> int:
     return 0
 
 
-def _sigmoid(value: float) -> float:
-    if value >= 0:
-        return 1.0 / (1.0 + math.exp(-min(value, 700.0)))
-    exponential = math.exp(max(value, -700.0))
-    return exponential / (1.0 + exponential)
 
 
 __all__ = [

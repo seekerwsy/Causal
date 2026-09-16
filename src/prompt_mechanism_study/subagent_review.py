@@ -19,13 +19,18 @@ from prompt_mechanism_study.contract_cleaning import (
     _CONTENT_FIELDS,
     ContractCleaningError,
     _base_population,
+    _evidence_span_count,
     _full_prompt_content_evidence,
     _manifest_digest,
     _parse_contract_repairs,
     _parse_content_reviews,
+    _prepared_source_review_population,
     _proposal_payload,
     _terminal_quality,
     _unique_by,
+    _validate_contract_values,
+    _validate_frozen_evidence,
+    _validate_proposal_identity,
 )
 from prompt_mechanism_study.curation import _is_response_format_requirement
 from prompt_mechanism_study.records import content_hash, content_id
@@ -54,6 +59,42 @@ _REPAIR_FIELDS = {
 }
 
 
+def _review_population(
+    base: Path, proposals: Path, source_use_bundle: Path | None,
+    reservation_bundle: Path | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    verify_bundle(proposals)
+    proposed = _unique_by(read_json(proposals / "proposed-contracts.json"),
+                          "task_unit_id", "proposed contracts")
+    if (source_use_bundle is None) != (reservation_bundle is None):
+        raise ContractCleaningError("prepared source review requires its qualification reservations")
+    if source_use_bundle is None:
+        verify_task_unit_data(base)
+        tasks, _, _ = _base_population(base)
+        if set(tasks) != set(proposed):
+            raise ContractCleaningError("proposal population differs from the base task population")
+        selection = {"kind": "full_population"}
+    else:
+        tasks, _, _ = _prepared_source_review_population(base, source_use_bundle, reservation_bundle)
+        if not proposed or not set(proposed) <= set(tasks):
+            raise ContractCleaningError("proposal selection contains a protected or unknown task")
+        report = read_json(proposals / "report.json")
+        selection = {"kind": "prepared_source_proposal_subset",
+                     "source_use_bundle_sha256": bundle_digest(source_use_bundle),
+                     "reservation_bundle_sha256": _manifest_digest(reservation_bundle)}
+        if (report.get("base_bundle_sha256") != _manifest_digest(base)
+                or any(report.get(key) != value for key, value in selection.items() if key != "kind")):
+            raise ContractCleaningError("proposal prepared-source provenance differs")
+        tasks = {task_id: tasks[task_id] for task_id in proposed}
+    for task_id, proposal in proposed.items():
+        _validate_proposal_identity(proposal)
+        _validate_contract_values(proposal)
+        if proposal["record_id"] != tasks[task_id]["representative_record_id"]:
+            raise ContractCleaningError("proposal source record identity differs")
+        _validate_frozen_evidence(tasks[task_id], proposal)
+    return tasks, proposed, selection
+
+
 def prepare_subagent_contract_reviews(
     repository_root: Path,
     base_bundle: Path,
@@ -62,6 +103,8 @@ def prepare_subagent_contract_reviews(
     *,
     producer_commit: str,
     nonterminal_reviews_root: Path | None = None,
+    source_use_bundle: Path | None = None,
+    reservation_bundle: Path | None = None,
 ) -> dict[str, Any]:
     """Freeze two blind reviewer assignments and inspectable work packets per task.
 
@@ -74,18 +117,10 @@ def prepare_subagent_contract_reviews(
         raise ValueError("producer_commit must be one non-empty token")
     base = base_bundle.resolve()
     proposals = proposals_root.resolve()
-    verify_task_unit_data(base)
-    verify_bundle(proposals)
-    tasks, _, _ = _base_population(base)
-    proposed = _unique_by(
-        read_json(proposals / "proposed-contracts.json"),
-        "task_unit_id",
-        "proposed contracts",
+    tasks, proposed, selection = _review_population(
+        base, proposals, source_use_bundle, reservation_bundle
     )
-    if set(tasks) != set(proposed):
-        raise ContractCleaningError("proposal population differs from the base task population")
     selected_task_ids = set(tasks)
-    selection: dict[str, Any] = {"kind": "full_population"}
     if nonterminal_reviews_root is not None:
         prior_reviews = nonterminal_reviews_root.resolve()
         verify_bundle(prior_reviews)
@@ -112,6 +147,7 @@ def prepare_subagent_contract_reviews(
                 "prior review bundle has no nonterminal or changed contracts"
             )
         selection = {
+            **selection,
             "kind": "prior_nonterminal_or_changed_contracts",
             "prior_reviews_bundle_sha256": bundle_digest(prior_reviews),
             "nonterminal_contract_count": len(nonterminal_ids),
@@ -229,6 +265,8 @@ def prepare_subagent_contract_repairs(
     output: Path,
     *,
     producer_commit: str,
+    source_use_bundle: Path | None = None,
+    reservation_bundle: Path | None = None,
 ) -> dict[str, Any]:
     """Freeze repairs for nonterminal or deterministically inconsistent contracts."""
 
@@ -237,14 +275,9 @@ def prepare_subagent_contract_repairs(
     base = base_bundle.resolve()
     proposals = proposals_root.resolve()
     reviews = reviews_root.resolve()
-    verify_task_unit_data(base)
-    verify_bundle(proposals)
     verify_bundle(reviews)
-    tasks, _, _ = _base_population(base)
-    proposed = _unique_by(
-        read_json(proposals / "proposed-contracts.json"),
-        "task_unit_id",
-        "proposed contracts",
+    tasks, proposed, source_selection = _review_population(
+        base, proposals, source_use_bundle, reservation_bundle
     )
     reviewed = _unique_by(
         read_json(reviews / "contract-content-reviews.json"),
@@ -321,6 +354,7 @@ def prepare_subagent_contract_repairs(
     plan = {
         "schema_version": "subagent-contract-repair-plan-1.0",
         "protocol_id": "source_only_subagent_contract_repair_v1",
+        **{key: value for key, value in source_selection.items() if key != "kind"},
         "producer_commit": producer_commit,
         "base_bundle_sha256": _manifest_digest(base),
         "proposals_bundle_sha256": bundle_digest(proposals),
@@ -554,6 +588,8 @@ def finalize_subagent_contract_repairs(
     output: Path,
     *,
     producer_commit: str,
+    source_use_bundle: Path | None = None,
+    reservation_bundle: Path | None = None,
 ) -> dict[str, Any]:
     """Replace only nonterminal proposals with source-only subagent repairs."""
 
@@ -564,14 +600,10 @@ def finalize_subagent_contract_repairs(
     reviews = reviews_root.resolve()
     packets = packets_root.resolve()
     decisions = decisions_root.resolve()
-    verify_task_unit_data(base)
     for root in (proposals, reviews, packets):
         verify_bundle(root)
-    tasks, _, _ = _base_population(base)
-    proposed = _unique_by(
-        read_json(proposals / "proposed-contracts.json"),
-        "task_unit_id",
-        "proposed contracts",
+    tasks, proposed, source_selection = _review_population(
+        base, proposals, source_use_bundle, reservation_bundle
     )
     prior_ledger = _unique_by(
         read_json(proposals / "contract-repair-ledger.json"),
@@ -591,6 +623,7 @@ def finalize_subagent_contract_repairs(
         or plan.get("proposals_bundle_sha256") != bundle_digest(proposals)
         or plan.get("reviews_bundle_sha256") != bundle_digest(reviews)
         or plan.get("producer_commit") != producer_commit
+        or any(plan.get(key) != value for key, value in source_selection.items() if key != "kind")
         or set(tasks) != set(proposed)
         or set(tasks) != set(prior_ledger)
         or set(tasks) != set(reviewed)
@@ -671,6 +704,7 @@ def finalize_subagent_contract_repairs(
                 "source_specification_assessment"
             ],
             "evidence_binding_status": "full_prompt_pending_review",
+            "evidence_span_count": _evidence_span_count(evidence),
             "evidence_adjudication": "FULL_PROMPT_PENDING_INDEPENDENT_REVIEW",
             "review_status": "PENDING",
             "review_issue_codes": [],
@@ -701,6 +735,7 @@ def finalize_subagent_contract_repairs(
         "prior_proposals_bundle_sha256": bundle_digest(proposals),
         "prior_reviews_bundle_sha256": bundle_digest(reviews),
         "repair_packets_bundle_sha256": bundle_digest(packets),
+        **{key: value for key, value in source_selection.items() if key != "kind"},
         "producer_commit": producer_commit,
         "arms_or_outcomes_used": False,
         "formal_roles_used": False,

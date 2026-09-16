@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
+import math
 
 from prompt_mechanism_study.inference import TargetITTPlan
 from prompt_mechanism_study.prioritization import (
     BridgeStatus,
     ConfirmationDispatchManifest,
-    DiscoveryPopulationStatus,
     FixedSlotLedger,
     PolicyTrack,
     SharedConfirmationUnion,
+)
+from prompt_mechanism_study.discovery_population import (
+    DiscoveryPopulationStatus,
     SupplementationDecision,
 )
 from prompt_mechanism_study.randomization import (
@@ -23,19 +26,49 @@ from prompt_mechanism_study.randomization import (
     TargetTaskBundle,
 )
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.representation import DataRoleManifest
+from prompt_mechanism_study.representation import DataRole, DataRoleManifest
 from prompt_mechanism_study.study_design import (
     ConfirmationFreeze,
     DiscoveryDesignFreeze,
     FormalBudgetPreflight,
-    RQ1BudgetQualification,
-    RQ1BudgetScenario,
     StudyFreezeIndex,
 )
+from prompt_mechanism_study.study_planning import RQ1BudgetQualification, RQ1BudgetScenario
 
 from prompt_mechanism_study.verification.qualification import (
     verify_formal_budget_preflight,
 )
+
+def _verify_realization_allocation(plan, bundles):
+    """Replay Q and the original allocation pool without using the allocator."""
+    weights, populations = defaultdict(dict), defaultdict(list)
+    for policy, r, q in plan.realization_weights:
+        weights[policy][r] = q
+    for policy, unit, stratum in plan.allocation_tasks:
+        populations[(policy, stratum)].append(unit)
+    expected = {}
+    for (policy, stratum), population in sorted(populations.items()):
+        n = len(population)
+        counts = {r: math.floor(n * q) for r, q in weights[policy].items()}
+        remainders = sorted(weights[policy], key=lambda r: (
+            -(n * weights[policy][r] - counts[r]),
+            content_hash(("realization_remainder", plan.assignment_seed, policy, stratum, r)),
+        ))
+        for index in range(n - sum(counts.values())):
+            counts[remainders[index]] += 1
+        ordered = sorted(population, key=lambda unit: (
+            content_hash(("realization_task", plan.assignment_seed, policy, stratum, unit)), unit,
+        ))
+        offset = 0
+        for r in sorted(counts):
+            for unit in ordered[offset:offset + counts[r]]:
+                expected[(policy, unit)] = (r, weights[policy][r], stratum)
+            offset += counts[r]
+    observed = {(b.policy_key, b.task_unit_id): (b.realization_id, b.realization_weight, b.stratum_id)
+                for b in bundles}
+    if observed != expected:
+        raise ValueError("target realization allocation failed independent randomization replay")
+
 
 def verify_target_randomization(
     dispatch: ConfirmationDispatchManifest,
@@ -50,7 +83,7 @@ def verify_target_randomization(
     if type(plan) is not TargetRandomizationPlan:
         raise TypeError("target randomization verifier requires a typed plan")
     frozen_bundles = tuple(task_bundles)
-    if not frozen_bundles or any(type(item) is not TargetTaskBundle for item in frozen_bundles):
+    if any(type(item) is not TargetTaskBundle for item in frozen_bundles):
         raise TypeError("target randomization verifier requires typed task bundles")
     canonical_bundles = tuple(
         sorted(
@@ -66,6 +99,7 @@ def verify_target_randomization(
         frozen_bundles
     ):
         raise ValueError("one policy/task coordinate has multiple frozen bundles")
+    _verify_realization_allocation(plan, frozen_bundles)
     if (
         plan.protocol_id != dispatch.union.ledger.protocol_id
         or plan.schema_version != dispatch.union.ledger.schema_version
@@ -96,7 +130,8 @@ def verify_target_randomization(
             or bundle.protocol_record_id != protocol_by_policy.get(bundle.policy_key)
         ):
             raise ValueError("task-bundle protocol lineage failed independent replay")
-        bundles_by_policy[bundle.policy_key].append(bundle)
+        if bundle.exclusion_reason is None:
+            bundles_by_policy[bundle.policy_key].append(bundle)
 
     expected = []
     for record in successful:
@@ -210,6 +245,32 @@ def verify_target_study_freezes(
     confirmation: ConfirmationFreeze,
     index: StudyFreezeIndex,
 ) -> dict[str, object]:
+    """Standalone verification including its upstream prerequisites."""
+
+    verify_formal_budget_preflight(budget, dispatch, assignments, preflight)
+    return _check_target_study_freezes(
+        manifest=manifest, budget=budget, discovery=discovery, ledger=ledger,
+        union=union, dispatch=dispatch, randomization_plan=randomization_plan,
+        task_bundles=task_bundles, assignments=assignments, preflight=preflight,
+        confirmation=confirmation, index=index,
+    )
+
+
+def _check_target_study_freezes(
+    *,
+    manifest: DataRoleManifest,
+    budget: RQ1BudgetQualification,
+    discovery: DiscoveryDesignFreeze,
+    ledger: FixedSlotLedger,
+    union: SharedConfirmationUnion,
+    dispatch: ConfirmationDispatchManifest,
+    randomization_plan: TargetRandomizationPlan,
+    task_bundles: Sequence[TargetTaskBundle],
+    assignments: Sequence[AssignedArmITTRecord],
+    preflight: FormalBudgetPreflight,
+    confirmation: ConfirmationFreeze,
+    index: StudyFreezeIndex,
+) -> dict[str, object]:
     """Independently close the complete target design-to-confirmation freeze chain."""
 
     if type(manifest) is not DataRoleManifest:
@@ -220,8 +281,11 @@ def verify_target_study_freezes(
         task_bundles,
         assignments,
     )
-    verify_formal_budget_preflight(budget, dispatch, assignments, preflight)
     qualification = budget.qualification_bundle
+    d0_receipt = discovery.discovery_population_lineage.receipt
+    qualification_roles = manifest if d0_receipt is None else d0_receipt.pre_data_role_manifest
+    if type(qualification_roles) is not DataRoleManifest:
+        raise ValueError("discovery qualification requires its original data-role manifest")
     if (
         discovery.protocol_id != manifest.protocol_id
         or discovery.protocol_id != budget.protocol_id
@@ -231,6 +295,8 @@ def verify_target_study_freezes(
         or discovery.qualification_bundle.artifact_id
         != qualification.qualification_bundle_id
         or discovery.qualification_bundle.sha256 != content_hash(qualification)
+        or qualification.data_role_manifest.artifact_id != qualification_roles.data_role_manifest_id
+        or qualification.data_role_manifest.sha256 != content_hash(qualification_roles)
         or discovery.rq1_budget_qualification.artifact_id
         != budget.rq1_budget_qualification_id
         or discovery.rq1_budget_qualification.sha256 != content_hash(budget)
@@ -244,8 +310,6 @@ def verify_target_study_freezes(
         != manifest.protocol_id
         or discovery.discovery_population_lineage.accepted_population_manifest_sha256
         != manifest.discovery_population_sha256
-        or discovery.discovery_population_lineage.pre_census.data_role_manifest_id
-        != manifest.data_role_manifest_id
         or discovery.discovery_population_lineage.post_census.data_role_manifest_id
         != manifest.data_role_manifest_id
         or (
@@ -341,6 +405,7 @@ def verify_target_study_freezes(
                     item.stratum_id,
                 )
                 for item in frozen_task_bundles
+                if item.exclusion_reason is None
             }
         )
     )
@@ -352,6 +417,8 @@ def verify_target_study_freezes(
                     item.task_unit_id,
                     item.realization_id,
                     item.task_bundle_id,
+                    item.realization_weight,
+                    item.exclusion_reason,
                 )
                 for item in frozen_task_bundles
             }
@@ -366,6 +433,8 @@ def verify_target_study_freezes(
         budget.power_and_margin_memo.atomic_power.plan.practical_margin,
         budget.power_and_margin_memo.pair_power.plan.practical_margin,
         budget.power_and_margin_memo.maximum_unknown_fraction_among_valid,
+        atomic_minimum_task_units_per_realization=budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_realization,
+        pair_minimum_task_units_per_realization=budget.power_and_margin_memo.pair_power.plan.minimum_task_units_per_realization,
     )
     dispatch_id = dispatch.confirmation_dispatch_manifest_id
     dispatch_hash = content_hash(dispatch)
@@ -442,59 +511,63 @@ def _verify_discovery_population(lineage, manifest: DataRoleManifest) -> bool:
     profile = lineage.profile
     pre = lineage.pre_census
     post = lineage.post_census
+    receipt = lineage.receipt
+    original = manifest if receipt is None else receipt.pre_data_role_manifest
+    if type(original) is not DataRoleManifest:
+        return False
+    original_units = sorted(task.task_unit_id for binding in original.bindings
+                            if binding.role is DataRole.DISCOVERY for task in binding.task_units)
+    final_units = sorted(task.task_unit_id for binding in manifest.bindings
+                         if binding.role is DataRole.DISCOVERY for task in binding.task_units)
+    if (original.protocol_id != manifest.protocol_id or manifest.protocol_id != profile.protocol_id
+        or pre.population_manifest_sha256 != original.discovery_population_sha256
+        or post.population_manifest_sha256 != manifest.discovery_population_sha256
+        or list(pre.task_unit_ids) != original_units or list(post.task_unit_ids) != final_units):
+        return False
+    if receipt is not None:
+        previous_bindings = {binding.data_id: binding for binding in original.bindings}
+        current_bindings = {binding.data_id: binding for binding in manifest.bindings}
+        if any(current_bindings.get(key) != value for key, value in previous_bindings.items()):
+            return False
+        extra = [binding for key, binding in current_bindings.items() if key not in previous_bindings]
+        if not extra or any(binding.role is not DataRole.DISCOVERY for binding in extra):
+            return False
+        old_tasks = {task.task_unit_id for binding in original.bindings for task in binding.task_units}
+        old_groups = {task.near_duplicate_group_id for binding in original.bindings for task in binding.task_units}
+        new_tasks = [task for binding in extra for task in binding.task_units]
+        names = [task.task_unit_id for task in new_tasks]
+        groups = [task.near_duplicate_group_id for task in new_tasks]
+        decisions = {row.task_unit_id: row for row in receipt.task_dispositions if row.accepted}
+        if (len(set(names)) != len(names) or len(set(groups)) != len(groups)
+            or set(names) & old_tasks or set(groups) & old_groups
+            or tuple(sorted(names)) != receipt.acquired_task_unit_ids or set(decisions) != set(names)):
+            return False
+        for task in new_tasks:
+            decision = decisions[task.task_unit_id]
+            if (decision.near_duplicate_group_id != task.near_duplicate_group_id
+                or decision.source_lineage_id != task.source_lineage_id
+                or tuple(event.value for event in decision.exposure_categories) != task.exposure_history
+                or set(task.exposure_history) - {"SOURCE_CURATION_VIEWED"}
+                or decision.source_family not in profile.permitted_source_families):
+                return False
 
     def ready(census) -> bool:
         cells = {item.target_id: item for item in census.cells}
-        pair_cells = {item.target_id: item for item in census.pair_cells}
-        if (
-            set(cells) != {item.target_id for item in profile.targets}
-            or set(pair_cells) != {item.target_id for item in profile.pair_targets}
-        ):
-            return False
-        for target in profile.targets:
-            cell = cells[target.target_id]
-            shared = set(cell.absent_lineages) & set(cell.present_lineages)
-            if (
-                cell.absent_task_units < target.minimum_absent_task_units
-                or cell.present_task_units < target.minimum_present_task_units
-                or len(shared) < target.minimum_shared_lineages
-            ):
-                return False
-        for target in profile.pair_targets:
-            cell = pair_cells[target.target_id]
-            if (
-                any(
-                    count < target.minimum_cell_task_units
-                    for _, count in cell.cell_task_units
-                )
-                or len(
-                    set.intersection(
-                        *(set(lineages) for _, lineages in cell.cell_lineages)
-                    )
-                )
-                < target.minimum_shared_lineages
-            ):
-                return False
-        return (
-            census.fillable_atomic_candidates
-            >= profile.minimum_fillable_atomic_slots
-            and census.fillable_pair_candidates
-            >= profile.minimum_fillable_pair_slots
-            and census.fold_feasible_atomic_candidates
-            >= profile.minimum_fillable_atomic_slots
-            and census.fold_feasible_pair_candidates
-            >= profile.minimum_fillable_pair_slots
-        )
+        return (profile.schema_version == "4.0"
+                and set(cells) == {item.target_id for item in profile.targets}
+                and all(cells[target.target_id].context_task_units >= target.minimum_context_task_units
+                        for target in profile.targets))
 
     if (
         lineage.accepted_population_manifest_sha256
         != manifest.discovery_population_sha256
-        or pre.data_role_manifest_id != manifest.data_role_manifest_id
+        or pre.data_role_manifest_id != original.data_role_manifest_id
         or post.data_role_manifest_id != manifest.data_role_manifest_id
         or lineage.plan.selector_variant_blind is not True
         or lineage.plan.prohibited_inputs
         != (
             "FCI_OR_PAG_EVIDENCE",
+            "FEATURE_STATES_OR_PAIR_CELLS",
             "NATURAL_OUTCOMES",
             "PAIR_RELATION_SUPPORT",
             "RD_SCORES",
@@ -505,18 +578,16 @@ def _verify_discovery_population(lineage, manifest: DataRoleManifest) -> bool:
     if lineage.plan.decision is SupplementationDecision.NOT_REQUESTED:
         return (
             lineage.receipt is None
-            and ready(pre)
-            and ready(post)
-            and lineage.status
-            is DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION
+            and lineage.status is (DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION
+                                   if ready(post) else DiscoveryPopulationStatus.COVERAGE_GAPS_RETAINED)
+            and pre.cells == post.cells
         )
-    receipt = lineage.receipt
     if receipt is None:
         return False
     return (
         not ready(pre)
-        and ready(post)
-        and lineage.status is DiscoveryPopulationStatus.READY_AFTER_ONE_ROUND
+        and lineage.status is (DiscoveryPopulationStatus.READY_AFTER_ONE_ROUND
+                               if ready(post) else DiscoveryPopulationStatus.COVERAGE_GAPS_RETAINED)
         and receipt.round_index == 1
         and set(receipt.acquired_task_unit_ids)
         == set(post.task_unit_ids) - set(pre.task_unit_ids)

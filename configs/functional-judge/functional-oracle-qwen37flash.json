@@ -11,9 +11,9 @@
     "protocol_version": "functional_oracle_v2",
     "model_id": "qwen3.7-flash-2026-07-15",
     "evaluator_config_sha256": "b6cac6b9c45efe13262e5efc1106226303804870ff5727be725fb7952d3e711b",
-    "prompt_sha256": "fc0b165024ba89f84e98e029e63e7015af1569b28076f509021733a92983c731",
+    "prompt_sha256": "f750e2fe095e1a40a5d8dc9b6ee959231e99e38082e2b0f64d4a7085dc3adbb4",
     "evaluator_config_path": "data/functional-judge/evaluator-candidates/functional-oracle-qwen37flash.json",
-    "prompt_path": "data/functional-judge/prompts/functional-oracle.txt"
+    "prompt_path": "data/functional-judge/prompts/functional-oracle-task-relative.txt"
   },
   "holdout": {
     "data_role": "QUAL_DEV_EXPOSED_REGRESSION_ONLY",

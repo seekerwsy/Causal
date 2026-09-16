@@ -1,42 +1,74 @@
 \section{Motivating Example and Problem Formulation}
 
-\subsection{From a Missing Requirement to a Testable Hypothesis}
+\subsection{From a Task Requirement to a Guidance Question}
 
-Consider a security-underspecified request to implement \texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8 report. The task semantics are fixed, but path confinement is implicit. A target policy can add the requirement to resolve and normalize the path under \texttt{base\_dir} and reject any resolution outside that directory. A matched no-op preserves the original factor state, a length-matched placebo changes presentation only, and a generic control requests secure coding without naming path confinement. This creates a testable requirement hypothesis without assuming that path confinement will affect the generated program.
+Consider a request to delete database records for a supplied user identifier
+and return the number of deleted records. The request specifies an operation,
+its input, and observable behavior, but does not explicitly require SQL value
+parameterization. A developer considering a prompt modification needs to know
+which input the requirement concerns, what to change, and what evidence would
+justify doing so. The proposed intervention adds that requirement for the
+identifier used by the deletion operation while retaining the requested record
+selection and return behavior. This defines something to investigate; it does not
+establish that code generated from the original prompt lacks parameterization
+or is insecure.
 
-\subsection{Units, Variables, and Causal Boundary}
+The intervention's scope is part of the hypothesis. A parameterization
+requirement attached to another input or database operation would define a
+different comparison. Prompt TSG records these task-local distinctions so that
+source assessment and prompt editing refer to the same requirement. A hypothesis
+specifies where the requirement applies, whether to add or remove it, and which
+non-target requirements must remain fixed. Its concrete prompt-editing policy is
+tested against a matched rewrite that leaves the target requirement's expression
+unchanged. The experimental object is this policy, not an intrinsic causal
+property of a requirement name or graph node.
 
-Let a generation unit be indexed by semantic task cluster $c$, task instance $i$, requirement hypothesis $h$, realization $r$, prompt arm $a$, generator model $m$, and request-randomness slot $s$:
+The intended output is an explanation of this requirement-level decision.
+For the example, it identifies the supplied identifier as a SQL value, locates
+the proposed parameterization requirement at the deletion operation, and states
+the record-selection and return behavior that must remain unchanged. It then
+names the tested edit and comparison, presents the available effect evidence
+and its uncertainty, and explains whether that evidence supports a modification
+or leaves the decision unresolved. This example specifies the explanation's
+content; it is not a measured hardening result.
 
-\[
-  u = (c,i,h,r,a,m,s).
-\]
-
-Tasks are partitioned before generator-based discovery into disjoint discovery and held-out evaluation pools. No semantic task cluster crosses this boundary. The highest resampling unit is \texttt{semantic\_task\_cluster\_id}; every descendant task instance, hypothesis, model, arm, realization, and request slot moves with its cluster.
-
-$W$ contains approved pre-treatment task metadata, $X^0$ contains natural Prompt TSG feature queries, and $Y^0$ contains independently committed discovery outcomes. A non-editable context query $C_q$ scopes one actionable requirement $f$. Randomized arm $A$ is the assigned prompt policy, whereas post-intervention $X^{A,R}$ is a separately extracted realization diagnostic and never replaces $A$ in the ITT estimator. Generator-model identity remains an analysis coordinate and provenance field.
-
-Prompt TSG edges encode relations stated or grounded in the prompt; they are not causal edges. A PAG retains uncertainty in observational discovery, but generated code is not a primary-PAG variable or a mediator. Generated code supplies independently measured security and functionality outcomes. Thus the Prompt TSG represents candidate requirements, observational discovery determines which hypotheses to test, and randomized assignment determines the effect of the frozen prompt policy.
-
-\subsection{What It Means for a Requirement to Matter}
+\subsection{Evidence and Scope of Guidance}
 \label{sec:matter-definition}
 
-For frozen hypothesis $h$ and generator model $m$, let $\Delta^{\mathrm{ITT}}_{h,m}$ be the target-minus-no-op assigned-arm risk difference on oracle-evaluable secure-code yield, and let $CI^{\mathrm{adj}}_{h,m}$ be its multiplicity-adjusted interval. The effect axis is defined before outcome inspection:
+We study changes to requirement expression within a declared task population
+and generator model. The analysis produces evidence for selected single- or
+two-requirement prompt policies, not an explanation of why one particular code
+sample was generated. Task semantics determine what the policy changes;
+independent measurements determine what can be said about its consequences.
 
-\begin{itemize}
-  \item \textsc{Supported-Expected}: the adjusted interval excludes zero in
-  the frozen expected direction;
-  \item \textsc{Supported-Opposite}: the adjusted interval excludes zero in
-  the opposite direction;
-  \item \textsc{Inconclusive}: the interval crosses zero and still contains
-  effects beyond the predeclared practically relevant margin;
-  \item \textsc{Null-Compatible}: the interval crosses zero but excludes
-  practically relevant effects in both directions under the frozen margin;
-  and
-  \item \textsc{Non-Evaluable}: required protocol evidence is unavailable or
-  invalid, so no effect classification is permitted.
-\end{itemize}
+The primary safety endpoint is \emph{oracle-evaluable secure-code yield}:
+whether a generation request produces valid code that a fixed security
+measurement procedure, the \emph{Oracle}, can assess and labels secure.
+Functionality is assessed independently on the same generated code against the
+original task. Code validity, Oracle support and unknown coverage, and
+secure-and-functional joint success remain separate outcomes. An unknown
+security label is not an insecure label, and a higher observed secure yield
+does not alone establish a lower underlying insecure-code rate when measurement
+coverage changes.
 
-These labels answer different questions. \emph{Effect-relevant} means either supported status; \emph{beneficial} means a supported security-improving operation-specific effect; and \emph{practically actionable} additionally requires \textsc{Supported} specificity and \textsc{Preserved} functionality. Specificity is reported as \textsc{Supported}, \textsc{Unsupported}, \textsc{Inconclusive}, or \textsc{Not-Tested}; functionality as \textsc{Preserved}, \textsc{Degraded}, \textsc{Improved}, \textsc{Inconclusive}, or \textsc{Non-Evaluable}. No aggregate ``matters'' label overwrites these axes, and inconclusive evidence is never relabeled as absence of effect.
+For a single-requirement policy, a meaningful effect is positive or negative
+relative to a prespecified practical margin and simultaneous uncertainty
+interval. A two-requirement interaction instead asks whether the effect of
+one edit changes when the other is also applied; it does not by itself establish
+joint benefit. Practically null, inconclusive, and non-evaluable findings remain
+distinct. An informative finding need not support hardening: an adverse
+single-requirement policy effect can support an endpoint-specific warning about
+that edit, while a two-requirement interaction does not establish the benefit
+or harm of the joint change.
+Favorable security evidence alone does not establish preserved functionality.
+An explanation must distinguish an unconfirmed option, a supported effect
+statement, and a recommendation whose
+additional security and task-preservation conditions have been met.
 
-The primary analysis is semantic-task-clustered assigned-arm ITT over every committed assignment. The primary outcome is oracle-evaluable secure-code yield. Code validity, Oracle support, unknown coverage, functionality, and secure-and-functional joint success remain separate outcomes; post-assignment fidelity, semantic compliance, generation success, and non-target drift are diagnostics rather than denominator filters. Claims therefore remain scoped to the frozen requirement, context, operation, task population, realization distribution, generator model, outcome, and multiplicity family.
+Effects are estimated at the level of independent, deduplicated \emph{task
+units}; repeated generation requests do not create additional tasks. Each claim
+refers to the tested requirement, operation and scope, task population, editing
+policy, generator model, endpoint, and inference family. Source binding does
+not convert this population-level evidence into a guarantee for an individual
+task. The Method specifies how the comparison and inferential rules are fixed
+before confirmation outcomes and how their evidence constrains guidance.
