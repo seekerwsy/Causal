@@ -147,6 +147,18 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
+The [explicit-boundary revision](experiments/2026-09-17-tsg-boundary-revision.md)
+removes task-to-operation broadcast and retains whole-task/universal scope in the
+graph. Two authored controls demonstrate the compiler correction. A fresh paired
+old/new comparison on the exposed pandoc and book tasks completed all four graphs
+in ten calls (CNY3.169692). Both versions kept the two API prohibitions in one atom;
+zero of the two fixed single-API probes was usable, so no prompt edit ran. Revised
+pandoc separated the global exception constraint but omitted the function-name
+requirement. Book branches survived in both versions. No overall automatic quality
+or stability improvement was established. The unchanged101-case reviewer suite
+passed in a clean export; both frozen model executions replay exactly offline.
+New scope semantics are active; old results retain their archived execution code.
+
 The [three-scheme extraction diagnostic](experiments/2026-09-17-tsg-extraction-comparison.md)
 compared current full records, focused bindings and inventory-then-binding on the
 same exposed pandoc task, twice per scheme. Eight calls completed for CNY2.444208.

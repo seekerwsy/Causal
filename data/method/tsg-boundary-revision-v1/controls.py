@@ -10,7 +10,7 @@ from prompt_mechanism_study.source_records import record_request, compile_record
 base, version, output = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
 catalog=read_json(base/version/'inputs/catalog.json')
 rows=[]
-for case in read_json(base/'inputs/controls.json'):
+for case in read_json(base/'controls-inputs/controls.json'):
     task=case['task']
     request=record_request(contract_decision_request(task,catalog))
     records=case[version+'_records']
