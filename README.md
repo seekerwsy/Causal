@@ -60,6 +60,10 @@ candidate construction at their original boundary. Policy-internal conditions
 are separate from task-selection context. The [bounded projection check](docs/experiments/2026-09-17-complete-policy-projection.md)
 tests this path through actual prompt edits on authored structures; it does not
 establish better automatic extraction or qualify a formal study.
+The subsequent [two-task natural check](docs/experiments/2026-09-17-complete-policy-natural.md)
+completed both graphs, but its one automatic candidate response truncated. Source
+guard/target defects and inappropriate functional candidates remained; no candidate
+gain or actual edit was established. Six calls and their failures replay offline.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) records the exact active procedure,
 negative results and next research decision. The

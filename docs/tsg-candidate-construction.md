@@ -214,3 +214,9 @@ this bounded check, the unchanged automatic API-probe failures and its limits.
 All these cases are exposed development or synthetic controls, not natural
 Discovery/Confirmation support. Earlier counts, qualification rules and outcomes
 remain in their original reports and Git history; they are not regraded here.
+
+The subsequent [natural-task check](experiments/2026-09-17-complete-policy-natural.md)
+completed two automatic graphs but its single proposal response truncated. Partial
+item diagnostics exposed unsupported scope changes and ordinary functionality
+proposed as factors. No candidate catalogue or actual edit was accepted; the
+expanded structural capability has not yet demonstrated a natural candidate gain.

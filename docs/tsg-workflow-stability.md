@@ -156,6 +156,17 @@ reference answer. Unknown transitions remain separate from correct repairs.
 
 ## Current evidence and reproduction
 
+The [complete-policy natural check](experiments/2026-09-17-complete-policy-natural.md)
+completed firmware-upload and file-download graphs in five Qwen Max calls. Its one
+Qwen Flash candidate call truncated at 8,192 tokens; no catalogue or edit followed.
+Source audit found a missing failure guard and a directory used as the constrained
+path. The partial candidate output also selected ordinary interfaces/returns and
+re-guessed graph targets. Local old/new diagnostics permit nine/ten of its seventeen
+complete leading items structurally, but the additional conditional exception is
+non-target functionality, not a valid security-factor gain. This does not establish
+automatic improvement. All six requests replay exactly; conservative cost is
+CNY1.926796 and remaining authorization CNY4.903512. No further sample was drawn.
+
 The [explicit-boundary revision](experiments/2026-09-17-tsg-boundary-revision.md)
 removes task-to-operation broadcast and retains whole-task/universal scope in the
 graph. Two authored controls demonstrate the compiler correction. A fresh paired

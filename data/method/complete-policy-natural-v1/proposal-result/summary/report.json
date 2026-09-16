@@ -1,0 +1,1 @@
+{"actual_conservative_cost_microunits":250000,"error_message":"provider completion did not finish with stop (finish_reason='length')","error_type":"JudgeGateError","formal_execution_authorized":false,"provider_calls":1,"request_bundle_sha256":"8d0fbb94c6e940456a8b64b0f83ffbd6cc1a486c9b7e0acd3e95620e187c7204","scientific_claim_allowed":false,"status":"CANDIDATE_PROPOSAL_FAILED"}
