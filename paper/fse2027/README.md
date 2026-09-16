@@ -19,6 +19,9 @@ This directory contains the FSE 2027 paper draft for Prompt Mechanism Study.
   `method-concise-preview.tex`; there is no separate Method text to maintain.
 - The preview filename is retained for continuity; the author has lifted its
   former three-page target in favor of a clearer explanation of the method.
+- The shared method-details appendix contains source checks, intervention
+  execution, weighted estimation, and inference details. The current Method-only
+  revision is local pending review, including this appendix.
 - `references.bib`: bibliography shared by the section files.
 - `tables/cwe-inventory/`: the selected 20-CWE table and full 117-label
   appendix, stored for later use and **not included in the manuscript**.
@@ -37,7 +40,7 @@ Overleaf and compiled with `main.tex` as the main file.
 
 The connected Overleaf Git project is
 `https://git.overleaf.com/6a8c0a50bbdf197f5de0d0ae`. Its separate local checkout
-is under `paper/tmp/overleaf-sync/`; the research repository's `origin` points
+is under `paper/tmp/overleaf-review-20260916/`; the research repository's `origin` points
 to GitHub. Fetch the Overleaf project's latest revision before syncing, and
 preserve any uncommitted manuscript edits in an existing sync checkout.
 
@@ -79,8 +82,12 @@ Introduction through Conclusion now follow this shared narrative and the current
 specified method. The four RQ sentences retain the main
 manuscript wording at the author's explicit request; their broad framing does
 not activate additional experiments. The protocol remains `SPECIFIED_DRAFT`.
-The exact RQ1 comparator envelope, optional Expert/Random inclusion, task/model
-counts and budgets, and the separately governed RQ4 design still need a
+The main study is single-requirement (Atomic-only); Pair research is preserved
+on `codex/pair-interaction-research`, not active in this manuscript. RQ1 and RQ4
+use CausalGuide, Prompt Attribution, Causal Prompt Concepts, Prompt Perturbation,
+and LLM-Judge Explanation. RQ2 isolates Full versus RD-only. The roster is fixed,
+but exact baseline implementations/source bindings, the common bridge, task/model
+counts and budgets, and the separately governed RQ4 design still require a
 prospective freeze. Representation and Oracle qualification also remain
 scientific prerequisites, not established by this prose revision. No formal
 computational result is reported. Protocol Section 15.1 now specifies explanation
@@ -92,9 +99,14 @@ provisional argument outline is in the writing notes, not presented as an abstra
 Data Availability is included after Conclusion and describes intended replication
 materials without a fabricated release link.
 
-The 2026-09-13 revision is local only. It updates the paper-facing name and protocol
-positioning, not immutable protocol IDs, experimental rules, implementation code,
-or frozen inputs/results. Overleaf has not been synchronized with this revision.
+The 2026-09-16 revision integrates the Overleaf RQ1/RQ4 working-session comment
+from commit `2528cd2`. Effect-confirmed is a reporting alias for the existing
+positive-/negative-meaningful statuses, not a new inference rule. RQ4 uses
+anonymized English Explanation + Suggested Action products and five 1--5 Likert
+items; overall usefulness is the planned primary rating, pending preregistration.
+The author authorized manuscript revision and Overleaf synchronization, not
+formal experiments or changes to frozen artifacts. See the writing notes for
+the final build and synchronization record.
 
 ## Reviewer Reading Guide
 

@@ -1,158 +1,226 @@
 # Manuscript narrative and Method — review notes
 
-## Scope and status
+## Current local Method review (2026-09-16)
 
-The clarity-first Method is the main manuscript's canonical
-`sections/03-method.tex`. Both `main.tex` and the section-only preview read that
-same file; the separate draft text has been removed. The preview is a writing
-artifact, not an additional experimental method or execution path. Its authority
-is `docs/protocol.md`, protocol
-`phase-context-policy-v3`, draft revision 2026-09-13. The protocol remains
-`SPECIFIED_DRAFT`; no claim-bearing formal result is asserted here.
+This follow-up revises Method only, on top of the preceding Overleaf submission.
+It is **local and awaiting author review**, with no new commit or remote push.
+The canonical Method and one shared method-details appendix are imported by
+both manuscript wrappers. Other section prose, protocol, implementation, data,
+and frozen evidence are unchanged in this follow-up.
 
-The author lifted the former three-page target. The preview filename is retained
-for continuity, not as a length constraint. A SQL deletion task provides a
-running example from source representation through causal analysis to explanation
-and guidance; it is illustrative, not an experimental result. This revision is
-local only. No Overleaf synchronization, provider call, or formal study is authorized.
+The approved section contract is: readers enter with the requirement-level
+security question and leave understanding the scoped edit, its causal comparison,
+and the evidence-conditioned action. Stage I establishes task meaning;
+Stage II separates selection from assigned-policy effects; Stage III converts
+the linked records into Explanation + Suggested Action. Standard execution
+details support this chain rather than competing with it in the main prose.
 
-The requested conceptual addition is **typed symbolic graph representation
-language**. It names the type system, symbolic vocabulary, permitted relations,
-source grounding, and query interpretation underlying Prompt TSG. Each extracted
-task graph is an instance of that language. It does not assert a new general
-purpose programming language, a complete semantics of natural language, or a
-new causal discovery algorithm.
+The main Method is reduced by roughly one third. Three equations remain in
+the body (graph, endpoint, primary contrast); the weighted arm mean and exact
+inference rules are in Appendix A. Repeated SQL background and repeated
+scope disclaimers are consolidated. Stage III includes one complete,
+explicitly unconfirmed SQL example, with no invented rank, effect, or recommendation.
+
+Review reading order:
+
+1. [Method preview](out/method-concise/method-concise-preview.pdf), Section 3:
+   narrative and example.
+2. The same PDF, Appendix A: relocated execution and statistical detail.
+3. [Canonical Method](sections/03-method.tex) and
+   [shared appendix](sections/appendix-method-details.tex): editable sources.
+
+The citation-verification pass adds two verified references and reuses CWEval
+at the measurement rationale, bringing the Method to five cited works:
+
+- banarescu2013amr: Laura Banarescu, Claire Bonial, Shu Cai, Madalina Georgescu,
+  Kira Griffitt, Ulf Hermjakob, Kevin Knight, Philipp Koehn, Martha Palmer,
+  Nathan Schneider. *Abstract Meaning Representation for Sembanking*. LAW 2013,
+  pp. 178–186, ACL. VERIFIED against the
+  [publication and metadata](https://aclanthology.org/W13-2322/) and
+  [paper](https://aclanthology.org/W13-2322.pdf). Stage I cites its concept/relation
+  graph representation, not evidence that Prompt TSG is accurate or more readable.
+- miller2017explanation: Tim Miller. *Explanation in Artificial Intelligence:
+  Insights from the Social Sciences*. arXiv:1706.07269, 2017; reading uses v3.
+  VERIFIED [metadata](https://arxiv.org/abs/1706.07269) and
+  [§§2.3/2.6.2](https://arxiv.org/html/1706.07269v3). Stage III cites contrast and
+  relevance as design motivation, not proof of this method's explanation utility.
+  This entry cites the verified preprint rather than guessing metadata for the
+  later journal publication.
+- peng2025cweval: existing metadata rechecked against the
+  [author preprint](https://arxiv.org/abs/2501.08200). Stage II uses the distinction
+  between functionality and security, not a claim that our Oracle is qualified.
+- spirtes1995fci and zheng2024causallearn: existing verified map below retained.
+
+Academic-polishing's method-prose-rewrite pass follows the approved structural
+plan; academic-paper-writer supplies the section contract and bounded read-only
+code/preprocessing probes. The probes reconfirmed source-only grounding,
+independent editability, task-unit weighting, four arms and the single primary
+family. The bounded review led to four local clarifications: correction is
+permitted rather than proven effective; bootstrap is with replacement at original
+source-stratum size; practical margins precede discovery outcomes; appendix
+symbols and the bootstrap order statistic are defined explicitly.
+No scientific experiment was run.
+
+The local prose is a reviewable specification, not a claim-bearing completed
+study. Formal representation/Oracle qualification, effect results, exact adoption
+criteria and expert-study evidence remain open. No performance claim was added.
+The explanatory example is explicitly hypothetical and unconfirmed.
+
+Local review verification: prose_debt, section_contract_debt, citation_debt,
+and rationale_debt are closed for this Method revision; thin_draft = no.
+Evidence/protocol/result debts remain open, so scientific completion is blocked
+while local manuscript review is safe. The final bounded reviewer confirmed
+the four corrections without repeating a full audit.
+
+Current builds succeeded with the commands below: Method preview 7 pages,
+full manuscript 16 pages, including references and the shared appendix.
+The preview pages and the full manuscript's Method/appendix pages were rendered
+and inspected; changed pages were rechecked after the final corrections.
+There are no overfull boxes or unresolved references. The full manuscript
+retains a minor underfull bibliography line; the preview retains expected
+section-only ACM front-matter warnings. Bibliography warnings for incomplete
+preprint volume/page fields are not filled with guessed metadata.
+No template, font, margin, spacing, or float settings were changed.
+The preview was queued in the local Codex file panel; its link above remains
+the direct review entry point.
+
+An overview figure remains a soft, manual publication debt, not part of this
+prose revision. Its three panels should map task bindings → matched intervention
+evidence → Explanation + Suggested Action, with semantic and causal graphs
+visibly distinct. Evidence source: these three Method stages; intended placement:
+the opening overview. Caption intent: how task-grounded requirements connect
+the analyzed intervention to bounded guidance. No data plot or numerical result
+figure is authorized or generated in this turn.
+
+## Scope and authority
+
+The canonical Method is `sections/03-method.tex`, imported by both `main.tex`
+and `method-concise-preview.tex`. The preview is not another method path and
+has no three-page constraint. The active authority is `docs/protocol.md`,
+`phase-context-policy-v3`, Atomic-only revision 2026-09-16, status
+**SPECIFIED_DRAFT**. No formal result is asserted.
+
+The author authorized the preceding full-manuscript revision and Overleaf
+submission; the current Method follow-up is local only.
+Pair interactions remain on `codex/pair-interaction-research` at `e6833027`;
+they are not an optional active main-paper track. No provider call, protected
+task exposure, new experiment, implementation/schema change or frozen-result
+reinterpretation is authorized by this prose work.
+
+The revision integrates the RQ1/RQ4 annotation in Overleaf commit `2528cd2`.
+Its PHASE display name becomes the approved CausalGuide name; mock-up counts
+are not results. The annotation's historical RQ3 description does not change
+the four current RQ sentences.
 
 ## Narrative and section contracts
 
-The approved name is **CausalGuide: Causal Analysis for Explainable Security
-Guidance in LLM Code Generation**. The main story is to establish causal evidence
-about changing a task-bound security requirement and explain what prompt
-modification that evidence supports, in which scope, and with which limitations.
-The two contributions are task-grounded requirement-level causal analysis and
-evidence-grounded explanations/security guidance. Representation gives these
-outputs task-local meaning; budgeted prioritization and independent randomized
-evaluation support evidence acquisition. Neither secure prompting, concept
-graphs, causal analysis, nor actionable explanations alone is claimed as new.
+Title: **CausalGuide: Causal Analysis for Explainable Security Guidance in LLM
+Code Generation**. Story: task grounding → causal evidence → Explanation +
+Suggested Action. The two contributions are task-grounded requirement-level
+causal analysis and evidence-grounded explanations/security guidance. Selection
+and randomized confirmation acquire the evidence needed by these outputs.
+Concepts, causal analysis, secure prompting and actionable explanations alone
+are not claimed as first contributions.
 
-- Introduction: move from the developer's modification decision to three
-  difficulties: task-local meaning, causal support, and evidence-to-guidance
-  interpretation. Finish with the three stages and two contributions. Reuse the
-  verified closest-work map below; do not claim a missing capability for all prior work.
-- Problem Formulation: use SQL deletion to define the explanation object and
-  expected output before the endpoint. Explain the matched comparison, scope,
-  and distinction between population-average evidence and an individual guarantee.
-- Method: carry the same requirement through representation, causal evidence,
-  and a specified explanation/reporting contract. Keep Typed Symbolic
-  Representation within Stage I and all six existing equations intact. Source
-  and implementation evidence below support the existing path; protocol Section
-  15.1 supports the new prospective reporting design, not implemented capability.
-- Evaluation: connect RQ1 selection quality, RQ2 structural-gate contribution,
-  RQ3 hardening evidence, and RQ4 perceived explanation utility. Preserve the
-  author's four RQ sentences verbatim; their broad wording does not expand the
-  currently specified experiments.
-- Related Work: acknowledge causal explanations, prompt adjustment, and joint
-  security/functionality objectives in prior work; distinguish the correspondence
-  between source-bound requirements, explicit comparisons, evidence, and guidance.
-- Conclusion: synthesize the method and its claim boundaries, not unobserved
-  empirical findings.
+- Introduction: developer decision → task-local meaning → causal support →
+  evidence-to-guidance → two contributions and complementary evaluation.
+- Problem: SQL deletion illustrates a scoped requirement, matched comparison
+  and two-part output; no numerical effect or original-code vulnerability is assumed.
+- Method: three reader-facing stages cover seven scientific operations. Typed
+  Symbolic Representation remains a subsection of Stage I. Stage II has
+  task-grounded hypotheses/prioritization, matched interventions, and outcome
+  measurement/effect estimation. Stage III specifies explanation content and
+  evidence-conditioned actions, not another experiment or a qualified generator.
+- Evaluation: same five-method roster in RQ1/RQ4; RQ2 isolates FCI admission;
+  RQ3 uses the same held-out effects to evaluate modification evidence.
+  Preserve the four RQ sentences verbatim.
+- Related Work: acknowledge concept-level causal analysis, prompt adjustment,
+  perturbation and security/functionality objectives; distinguish this study's
+  task-bound requirement/edit/evidence/guidance correspondence.
+- Conclusion: synthesize this correspondence and its limits without findings.
 
-The abstract is intentionally not filled. Its eventual skeleton is the
-requirement-level guidance decision, task-scope/causal-evidence/explanation
-challenges, the two-part methodological response, verified held-out and expert
-study results, and their bounded
-implication. The results move remains `[RESULT_NEEDED: frozen formal outputs]`;
-`[ABSTRACT_NEEDED: main empirical evidence is not yet available]` stays open.
-The title and protocol positioning change, but experimental rules and bibliography
-do not. No new figure was requested or added in this prose revision. The existing
-Data Availability section is included after Conclusion; it states intended
-artifact contents without asserting that a package has already been released.
+The abstract remains unfilled: [RESULT_NEEDED: frozen formal RQ outputs] and
+[ABSTRACT_NEEDED: main empirical evidence]. Data Availability follows Conclusion.
+No new figure or numerical table is in scope; no data figures require generation.
+An overview, if later requested, should show the three stages and the separate
+semantic, observational and randomized evidence sources, not causal TSG edges.
 
-## Method blueprint
+## Method blueprint and evidence hooks
 
-Reader before: understands the requirement-level guidance question. Reader
-after: can trace the applicable requirement and edit to a defined comparator,
-independent effect evidence, and the action or withheld advice that evidence
-permits. Each stage must explain its role and boundary, not reproduce code chronology.
-
-| Reader-facing stage | Scientific operations | Core content |
+| Reader stage | Scientific operations | Core content |
 |---|---|---|
-| Structured graph representation | Representation | Typed Symbolic Representation; Graph Construction and Grounding; Context and Requirement Queries; source bindings and four-valued states |
-| Requirement-level causal analysis | Prioritization; hypothesis freeze; intervention/randomization; measurement; outcome assembly; inference | Atomic/Pair hypotheses; support and structural admission distinct from RD ranks; fixed budgets and common bridge; addition/removal; matched controls and factorial cells; independent measurement; fixed-weight task-unit ITT; separate simultaneous families |
-| Evidence-grounded explanations and guidance | Human-facing reporting within inference/reporting | Fixed content order over linked source/policy/inference records; selection rationale distinct from effects; functionality/coverage/scope; evidence-conditioned advice or explicit withholding |
+| Structured Graph Representation | Representation | Source records, bounded review/correction, deterministic graph compilation; exact scope; applicability distinct from expression |
+| Requirement-Level Causal Analysis | Prioritization; hypothesis freeze; intervention/randomization; measurement; outcome assembly; inference | One editable requirement; FCI admission versus observational RD; fixed K and mapping; ADD/REMOVE; four arms; weighted task-unit ITT; one simultaneous primary family |
+| Evidence-Grounded Explanations and Guidance | Reporting within inference/reporting | Explanation + Suggested Action; task/edit/evidence correspondence; coverage/functionality/uncertainty; withholding unsupported advice |
 
-Keep the explanatory emphasis on task-local requirement scope, the single
-structural difference between selector variants, and the separation of generation
-randomness from independent task units. Explain the main selection path before
-its ablations, and introduce each estimator through its scientific meaning.
-Equations specify the graph, factorial arms, safety outcome, task-unit mixture,
-and effect contrasts. Stage I first inventories source facts, then binds fixed
-local instance IDs, and finally assesses requirement applicability and source
-expression separately within fixed scopes. Binding cannot add or relabel facts,
-and assessment cannot introduce a new scope. These are source-only operations
-within representation, not additional scientific stages. A missing graph match
-is not sufficient evidence of requirement absence.
-Requirement addition and removal are intervention directions, not separate
-top-level components. Stage II defines the proposed direction as part of the
-hypothesis and explains its realization and controls within the same stage. The Atomic
-FCI gate and observational RD rank are explicitly distinguished: FCI supplies
-structural admission, while independently computed RD scores supply priority.
-Pair admission instead uses the Prompt-TSG relation gate. Observational RD
-prioritizes candidates; assigned-arm RD estimates the frozen intervention
-effect. Stage III presents those linked records; it is not a second inference
-path or a new data role. Yield@K is explained in RQ1, not used as an explanation score.
-Implementation filenames, hashes, provider incidents, old catalog tables, and
-historical result labels do not belong in the manuscript prose.
+Three main Method equations define the graph, secure-yield endpoint and
+target-minus-no-op effect; the weighted arm mean is in Appendix A.
+Pair factorial and interaction equations
+are removed. Individual-policy evidence does not establish additivity or joint
+benefit. Generated code is measured independently, not a PAG variable/mediator.
 
-## Evidence hooks
+All hooks below are preexisting artifact evidence of specification or inspectable
+implementation, not proof that the formal study ran.
 
-All method facts below are `preexisting_artifact` evidence. They establish the
-specified procedure and inspectable implementation, not execution of a formal
-experiment.
-
-| Draft topic | Normative evidence | Implementation hook |
+| Topic | Protocol section | Implementation hook |
 |---|---|---|
-| Representation language and source semantics | Protocol §§5.1–5.5 | `task_input.py`, `prompt_contract_extract.py`, `prompt_contract.py`, `prompt_tsg.py` |
-| Atomic/Pair semantic policies | Protocol §6 and §§24.2–24.3 | `mechanisms.py`, `interaction_selector.py` |
-| Shared ranks and structural Gates | Protocol §§7–8, §24.3 | `prioritization.py`, `interaction_selector.py`, `selector_analysis.py` |
-| Realization allocation and balanced requests | Protocol §§9–10, §§24.4–24.6 | `randomization.py` |
-| Outcomes and mixture estimator | Protocol §11, §24.8 | `measurement.py`, `outcomes.py`, `inference.py` |
-| Simultaneous intervals and Yield@K | Protocol §12, §24.9 | `inference.py`, `selector_analysis.py` |
-| Optional source supplementation and inactive extensions | Protocol §25 | `discovery_population.py`, `study_design.py` |
-| Evidence available for explanation | Protocol §§11–15, §18 | `TaskHypothesisBinding`; `SharedEvidenceRecord` / `TargetEffectEstimate`; `selector_analysis.build_target_rq_tables` and `unique_effect_rows` |
-| Explanation mapping and guidance boundaries | Protocol §15.1; approved 2026-09-13 revision | Specified only: no active explanation-composition function or adoption-decision field was verified; the development TSG viewer is not this implementation |
+| Source records and graph semantics | §5; tsg-workflow-stability.md | source_records.py; prompt_contract_extract.py; prompt_contract.py; prompt_tsg.py |
+| Atomic obligations and exact scope | §§5–6; tsg-candidate-construction.md | candidate_construction.py; mechanisms.py |
+| FCI admission, RD ranking and fixed slots | §§7–8 | prioritization.py; selector_analysis.py |
+| Realizations and randomization | §§9–10 | randomization.py |
+| Outcomes and task-unit estimator | §11 | measurement.py; outcomes.py; inference.py |
+| Simultaneous intervals and existing meaningful Yield@K | §12 | inference.py; selector_analysis.py |
+| Optional outcome-blind preparation | §4 | discovery_population.py |
+| Formal evidence and freezes | §§15,18–19 | SharedEvidenceRecord; TargetEffectEstimate; unique_effect_rows; build_target_rq_tables |
+| Explanation/action content and RQ4 | §§15.1–17 | Specified contract only; no qualified composition/adoption classifier verified |
 
-## Explanation and RQ4 design boundary
+Candidate construction cannot split a compound obligation, treat assumptions as
+requirements or repair a graph. The later source-only scope assessment cannot
+rebind source facts or choose scope by target state. Unresolved is not absent;
+unexpressed in a prompt does not mean protection absent in generated code.
 
-The fixed explanation content order is task scope -> requirement/location ->
-edit/comparator -> effect evidence -> functionality/uncertainty -> supported
-action. Semantic, observational, and randomized statements retain distinct
-sources. Task binding does not identify an individual treatment effect or prove
-transportability to a new population. Realization-specific eligible populations
-and original mixture weights remain part of the reported effect's scope.
+## Five-method reporting and human-study boundary
 
-The new protocol Section 15.1 specifies necessary conditions and withholding
-behavior. It does not invent sufficient numerical adoption criteria. Missing
-secondary inference rules keep adoption advice explicitly blocked while valid
-primary effect evidence remains reportable. Harmful REMOVE is not beneficial
-ADD; Pair interaction is not joint benefit; non-significant functionality loss
-is not proof of preservation. Source completeness alone never decides the
-functional label: independent review of the generated code against the full
-original task supplies pass/fail/unknown.
+The roster is CausalGuide, Prompt Attribution (simple correlation), Causal Prompt
+Concepts, Prompt Perturbation, and LLM-Judge Explanation (direct prompted LLM).
+Causal Prompt Concepts and Prompt Perturbation are working comparator labels:
+their exact publication, implementation/version and adaptations remain UNVERIFIED.
+Ji et al. and NLPerturbator are relevant prior work, not automatically those
+comparators' identities. No reference corpus was supplied; the existing map
+below and bounded primary-source checks were reused.
 
-RQ4 compares complete explanation products under a common presentation. No
-method receives evidence it did not produce. The comparison cannot isolate
-the causal contribution of graph representation or wording to understanding.
-Its primary construct/endpoint, baseline material construction, case sampling
-across available outcome types, participant assignment, ethics, and repeated
-expert/case analysis remain `[METHOD_DETAIL_NEEDED: prospective RQ4 design]`.
-Actual adoption/repair success and objective comprehension are not measured by
-perceived clarity, credibility, or actionability alone.
+RQ1 reports K, Mapped, Effect-confirmed (+/−), and Effect-confirmed Yield@K.
+Mapped resolves a proposal to the frozen common scoped policy space; it is not
+successful protocolization or an effect finding. Effect-confirmed means formally
+authorized POSITIVE_MEANINGFUL or NEGATIVE_MEANINGFUL under existing simultaneous
+intervals/margins. It is a reporting alias, not a new stored field/status.
+Original K includes every empty/failed/non-evaluable slot. An opposite-direction
+effect can be effect-bearing while contradicting advice. External shared
+confirmation is not a baseline's native capability; same K does not mean same
+compute. RD-only is an RQ2 ablation. Expert/Random are not extra main methods.
+
+RQ4 compares anonymized English complete Explanation + Suggested Action products
+using five 1–5 Likert items: clarity, evidence sufficiency/justification,
+credibility, actionability and overall usefulness. Overall usefulness is the
+planned primary rating, not a registered or observed endpoint yet. Exact
+evidence access, explanation procedures, item anchors, ethics, participants,
+cases, assignment, empty/unavailable-product handling, repeated expert/case
+analysis and secondary multiplicity remain to be frozen. Common presentation
+cannot invent evidence or rewrite every product through CausalGuide. The study
+does not isolate wording/TSG effects, causal correctness, comprehension, actual
+adoption or repair success.
+
+Adoption needs prospectively frozen security/task-preservation criteria,
+secondary margins, coverage and joint decision rules. These remain open.
+Missing support withholds advice, not an otherwise reportable effect. Harmful
+REMOVE does not validate ADD; no detected functionality loss is not preservation.
+Independent original-task assessment supplies functional pass/fail/unknown.
 
 ## Verified citation-to-claim map
 
-The preview reuses the manuscript's existing bibliography. Its two method
-references below were checked against primary publication sources.
+The preview reuses the manuscript's shared bibliography. The two existing
+Method references below were checked against primary publication sources;
+the current additions are mapped in the local-review section above.
 
 - `spirtes1995fci`: FCI and causal discovery with latent variables and selection
   bias. [Primary publication page](https://www.microsoft.com/en-us/research/publication/causal-inference-in-the-presence-of-latent-variables-and-selection-bias/).
@@ -186,122 +254,60 @@ of every field in the full bibliography.
   interpretation of apparent security improvement.
   [Publication page](https://conf.researchr.org/details/icse-2026/icse-2026-research-track/175/Rethinking-the-Evaluation-of-Secure-Code-Generation).
 
-## Template profile
 
-The [FSE 2027 Research Papers instructions](https://conf.researchr.org/track/fse-2027/fse-2027-papers)
-specify the single-column `acmsmall` style and permit numeric citations. The
-preview uses the existing `acmsmall,screen,review,anonymous` class options and ACM
-bibliography style without reducing fonts, margins, or line spacing. The full
-submission limit is 18 pages of text/figures plus 4 pages of references; the
-author has lifted the former 2–3 page target for this Method draft. The preview
-contains no floats, so there is no separate float-placement map.
+## Build and preceding Overleaf synchronization
 
-## Details reserved for the full paper or appendix
-
-The Method states the design; experiment settings must later supply the
-actual qualified language/task scope, fixed model and decoding policy, generation
-slot count, role counts, K values, effect margins, power, and evaluator validation.
-These numbers cannot be inferred from development batches. Exact query/rewriter
-contracts, fold rules, bootstrap validity predicates, and calibration examples
-can accompany the artifact or appendix. Context-modifier inference, cross-model
-replication, and Pair response-pattern labels remain inactive until their own
-rules are prospectively frozen. RQ4 is a separate downstream human study.
-
-Specifically, context-modifier inference still needs exact assignment, joint
-bootstrap, and multiplicity rules; Pair response-pattern labels additionally
-need deterministic predicates and precedence. A replication model requires its
-own prospectively frozen model-bound effect coordinate. Optional Expert/Random
-selectors require a jointly frozen budget. Optional discovery-population
-supplementation is one outcome- and selector-blind acquisition round of
-independent natural tasks against context-only targets, never factor-state or
-four-cell filling. These extensions are omitted from the main Method prose.
-
-## Build and review
-
-From `paper/fse2027`:
+Build commands from `paper/fse2027`:
 
 ```powershell
-latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out/method-concise method-concise-preview.tex
 latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out/main-integration main.tex
+latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out/method-concise method-concise-preview.tex
 ```
 
-Built with TeX Live 2026, pdfTeX 1.40.29, latexmk 4.88, and acmart 2.16 on
-Windows on 2026-09-13. Both final builds returned exit code 0. The Method preview
-has seven pages including its two references; the integrated main manuscript
-has fifteen pages including references. All fifteen main pages and all seven
-preview pages were rendered and visually inspected in their final form. No unresolved
-references or overfull boxes remain. The main manuscript retains one
-bibliography underfull-line warning and its existing ACM reference-block
-warning; the section-only wrapper has expected missing-front-matter warnings.
-The final main page contains the end of the bibliography. No fonts, margins,
-line spacing, template options, or float settings were changed to control
-length. Two discretionary break opportunities in the seven-operation summary
-resolved a long slash-connected term without altering its content. No clipped
-text, equation overflow, or unreadable section transition was observed. There
-are no active floats to relocate in either document.
+The existing acmsmall,screen,review,anonymous profile, bibliography style,
+fonts, margins and spacing are preserved. No active figures or tables need float
+placement. This is a bounded layout audit, not a submission-compliance claim.
+The preceding submitted builds on 2026-09-16 succeeded with TeX Live 2026: main 15 pages,
+Method preview 7 pages, both including references. All 15 main pages and 7
+preview pages were rendered and visually reviewed. Equations and section
+transitions are legible; no clipping, overfull boxes or unresolved references
+remain. One long FCI sentence was reflowed without changing its meaning.
+No fonts, margins, spacing, template options or float settings changed.
+The main retains a minor underfull bibliography line and the existing ACM
+reference-block warning; the section-only preview has expected front-matter
+warnings. This is not a submission-ready build because scientific evidence is
+still missing. Four RQ sentences and four retained Atomic equations pass exact
+source comparisons. The separate Overleaf checkout also compiled successfully
+from source inputs matching this reviewed manuscript (including the unchanged
+bibliography). Nine manuscript source files were committed and pushed to
+Overleaf as `56f0a549afff886d448a5aca80f0390c9e85b132`, on top of `2528cd2`.
+Remote `refs/heads/main` was read back and matches that commit. Generated
+PDF/build files, local notes, protocol, code and data were not uploaded.
+The research repository's local documentation changes were not committed or
+pushed to GitHub as part of this manuscript-only remote submission.
 
-The revision used writing-ai-paper for the contribution/narrative decisions,
-academic-paper-writer in existing-section revision mode, academic-polishing for
-prose and claim strength, academic-reviser for bounded cross-section review, and
-academic-latex-layout for audit and a minimal line-break repair, with pdf for
-rendered-page inspection. The review checked evidence before argument and style.
-The main changes replace the selection/testing-centered story with task-grounded
-causal analysis for explanation and guidance, add a specified Stage III reporting
-contract, and distinguish complete-product RQ4 utility from computational effect
-evidence. Independent reviews were incorporated in two bounded rounds. Corrections
-separate adverse Atomic effects from negative Pair interactions, require adoption
-rules to be frozen before relevant outcomes are inspected, avoid implying an
-already preregistered expert study, and distinguish the behavior an explanation
-states must be preserved from evidence that generated code actually preserves it.
+Writing-ai-paper guided contribution framing/readability; academic-paper-writer,
+academic-polishing and academic-reviser supplied evidence-first section checks.
+Read-only probes verified the current Atomic path and source-record extraction.
+Bounded reviews checked Method and Evaluation; incorporated feedback distinguishes
+mapping/protocolization/confirmation, reports missing RQ4 products and avoids
+presenting suggested actions as an implemented classifier.
 
-Scientific consistency checks covered independent Atomic/Pair eligibility,
-FCI admission versus observational RD ranking, the common fixed-budget bridge,
-model-bound result reuse, one-realization allocation, assigned-arm task-unit
-accounting, unknown handling, fixed-mixture estimation, and separate max-|T|
-families. Direct source comparisons confirm that the four RQ sentences and six
-equations are unchanged. Main and preview still read one canonical Method file;
-the manuscript title and protocol positioning were updated together. Protocol
-Section 15.1 is a prospective reporting specification, not another execution path
-or a claim of an implemented explanation generator. The abstract source,
-bibliography, experimental implementation, frozen identifiers, and research
-artifacts were not changed by this revision. No formal execution, new task
-exposure, provider call, commit, push, or Overleaf synchronization was performed.
+## Bounded verification and remaining evidence
 
-## Bounded verification status and remaining evidence
+Whole-paper verdict: blocked; safe_to_continue: yes for prose revision and the
+authorized Overleaf synchronization, not formal execution or submission readiness.
 
-Input scope: the six revised sections, current normative protocol and relevant
-implementation hooks, and primary-source checks for the closest literature.
-This verifies the wording of a specified method and its cross-section
-consistency. It does not qualify the extractor or Oracle, run the formal study,
-verify every bibliography field, or establish a submission-ready paper.
+- prose/rationale debt: closed for the revised narrative after bounded review.
+- section/result debt: open; abstract and formal RQ1–RQ4 results are unavailable.
+- citation debt: open for exact research-baseline identity and a final full
+  bibliography audit; closest-work capability claims are checked above.
+- evidence debt: independent representation/Oracle qualification, natural support,
+  formal effects and human-study results; development success is not confirmation.
+- protocol debt: exact comparator bridge/procedures, source/model scope,
+  power/margins/budget, secondary adoption rules, and RQ4 preregistration.
+- figure debt: none introduced by this prose-only task; no data plots to generate.
 
-- Whole-paper verdict: blocked; safe_to_continue: yes.
-- prose_debt: closed for the revised passages; the bounded review corrections are
-  incorporated.
-- section_contract_debt: open for the full empirical paper because the abstract
-  and result-bearing argument remain incomplete; the revised method narrative
-  and section transitions have been checked.
-- citation_debt: open for a final full-bibliography/citation-to-claim audit;
-  the closest-work claim checks are recorded above.
-- evidence_debt: open for representation/measurement qualification, the specified
-  explanation product's implementation and evaluation, and formal evidence of
-  selection quality, intervention effects, and perceived utility. Existing
-  inference records establish available inputs, not an executed explanation study.
-- figure_debt: closed for this prose-only revision; no new figures or tables
-  were in scope and no dangling references were introduced.
-- protocol_debt: open for the actual admitted scope, task/model policies,
-  budgets and comparator bridge, Oracle qualification, power/margins, and
-  separately governed RQ4 design. Exact secondary margins, coverage conditions,
-  and joint adoption predicates must be prospectively fixed before inspecting
-  relevant Confirmation outcomes; absent rules withhold adoption advice, not
-  otherwise valid primary effect reporting.
-- result_debt: open; no formal RQ1–RQ4 outputs or traceable result tables exist.
-- rationale_debt: closed for the revised core design explanations.
-- thin_draft: yes as a complete empirical paper, not as a Method section.
-
-Claims about reliable extraction, Full outperforming its comparators,
-beneficial hardening, and experts' utility assessments remain unasserted. Current
-prose specifies how to test these claims rather than asserting their outcomes.
-They require the corresponding prospective freeze, qualification, and
-claim-bearing formal evidence before being written as findings. No additional
-experiment was authorized or needed to finish this narrative revision.
+No claims of superior selection, beneficial hardening, qualified extraction,
+or favorable expert ratings are made. Such findings require frozen, traceable
+formal evidence. Research implementation and frozen artifacts remain unchanged.

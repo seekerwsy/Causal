@@ -23,21 +23,22 @@ tested against a matched rewrite that leaves the target requirement's expression
 unchanged. The experimental object is this policy, not an intrinsic causal
 property of a requirement name or graph node.
 
-The intended output is an explanation of this requirement-level decision.
-For the example, it identifies the supplied identifier as a SQL value, locates
+The intended output is an \emph{Explanation + Suggested Action} record.
+For the example, the explanation identifies the supplied identifier as a SQL value, locates
 the proposed parameterization requirement at the deletion operation, and states
 the record-selection and return behavior that must remain unchanged. It then
-names the tested edit and comparison, presents the available effect evidence
-and its uncertainty, and explains whether that evidence supports a modification
-or leaves the decision unresolved. This example specifies the explanation's
+names the tested edit and comparison and presents the available effect evidence
+and its uncertainty. The suggested action states whether to consider the edit
+for testing, adopt it on sufficient evidence, or withhold adoption advice.
+This example specifies the explanation's
 content; it is not a measured hardening result.
 
 \subsection{Evidence and Scope of Guidance}
 \label{sec:matter-definition}
 
 We study changes to requirement expression within a declared task population
-and generator model. The analysis produces evidence for selected single- or
-two-requirement prompt policies, not an explanation of why one particular code
+and generator model. The analysis produces evidence for selected single-requirement
+prompt policies, not an explanation of why one particular code
 sample was generated. Task semantics determine what the policy changes;
 independent measurements determine what can be said about its consequences.
 
@@ -53,13 +54,9 @@ coverage changes.
 
 For a single-requirement policy, a meaningful effect is positive or negative
 relative to a prespecified practical margin and simultaneous uncertainty
-interval. A two-requirement interaction instead asks whether the effect of
-one edit changes when the other is also applied; it does not by itself establish
-joint benefit. Practically null, inconclusive, and non-evaluable findings remain
+interval. Practically null, inconclusive, and non-evaluable findings remain
 distinct. An informative finding need not support hardening: an adverse
-single-requirement policy effect can support an endpoint-specific warning about
-that edit, while a two-requirement interaction does not establish the benefit
-or harm of the joint change.
+policy effect can support an endpoint-specific warning about that edit.
 Favorable security evidence alone does not establish preserved functionality.
 An explanation must distinguish an unconfirmed option, a supported effect
 statement, and a recommendation whose
@@ -70,5 +67,6 @@ units}; repeated generation requests do not create additional tasks. Each claim
 refers to the tested requirement, operation and scope, task population, editing
 policy, generator model, endpoint, and inference family. Source binding does
 not convert this population-level evidence into a guarantee for an individual
-task. The Method specifies how the comparison and inferential rules are fixed
+task or show that several individually assessed edits remain beneficial when
+combined. The Method specifies how the comparison and inferential rules are fixed
 before confirmation outcomes and how their evidence constrains guidance.

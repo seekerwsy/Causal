@@ -12,7 +12,9 @@ edit changes in a given task scope and what evidence supports that change.
 Its task bindings identify the operation and input concerned; its policy-effect
 evidence concerns the specified comparison, rather than attributing one
 generation to a token or reconstructing internal reasoning. Whether experts
-find this explanation useful is a separate empirical question.
+find this explanation useful is a separate empirical question. Accordingly,
+our evaluation separates the requirement hypotheses a method proposes from
+the perceived utility of its final explanation product.
 
 \paragraph{Causal Analysis and Guidance for Code Models.}
 Palacio et al.~\cite{palacio2024causation} examine software and model interventions
@@ -30,7 +32,10 @@ independently measured policy effect. Prompt-TSG relations define task semantics
 observational structure helps prioritize questions; held-out randomized
 comparisons supply effect evidence. The explanation preserves these distinct
 sources, together with functional outcomes, uncertainty, and applicability
-limits.
+limits. Concept-based causal analysis and prompt perturbation inform the
+comparator roles in Section~\ref{sec:compared-methods}; their study-specific
+adaptations must not be confused with faithful reproductions of an original
+system or with its native evidence.
 
 \paragraph{Hardening LLMs for Secure Code.}
 Prompting studies examine security reminders, CWE-specific instructions, and

@@ -1,0 +1,157 @@
+\section{Method Details}
+\label{app:method-details}
+
+This appendix specifies the execution details supporting the three stages in
+Section~\ref{sec:method}. Development fixes representation and measurement rules,
+independent qualification assesses them, discovery prioritizes hypotheses, and
+confirmation tests the selected policies. Deduplicated task units and their
+frozen near-duplicate groups do not cross these roles; instances and repeated
+generations remain attached to their task unit.
+
+\subsection{Source Representation and Scope Checks}
+\label{app:representation-details}
+
+The source records retain operation participants and outputs, requirement
+targets, conditions, and composition together with exact evidence spans.
+Mechanical checking permits at most one bounded replacement. One ordinary
+source review then permits at most one local semantic patch before deterministic
+graph compilation. The patch is restricted to affected records and their
+source-supported dependencies. Compilation checks permitted types, references,
+and evidence locations but cannot infer missing bindings. A positive source
+review is not an independent semantic qualification.
+
+Conditions supplying information remain distinct from the objects being
+constrained and from conditions governing whether an operation executes.
+For example, requiring Python does not make deletion conditional on Python;
+participation in a common workflow does not spread a requirement to every
+operation. Candidate construction preserves negation, thresholds, direct objects,
+and compound meanings. It cannot convert an input assumption into an obligation,
+select half of a compound obligation, or repair missing graph relations.
+
+Context and scope matching are independent of the target requirement state.
+The subsequent source-only assessment refers to existing operation, input, and
+condition instances without adding, splitting, or rebinding facts. Missing or
+ambiguous evidence remains unresolved. Unknowns can be localized only when their
+source-grounded impacts are known; shared constraints or missing localization
+remain blocking. Independent qualification must assess source meaning and
+candidate correctness, not only graph well-formedness.
+
+\subsection{Candidate Freeze and Intervention Execution}
+\label{app:intervention-details}
+
+Before discovery outcomes are inspected, the candidate universe, natural-state
+support rules, reliability thresholds, and task-unit folds are fixed. Source
+tasks must establish the relevant operation, security boundary, and observable
+non-target behavior; they need not already contain experimental controls or
+exact editing recipes. Missing functionality details limit the corresponding
+claims without automatically invalidating an independently measurable security
+comparison. Full and RD-only prioritization use identical candidate rows,
+support decisions, folds, cross-fitted standardized RD scores, deterministic
+tie-breaks, and fixed $K$; only Full applies the FCI adjacency criterion.
+
+A common outcome-blind mapping resolves each method's proposal to a scoped
+requirement, editing operation, and comparator. This mapping is distinct from
+protocolization, which validates concrete edits and controls, and from
+confirmation, which estimates effects. Each unique selected model-bound effect
+is confirmed once and reused by all referring slots. Empty, failed, and
+non-evaluable slots remain in the original $K$; outcomes cannot trigger
+reranking, replacement, or budget reassignment.
+
+The hypothesis freeze fixes finite editing realizations, their positive weights
+summing to one, eligible population rules, arms, models, request settings,
+endpoints, and inference plans. Seeded, source-stratified balanced allocation
+assigns exactly one realization to each task--policy coordinate before
+task-specific materialization. Only that realization's complete four-arm bundle
+is produced and checked. Failure is retained without trying another realization,
+replacing the task, or renormalizing weights. Realizations may consequently have
+different protocolizable populations, a limitation of the mixture estimand.
+
+Eligible pools, materialized bundles, and the complete assignment table are
+frozen before generation. Within each task-instance--policy--realization--model
+block, the four arms receive equal requests and randomized execution order.
+Task, arm, realization, model, and request-randomness bindings are preserved.
+Failed materialization is a pre-assignment record; each committed assignment
+subsequently receives a terminal record and remains in its assigned arm.
+
+\subsection{Measurement, Weighting, and Simultaneous Inference}
+\label{app:inference-details}
+
+Oracle qualification covers the admitted endpoint, languages, task families,
+and code forms, using representative secure, insecure, and unknown examples
+and checks for plausible differential measurement errors. Functional assessment
+is arm blind and uses the complete original task. Whole-task pass requires
+assessable material requirements and their fulfillment; unresolved requirements
+cannot be credited as satisfied. Incomplete source specifications alone do not
+determine failure. Infrastructure evidence that is missing blocks affected
+inference pending resolution or replay of the same assignments under the
+frozen rules.
+
+For hypothesis $h$ and a fixed model, let $\bar Y_{ia}$ average request outcomes
+for arm $a$ within each task instance and then combine instances within task
+unit $i$ using frozen weights. Realization $r\in R_h$ has weight $q_{hr}>0$,
+with $\sum_r q_{hr}=1$. For $n_{hr}$ eligible assigned task units allocated to
+realization $r$, the arm mean is
+\begin{equation}
+  \widehat\mu_{ha}
+  =\sum_{r\in R_h}q_{hr}
+     \left(\frac{1}{n_{hr}}\sum_{i:r_{hi}=r}\bar Y_{ia}\right).
+\end{equation}
+Here $r_{hi}$ denotes task unit $i$'s allocated realization.
+Thus realization-specific task means are combined using the original mixture
+weights, not weights selected by realized failures. Within realization/source
+cells, $\lambda_{hrs}=q_{hr}n_{hrs}/n_{hr}$, where $s$ indexes source strata
+and $n_{hrs}$ counts task units in cell $(r,s)$. These fixed weights also apply to
+arm summaries, diagnostic fractions, and sensitivity bounds. Missing required
+support never creates a smaller renormalized policy.
+
+For latent secure valid-code yield, define $L=Y$ and
+$U=L+\mathbb I\{\text{valid and Oracle-unevaluable}\}$. The contrast bounds are
+$\widehat\mu_{LT}-\widehat\mu_{UN}$ through
+$\widehat\mu_{UT}-\widehat\mu_{LN}$ under the same weights. Oracle-unknown,
+functional-unknown, and joint-unknown outcomes retain separate coverage records.
+Specificity, functionality, and joint-success claims require their own
+prospectively frozen secondary inference.
+
+Let $D_{hi}=\bar Y_{iT}-\bar Y_{iN}$. The variance estimate is
+$\sum_{r,s}\lambda_{hrs}^{2}s_{hrs}^{2}/n_{hrs}$, where $s_{hrs}^{2}$ is the
+sample variance of $D_{hi}$ in the corresponding cell. Each bootstrap draw
+samples the family-wide union of task units with replacement within each
+original source stratum, retaining that stratum's original number of units.
+All descendants move together, including arms, instances, overlapping effects,
+and models. Each effect retains its original support, realization labels,
+and $\lambda$ weights rather than refitting weights to resampled frequencies.
+
+The primary family contains every unique selected Atomic target-minus-no-op
+secure-yield model effect. A draw is invalid if any coordinate loses its frozen
+minimum cell/realization support or has zero standard error. Otherwise its
+statistic is the maximum across coordinates of the absolute studentized
+deviation from the original estimate. Of $B$ draws, at least
+$\lceil B f_{\min}\rceil$ must be valid, where $f_{\min}$ is the required
+valid-draw fraction. For familywise error level $\alpha$, the critical value is the
+$\lceil(1-\alpha)B_{\mathrm{valid}}\rceil$ order statistic of the valid bootstrap
+maxima; intervals are the
+estimate plus or minus this value times its standard error.
+Failed provenance, inadequate initial support, excessive unknown coverage,
+zero initial standard error, or too few valid draws makes the family
+non-evaluable, with no unadjusted fallback. An empty selected union has no
+eligible coordinates rather than zero-valued effects.
+
+For a prespecified practical margin $\epsilon$, an interval wholly above
+$\epsilon$ is positive-meaningful, one wholly below $-\epsilon$ is
+negative-meaningful, and one contained within $[-\epsilon,\epsilon]$ is
+practically null. Other evaluable intervals are inconclusive. Practical margins
+and power assumptions are fixed before discovery outcomes are inspected.
+The assignment-bound inference plan, including $\alpha$, support minima, draw
+count, seed, and valid-draw fraction, is frozen before confirmation outcomes.
+
+\subsection{Explanation Evidence Links}
+
+Each explanation links its task scope and source bindings to the selected
+hypothesis, editing policy, concrete arms, assignment records, measurements,
+and inference output. An illustrative wording does not replace the frozen
+mixture whose effect is reported. Missing evidence is explicitly unavailable;
+reporting cannot alter an effect status, remove assigned tasks, or rerank
+hypotheses. The explanation and action format specifies content constraints,
+not an independently qualified generator. The exact adoption predicates and
+their required secondary evidence remain open; this does not prevent reporting
+an otherwise evaluable primary effect.

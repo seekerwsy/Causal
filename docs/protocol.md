@@ -127,9 +127,30 @@ neither score nor admission establishes a randomized causal effect.
 
 ## 8. Selectors and fixed budgets
 
-Atomic Full and RD-only form the core selector comparison. Blinded Expert and
-seeded Random are optional only within their prospectively qualified, funded
-comparator envelope. They share the same universe and fixed-K accounting.
+The approved main RQ1/RQ4 roster is CausalGuide, Prompt Attribution (simple
+correlation baseline), Causal Prompt Concepts, Prompt Perturbation, and LLM-Judge
+Explanation (direct prompted-LLM baseline). These are study method labels, not
+claims that five implementations are qualified. The two research-comparator
+source/implementation bindings, every method's allowed information, selection
+rules, native-output bridge and costs require a joint prospective freeze.
+No working label silently identifies a published algorithm or faithful reproduction.
+
+All methods map outputs outcome-blind into the frozen admissible Atomic universe.
+The bridge preserves proposed semantics; it does not invent a missing requirement
+or replace a failed proposal. Full versus RD-only is the RQ2 admission-gate
+ablation, not an additional main comparator. Blinded Expert, seeded Random and
+other reference profiles are supplemental only if separately authorized, qualified
+and budgeted; they are not added to the five-method roster.
+
+Mapped counts original slots resolving to a scoped requirement, operation and
+comparator. It is distinct from protocolization, assigned execution and an
+evaluable effect. Effect-confirmed is a paper-facing alias for formally authorized
+POSITIVE_MEANINGFUL or NEGATIVE_MEANINGFUL slots under Section 12; it changes no
+stored status, margin, estimator or multiplicity rule. Report signs separately.
+Effect-confirmed Yield@K is the existing meaningful Yield@K. Neither development
+statuses nor mere exclusion of zero qualifies as scientific effect confirmation.
+An opposite-to-prediction effect is effect-bearing but does not validate advice.
+Equal K is an output-slot budget, not equal compute; disclose method-specific costs.
 
 Every slot remains in K, including empty, failed and non-evaluable slots. The
 selected union is deduplicated by model effect; one shared result fans back to
@@ -272,8 +293,11 @@ evidence requirements; one cannot silently promote another.
 ### 15.1 Evidence-grounded explanations and guidance
 
 This is a specified reporting contract, not a qualified explanation generator.
-Explain applicable scope, source requirement/target/condition, concrete edit and
-comparator, effect evidence, functionality/uncertainty, then supported action.
+The product is an English Explanation + Suggested Action record. The Explanation
+connects applicable scope, source requirement/target/condition, concrete edit and
+comparator, effect evidence, and functionality/uncertainty. The Suggested Action
+identifies a modification option, supported adoption, an endpoint-specific warning,
+or explicit withholding under the evidence conditions below.
 Tie each statement to exact source, policy and verified result records.
 
 Without formal randomized evidence, an edit is an unconfirmed option. A favorable
@@ -290,30 +314,49 @@ transportability guarantee or evidence about internal model reasoning.
 
 ## 16. Main-paper research questions
 
-The manuscript is unchanged at the owner's request, including its prior Pair text.
-The author's four manuscript RQ sentences remain unchanged; this Atomic scope
-narrows their operational study and does not activate additional experiments.
+The owner authorized manuscript synchronization and Overleaf submission on
+2026-09-16. The four manuscript RQ sentences remain unchanged; the Atomic-only
+study and five-method decision govern their operationalization. This prose
+revision does not activate formal execution or additional experiments.
 
-- RQ1: prioritize actionable hypotheses under a common budget; report held-out
-  meaningful Yield@K, overlap and the complete candidate-to-confirmation funnel.
-  Comparator methods and optional Expert/Random require a joint prospective freeze.
+- RQ1: compare the five methods in Section 8 under a common budget; report K,
+  Mapped, Effect-confirmed (+/-), Effect-confirmed Yield@K, overlap and the complete
+  candidate-to-confirmation funnel. All original slots remain in K. Shared effects
+  are evaluated once and reused; external confirmation is not a native baseline
+  capability. Exact comparator procedures still require prospective qualification.
 - RQ2: Atomic Full versus RD-only is the sole-difference structural-gate comparison.
   Shared rows, support, folds, scores, tie-breaks, K and confirmation isolate FCI
   admission. This does not measure graph readability or every component's value.
 - RQ3: model-specific Atomic ADD/REMOVE policy effects on secure-code yield, with
   distinct functionality, coverage and specificity evidence before hardening claims.
-- RQ4: perceived utility of complete explanation products under common presentation.
+  Use the same held-out effects as RQ1; effect-bearing does not mean advice-validating.
+- RQ4: perceived utility of the same five methods' complete Explanation + Suggested
+  Action products under common presentation.
   It does not validate causal discovery, objective repair or actual adoption success.
 
 ## 17. Secondary analyses and human study
 
 RFCI/JCI are optional exploratory appendix work, not required main-path components
-or ways to promote causal evidence. The blinded Expert selector is distinct from
-RQ4 participants. RQ4 needs its own ethics determination, preregistration,
-participant/case manifests, comparator material rules, blinded randomized order,
-primary endpoint and analysis of repeated expert/case ratings. Include unfavorable
-and unresolved cases under prospective sampling; do not supply evidence a comparator
-never produced. Exact human-study choices remain unspecified until separately frozen.
+or ways to promote causal evidence. Any supplemental blinded Expert selector is
+distinct from RQ4 participants.
+
+RQ4 uses anonymized English products and five 1--5 Likert items: clarity, evidence
+sufficiency/justification, credibility, actionability and overall usefulness.
+Overall usefulness is the planned primary rating; other items are secondary.
+This is not yet a preregistration. Freeze ethics determination, participant/case
+manifests, item wording/anchors, balanced assignment and blinded randomized order,
+primary/secondary analysis and multiplicity, and repeated expert/case dependence
+before recruitment or response inspection. Include unfavorable and unresolved
+cases; prospectively define unavailable/empty/unmappable product handling and
+report its counts by method.
+
+Freeze each method's evidence access and explanation-construction procedure,
+including whether shared confirmation is supplied, before study materials are
+produced. A common presentation must not invent evidence, strengthen native
+claims or rewrite every product through CausalGuide. RQ4 compares complete products,
+not wording alone under identical evidence; it cannot attribute ratings solely
+to Prompt TSG or establish objective comprehension, actual adoption or repair.
+Exact implementation/material and human-study rules remain open until frozen.
 
 ## 18. Artifacts and two freezes
 

@@ -2,23 +2,21 @@
 
 \subsection{Evaluation Overview}
 
-The evaluation examines two complementary aspects of security guidance: the
-evidence supporting a proposed modification and the perceived utility of its
-explanation. RQ1 asks whether the analysis identifies actionable hypotheses
-that yield meaningful effect evidence under a fixed budget. RQ2 examines the
-structural information used to identify them. RQ3 evaluates the prompt policies
-underlying the guidance, and RQ4 examines experts' assessments of the complete
-explanation products. The computational and human studies address different
-claims; neither substitutes for the other.
+The evaluation asks whether requirement-level causal analysis produces useful
+evidence and whether experts find the resulting explanations useful for prompt
+modification. RQ1 compares the hypotheses identified by five methods. RQ2
+isolates the contribution of FCI-based admission. RQ3 examines the effects and
+limits of the proposed modifications, and RQ4 compares the perceived utility
+of the five methods' explanation products. The computational and human studies
+address complementary claims; neither substitutes for the other.
 
-The computational study uses disjoint development,
-discovery, and held-out confirmation task units. All included selectors must
-share the same prospectively frozen task manifests, generator and request-randomness policy, candidate
-budgets, common hypothesis bridge, randomized confirmation, and independent
-measurement rules. Candidate identities, selector slots, prompt policies, and
-inference rules must be fixed before confirmation outcomes. Each unique selected
-model-bound effect is confirmed once and its result is reused by every
-referencing selector slot.
+Development, independent qualification, discovery, and held-out confirmation
+use prospectively separated task units. Methods share frozen task manifests,
+generator and request-randomness policies, candidate budgets, a common
+hypothesis bridge, randomized confirmation, and independent measurement.
+Candidate identities, method slots, editing policies, and inference rules are
+fixed before confirmation outcomes. Each unique selected model-bound effect
+is confirmed once and its result is reused by every referring method slot.
 
 \paragraph{Tasks and experimental settings.}
 Natural programming tasks must specify an interpretable operation, the relevant
@@ -26,122 +24,177 @@ security boundary, and the non-target behavior to preserve. Incomplete functiona
 specifications limit functionality and joint-success claims without automatically
 excluding an independently measurable security comparison. Source lineage and
 task-unit deduplication govern the role split. The final source inventory,
-admitted language and task families, model configurations, task counts,
-generation-request counts, and Atomic/Pair budgets are to be fixed jointly with
-Oracle qualification and the comparator envelope before formal execution.
+admitted language and task families, model configurations, task and request
+counts, and budget $K$ require a joint freeze with Oracle qualification and
+the comparator implementations before formal execution. This section specifies
+the evaluation design; it does not report completed experiments.
+
+\subsection{Compared Methods}
+\label{sec:compared-methods}
+
+RQ1 and RQ4 use the same five-method comparison. It includes representative
+research approaches and simple reference baselines, rather than treating every
+comparator as a state-of-the-art system.
+
+\paragraph{\model.}
+Our method constructs task-grounded requirement hypotheses, applies FCI-based
+admission and observational RD ranking, and links selected prompt policies to
+independent effect evidence. Its explanation identifies the requirement's
+scope, the tested modification, and the action or limitation supported by that
+evidence.
+
+\paragraph{Prompt Attribution.}
+This simple correlation-based baseline uses associations between prompt-side
+features and measured outcomes to identify candidate requirements. Its native
+evidence is associational: a high attribution score does not establish the
+effect of editing the corresponding requirement.
+
+\paragraph{Causal Prompt Concepts.}
+This comparator represents the concept-level causal-analysis approach. Its
+concept-based candidates must be mapped to a specific task scope, requirement,
+and editing operation before they can enter the shared intervention evaluation.
+The name is a study working label; the exact source method, implementation,
+and adaptation remain to be fixed, rather than being assumed from a related
+paper's capabilities.
+
+\paragraph{Prompt Perturbation.}
+This comparator represents analysis through natural-language prompt changes.
+Its proposed changes must be mapped to a single scoped security requirement
+and checked for preservation of non-target behavior. The permitted
+perturbations, selection rule, source implementation, and explanation procedure
+remain to be fixed. General robustness perturbations are not automatically
+valid requirement interventions.
+
+\paragraph{LLM-Judge Explanation.}
+This simple baseline directly prompts an LLM to propose a security explanation
+and suggested prompt modification from its allowed inputs. The model, prompt,
+accessible evidence, and candidate selection rule are fixed prospectively.
+Here, \emph{Judge} names the baseline, not the security Oracle or the experts
+participating in RQ4; its statements do not adjudicate the other methods' results.
+
+All five methods receive the same $K$ output slots. A common, outcome-blind
+bridge maps their outputs into the frozen admissible requirement-policy space.
+It preserves each method's proposed requirement and edit rather than supplying
+missing reasoning or selecting a better hypothesis on its behalf. Unmappable
+outputs remain failed slots. Each method's allowed information, implementation
+version, adaptation, and mapping rules must be declared and qualified before
+the comparison. Differences in native output spaces make this an evaluation
+of the declared method-plus-bridge procedures, not an unqualified comparison
+of their original systems. Shared confirmation is an external evaluator, not
+a native causal capability credited to every baseline. Equal $K$ also does not
+imply equal computation; method-specific model calls and other resource costs
+are reported separately. RD-only is reserved for RQ2, not a sixth main comparator.
 
 \subsection{RQ1: Overall Effectiveness}
 
 \textbf{RQ1. How effectively does \model identify actionable prompt-side security hypotheses compared with state-of-the-art methods?}
 
-RQ1 evaluates which requirement-level questions receive useful follow-up
-evidence. Selection is assessed by the held-out effects obtained for the
-original budget of hypotheses, rather than by observational scores alone.
-The planned comparison covers representative state-of-the-art methods for
-prompt-side security analysis, alongside matched ablations and reference
-rankings. Association, regularized prediction, LLM-based explanation,
-causality-aided analysis, and natural-language perturbation define candidate
-comparator families, not already qualified implementations. Each included
-method must produce a fixed number of context--requirement--operation slots
-through a prospectively specified bridge. The exact methods, bridge validation,
-and shared evaluation budget require a joint freeze; Expert and seeded Random
-rankings are included only when that budget covers them. Comparisons over a
-shared candidate universe assess selection, whereas methods operating in native
-output spaces require separately identified end-to-end comparisons that also
-include their mapping failures.
+RQ1 asks which methods identify requirement modifications that receive meaningful
+effect evidence in held-out confirmation. The reporting funnel contains $K$,
+\emph{Mapped}, \emph{Effect-confirmed}, and \emph{Effect-confirmed Yield@$K$}.
+Mapped counts slots whose output resolves to a concrete requirement, task scope,
+editing operation, and comparator under the common bridge. Mapping does not
+establish that every task can be protocolized or that the proposed change has
+an effect.
 
-The method-level endpoint is meaningful Yield@$K$: the proportion of the
-original $K$ slots with positive- or negative-meaningful held-out effects.
-Empty slots, failed gates, protocolization failures, and non-evaluable findings
-remain in the denominator. The complete candidate-to-confirmation funnel
-reports their composition, candidate overlap, and positive versus negative
-findings. This endpoint measures discovery of effect-bearing hypotheses, not
-explanation quality or the fraction of successful hardening policies. Yield differences describe the
-frozen benchmark; they do not establish expected superiority over arbitrary
-discovery populations.
+Effect-confirmed counts slots with a positive-meaningful or negative-meaningful
+held-out effect under the practical margins and simultaneous intervals in
+Section~\ref{sec:method-causal}. Thus, Effect-confirmed Yield@$K$ is this count
+divided by the original $K$; it is the reporting name for meaningful Yield@$K$,
+not a new significance rule. Positive and negative counts are reported separately.
+Empty slots, mapping or protocolization failures, and non-evaluable findings
+remain in the denominator, alongside practically null and inconclusive effects.
+The full funnel also reports candidate overlap and failure composition.
+
+An effect-confirmed hypothesis is not necessarily a successful recommendation.
+Confirmation establishes a scoped effect of the tested edit, not the correctness
+of its explanation or predicted direction. An effect opposite to the proposed
+advice can therefore count as effect-bearing while contradicting that advice.
+RQ3 examines this distinction; RQ4 evaluates explanation utility. Yield
+differences describe the frozen benchmark and do not establish expected
+superiority over arbitrary discovery populations.
 
 \subsection{RQ2: Component Contribution}
 
 \textbf{RQ2. Which components of \model contribute to its effectiveness in identifying actionable security hypotheses?}
 
-RQ2 tests whether the structural admission criteria contribute to that
-selection objective. Two controlled comparisons isolate the information used in
-prioritization. Atomic Full versus RD-only holds the candidate universe,
-task rows, support rules, folds, first-order RD scores, tie-breaking, and $K_A$
-fixed; only Full applies the qualified FCI adjacency gate. Pair Full versus
-No-Relation holds compatible-pair rows, four-cell support, folds, second-order
-RD scores, tie-breaking, and $K_I$ fixed; only Full applies the Prompt-TSG
-relation gate. Neither Pair selector requires Atomic selection or support.
-Both comparisons share the bridge and downstream confirmation results.
+RQ2 isolates the contribution of FCI-based admission through Full versus
+RD-only. The two selectors hold the candidate universe, task rows, natural-state
+support, folds, first-order RD scores, tie-breaking, and $K$ fixed; only Full
+applies the qualified FCI adjacency gate. Both use the same bridge and downstream
+confirmation results.
 
-We report Full-minus-ablation meaningful Yield@$K$, selected-candidate overlap,
-and the empty-slot and failure composition. These tests isolate the two
-structural gates; they do not independently establish the contribution of every
-representation or measurement component. In particular, these Gate ablations
-do not test whether a graph-grounded explanation is easier to understand.
-That claim would require a separately designed explanation comparison.
+We report Full-minus-RD-only Effect-confirmed Yield@$K$, selected-candidate
+overlap, and empty-slot and failure composition. This comparison tests the
+admission criterion, not every representation or measurement component.
+In particular, it cannot establish that graph-grounded explanations are easier
+to understand; that attribution would require a separately designed comparison.
 
 \subsection{RQ3: Prompt Hardening Effectiveness}
 
 \textbf{RQ3. Can security explanations produced by \model guide prompt hardening that reduces insecure code generation?}
 
-RQ3 evaluates the effects of the prompt modifications described in the
-explanations. It asks which changes support a hardening conclusion under
-Section~\ref{sec:method-guidance}, rather than treating every selected or
-effect-bearing hypothesis as beneficial. This is a computational evaluation
-of the underlying policies, not a test of whether a person can read an
-explanation and successfully apply its advice.
-For Atomic policies, the primary contrast is target versus
-operation-matched no-op on oracle-evaluable secure-code yield. Placebo/sham and
-generic-security controls assess specificity under separately frozen secondary
-inference rules. ADD and REMOVE remain distinct policies. Pair policies use
-$A_{00}$, $A_{10}$, $A_{01}$, and $A_{11}$ to estimate the two-factor response
-surface and its primary two-sided RD interaction; an interaction alone does not
-show that the joint-target arm improves security.
+RQ3 examines what the effects used in RQ1 support about the proposed actions.
+It uses the same held-out comparisons, not a second experiment selected after
+observing favorable findings. The primary contrast is a single-requirement
+target edit versus operation-matched no-op on oracle-evaluable secure-code
+yield. Placebo/sham and generic-security controls assess specificity under
+separately frozen secondary inference rules. Requirement addition (ADD) and
+removal (REMOVE) remain distinct policies.
 
-Effects are model-specific, realization-weighted assigned-arm ITT estimates
-with task-unit uncertainty and the separate Atomic and Pair simultaneous
-families in Section~\ref{sec:method}. Every committed assignment remains in its
-assigned arm regardless of fidelity, compliance, generation success, or
-non-target drift. We distinguish positive-meaningful, negative-meaningful, practically null,
-inconclusive, and non-evaluable evidence. Validity, evaluability, insecure and
-unknown labels, functionality, and joint success are reported separately,
-together with coverage sensitivity bounds. Thus, observed secure-yield gains
-are not automatically reported as reductions in the underlying insecure-code
-rate, and beneficial hardening claims require the corresponding security and
-task-preservation evidence.
+Effects are model-specific, realization-weighted assigned-arm ITT estimates,
+with task-unit uncertainty and one simultaneous primary family. Every committed
+assignment remains in its assigned arm regardless of fidelity, compliance,
+generation success, or non-target drift. We report effect direction, magnitude,
+uncertainty, and positive-meaningful, negative-meaningful, practically null,
+inconclusive, or non-evaluable status. Validity, evaluability, insecure and
+unknown labels, functionality, joint success, and coverage sensitivity bounds
+accompany the primary endpoint.
+
+These records distinguish a supported modification, an endpoint-specific warning,
+and a decision for which adoption advice must be withheld under
+Section~\ref{sec:method-guidance}. Secure-yield gains alone do not establish
+reduced underlying insecurity or preserved functionality. RQ3 therefore evaluates
+the evidence for the policies underlying the guidance, not whether a person
+can read an explanation and successfully apply its advice.
 
 \subsection{RQ4: Explanation Quality}
 
 \textbf{RQ4. How do security experts evaluate the quality of explanations produced by \model and competing methods?}
 
-RQ4 addresses whether experts find the resulting explanations clear, credible,
-and useful for deciding how to modify a prompt. The comparison unit is each
-method's complete explanation product, including the requirement it identifies,
-the evidence it provides, and the guidance or limits it communicates. A common
-presentation identifies context, editable requirement, comparison, evidence,
-uncertainty, and scope without inventing evidence unavailable from a method.
-The study therefore evaluates overall perceived utility, not alternative
-wordings of identical evidence. Differences in ratings cannot be attributed
-solely to Prompt TSG or to the prose format. Methods included as RQ1 selectors
-also need a specified explanation-construction procedure to enter this comparison.
+RQ4 compares anonymized English \emph{Explanation + Suggested Action} records
+from the same five methods. Each record is a complete product: the requirement
+identified, the evidence presented, and the suggested modification or stated
+reason to withhold advice. Common presentation fields make the products
+comparable without inventing evidence, strengthening a baseline's claims,
+or rewriting every method's output through \model. Each method's evidence
+access and explanation-construction procedure, including whether shared
+confirmation results are available, must be fixed before producing study
+materials. RQ1's external validation does not automatically become a baseline's
+own explanation evidence.
 
-The planned human study will compare anonymized products under a balanced
-case--method assignment. Candidate rating dimensions include clarity,
-evidence sufficiency, credibility, actionability, and usefulness. Case sampling
-must not be restricted to favorable examples. The plan must specify how the
-available effect statuses in Section~\ref{sec:method-causal} are represented,
-distinguishing Atomic policy effects from Pair interactions.
-Participant criteria and counts, comparator materials, case sampling,
-presentation order, scales, the primary endpoint, ethics determination, and an
-analysis accounting for repeated ratings by expert and case must be fixed before
-recruitment or response inspection and recorded in the preregistration.
-The RQ1 Expert selector is distinct from
-these study participants and ratings.
+Experts rate five items on 1--5 Likert scales: clarity, evidence
+sufficiency/justification, credibility, actionability, and overall usefulness.
+The planned primary rating is overall usefulness; the other four characterize
+the perceived strengths and weaknesses of each product. This is a comparison
+of complete-product perceived utility, not a wording-only comparison with
+identical evidence. Differences cannot be attributed solely to Prompt TSG,
+causal correctness, or prose format.
 
-RQ4 evaluates perceived explanation quality and utility. Rated credibility does
-not establish causal correctness, and rated clarity or actionability does not
-establish objective comprehension, successful adoption, or repair accuracy.
-These ratings cannot revise the computational evidence used in RQ1--RQ3.
-They provide a separate evaluation of whether the evidence presentation is
-useful to its intended expert audience.
+The study will use balanced case--method assignment and blinded randomized
+presentation order. Prospective case sampling must include unfavorable and
+unresolved findings rather than only successful hardening examples. Study
+materials must also follow prespecified handling of empty or unmappable outputs
+and unavailable explanation products, with decisions and counts reported by
+method. Participant
+criteria and counts, case sampling, comparator materials, exact item wording
+and anchors, ethics determination, and an analysis accounting for repeated
+ratings by expert and case require preregistration before recruitment or
+response inspection. The primary rating and secondary-item multiplicity rule
+must be finalized in that plan.
+
+Rated credibility does not establish causal correctness, and rated clarity
+or actionability does not establish objective comprehension, actual adoption,
+or repair accuracy. These ratings cannot revise the computational evidence in
+RQ1--RQ3. They assess whether the resulting explanations help experts judge
+the proposed prompt changes and their limits.
