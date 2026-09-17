@@ -1131,4 +1131,5 @@ if __name__ == '__main__':
                           complete_background_natural=verify_complete_background_natural(),
                           structural_repair_boundary=verify_structural_repair_boundary(),
                           predicate_binding_api=verify(ROOT/'predicate-binding-api'),
+                          predicate_binding_thinking_api=verify(ROOT/'predicate-binding-thinking-api'),
                           scientific_claim_allowed=False), indent=2))

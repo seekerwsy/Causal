@@ -75,12 +75,17 @@ hashing order while retracting the uncertain username binding under a newly froz
 normalized predicate. Both saved privilege graphs retain their structure. No fresh
 model improvement was established by those authored controls.
 
-The subsequent [DeepSeek Flash API check](data/method/tsg-reliable-construction-v1/predicate-binding-api/README.md)
-made six fresh calls on registration and privilege tasks. Both graphs compiled after
-one mechanical correction each, but neither followed the predicate/binding separation
-contract. Both model reviews approved every record and source unit; registration also
-omitted the web-application/account-registration requirement. The negative result
-leaves automatic adherence unestablished. Conservative spending was CNY0.178368.
+The [non-thinking DeepSeek Flash check](data/method/tsg-reliable-construction-v1/predicate-binding-api/README.md)
+compiled both final graphs but missed predicate/binding defects in both source reviews.
+A [thinking-mode comparison](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
+used identical tasks, instructions and source code with larger delivery limits.
+Both initial graphs compiled; the existing review and local patch corrected four
+operation facts while preserving requirements, order and conditions. Registration's
+explicit web/account task requirement was restored. Username insertion and the
+meaning of supplied `pass` bodies remain disputed, so the 2/2 narrow separation
+check is not whole-graph correctness or repeated stability. Each batch made six
+API calls; conservative costs were CNY0.178368 and CNY0.964020 respectively. Thinking
+and resource limits changed together; no isolated thinking effect is established.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
 the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)
