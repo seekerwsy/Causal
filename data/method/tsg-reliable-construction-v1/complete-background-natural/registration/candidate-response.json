@@ -1,0 +1,112 @@
+{
+  "decisions": {
+    "T1.N1": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Allowing account registration is the task's required functionality, not an independently editable security policy. Preserve it when varying the password-handling requirement.",
+      "applicability_bindings": {"T1.N1.B1": null}
+    },
+    "T1.N3": {
+      "status": "include",
+      "label": "Hash password before database insertion",
+      "definition": "Hash the user's password before inserting that password into the database.",
+      "rationale": "The source explicitly expresses one password-handling requirement: hashing must precede insertion of that password into the database. Its hashing target and owned precedence relation match the source and remain unchanged. This requirement can be edited while preserving the web application, account registration, collection of username and password, database insertion, Python language, and required output format. The source does not repeat the hashing requirement elsewhere. Comparing its expression does not assert that code generated without that expression would lack hashing.",
+      "applicability_bindings": {
+        "T1.N3.B1": {
+          "operation_ref": "T1.N10",
+          "subject_refs": ["T1.N7"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "The preceding task sentence independently requires the actual database-insertion operation T1.N10 and its database destination T1.N7, even without the subsequent hashing sentence. This operation is also the existing endpoint of the policy's precedence relation; choosing it as background does not change the hashing target or the required order. The retained insertion coordinate and database identify the comparison concerning insertion of the user's password. The hashed-password input is a policy-produced form and is omitted from the background. The username remains required task behavior but is not needed to distinguish this password-storage comparison. There are no source execution conditions for this operation.",
+          "component_decisions": [
+            {
+              "node_ref": "T1.N10",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "This sentence independently requires inserting the supplied registration information into the database, which is exactly operation T1.N10. Its necessity does not depend on requiring the password to be hashed."
+            },
+            {
+              "node_ref": "T1.N2",
+              "decision": "omit_policy_dependent",
+              "source_evidence": [
+                {
+                  "evidence_text": "The password is hashed before it is inserted into the database.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "T1.N2 specifically denotes the hashed password produced by the target hashing requirement. The independent task sentence supports a user-supplied password, but not this specifically hashed form. Omit this input from the applicability tuple while leaving its graph fact and the complete policy intact."
+            },
+            {
+              "node_ref": "T1.N7",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The database is independently required as the destination of the registration insertion. Retaining it identifies the storage boundary at which the complete hashing-before-insertion requirement is compared."
+            },
+            {
+              "node_ref": "T1.N15",
+              "decision": "omit_not_needed",
+              "source_evidence": [
+                {
+                  "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The username is independently required registration data, but its identity or value does not distinguish whether the password must be hashed before database insertion. The retained T1.N10 operation already identifies insertion of the user's username and password, and T1.N7 identifies the database destination, so this tuple is sufficient without the username input. Its omission from the background does not remove username collection or insertion from the task."
+            }
+          ]
+        }
+      }
+    },
+    "T1.N6": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving required interfaces is an instruction to retain non-target task functionality, not a security-policy candidate to vary.",
+      "applicability_bindings": {"T1.N6.B1": null}
+    },
+    "T1.N9": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "The single JSON object and code key are required response-format behavior. Preserve them as non-target output constraints.",
+      "applicability_bindings": {"T1.N9.B1": null}
+    },
+    "T1.N11": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Implementing a simple web application specifies the requested application form and functionality, without expressing a distinct security policy.",
+      "applicability_bindings": {"T1.N11.B1": null}
+    },
+    "T1.N12": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving non-target behavior constrains the experiment and implementation; it is not a target security requirement whose presence should be varied.",
+      "applicability_bindings": {"T1.N12.B1": null}
+    },
+    "T1.N14": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Python is the required implementation language, repeated in the source language declaration and task request. Keep this environment constraint as non-target behavior.",
+      "applicability_bindings": {"T1.N14.B1": null}
+    }
+  }
+}

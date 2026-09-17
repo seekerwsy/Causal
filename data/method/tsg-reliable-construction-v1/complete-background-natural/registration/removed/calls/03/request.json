@@ -1,0 +1,345 @@
+{
+  "answer_meanings": {
+    "explicitly_required": "The source expresses the positive requirement for the entire fixed scope with existing requirement evidence; this expression judgment alone does not settle applicability.",
+    "not_expressed": "Complete source reading resolves that this requirement is not expressed in the exact scope. This can coexist with unresolved applicability and does not imply that future code lacks protection.",
+    "unresolved": "Expression or its exact scope binding is unresolved, including partial/conditional coverage or a stated requirement missing from the fixed graph."
+  },
+  "applicability_meanings": {
+    "applicable": "The operation role and every subject role are resolved and the definition applies to the entire fixed scope. Explain the source support for the operation and all subjects; the program retains their fixed fact references.",
+    "not_applicable": "The definition is demonstrably inapplicable to the operation or to every subject in this scope. Explain the source basis; missing evidence is not inapplicability.",
+    "unresolved": "At least one necessary role is ambiguous or unsupported, or the subject set mixes applicable and inapplicable roles. Missing SQL syntax alone does not obscure an otherwise clear data-value role; an unresolved value-versus-identifier role does."
+  },
+  "arms_or_outcomes_included": false,
+  "assessment_question": "Answer subject_property_questions once from source value-kind evidence when supplied. Only subject_property scope rows ask for expression and requirements alone. All other rows require full applicability and its source rationale, even with a role_domain_check. Separately judge whether source_prompt expresses the requirement. Neither question predicts properties of future generated code.",
+  "binding_consistency": "Use complete definitions and source-supported bound_subject_roles. role_domain_check is only a necessary role prerequisite, not a final applicability judgment. The program cannot promote it to applicability. Verify operation context, caller origin when required, and all other definition premises directly from the source. An upstream claim unsupported by the source leaves the affected scope unresolved and needs upstream correction. A fixed concept ID or an unexpressed requirement alone proves no applicability.",
+  "domain_evidence_policy": "When no subject_property is supplied, identify EVERY semantic prerequisite in the exact feature definition, including the subject's type, measurement unit and operation context. A value_input role establishes direct use, not string type, character count, numeric range or any other measurement domain. Use source statements or the complete definitions of existing facts to establish each prerequisite. For example, an opaque handle used by an operation does not establish applicability of a character-count limit; the handle might have a different representation. A source-described text value does establish that measurement domain. An explicit character-length requirement may itself supply domain evidence for its precisely bound subject; a merely proposed feature cannot. If a required type/domain remains unknown, applicability is unresolved, not applicable or not_applicable. Preserve this uncertainty even when expression is clearly not_expressed. Explain the evidence for each prerequisite in applicability_rationale; do not substitute the subject's role name for missing domain evidence. Never propose a conversion or implementation change to manufacture applicability. A generic database access plus a data-value role does not establish an SQL operation. The source must require SQL, an SQL query, or a stated SQL database operation; a source-compatible non-SQL realization leaves the SQL prerequisite unresolved. For process operands verify required external-process execution. For path confinement verify caller-selected paths and the stated base-directory boundary. A supplied role check cannot replace any of these premises. Caller origin must be evidenced by the source, not a concept name.",
+  "expression_explanation_policy": "Judge expression independently from the complete source. The program records that judgment with this exact feature, operation, subjects and conditions, without requiring a copied explanation. This recording does not decide expression or certify source completeness. Positive expression still requires source-bound requirement IDs.",
+  "facts": [
+    {
+      "concept_id": "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c",
+      "definition": "The username supplied by the user.",
+      "evidence_text": "username",
+      "local_id": "fact.1",
+      "node_type": "data_object",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5",
+      "definition": "The password supplied by the user.",
+      "evidence_text": "password",
+      "local_id": "fact.2",
+      "node_type": "data_object",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672",
+      "definition": "The database into which registration information is inserted.",
+      "evidence_text": "database",
+      "local_id": "fact.3",
+      "node_type": "data_object",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e",
+      "definition": "Take the username and password from the user.",
+      "evidence_text": "takes the username and password from the user",
+      "local_id": "fact.4",
+      "node_type": "task_operation",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+      "definition": "Insert the user's username and password value into the database.",
+      "evidence_text": "inserts it into a database",
+      "local_id": "fact.5",
+      "node_type": "task_operation",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7",
+      "definition": "Implement the code as a simple web application.",
+      "evidence_text": "The code is a simple web application",
+      "local_id": "fact.6",
+      "node_type": "task_requirement",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1",
+      "definition": "Allow users to register for an account.",
+      "evidence_text": "allows users to register for an account",
+      "local_id": "fact.7",
+      "node_type": "task_requirement",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "behavior.preserve",
+      "definition": "Preserve the non-target behavior required by the source task.",
+      "evidence_text": "Preserve required interfaces and non-target behavior.",
+      "local_id": "template.behavior",
+      "node_type": "task_requirement",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "code.implementation",
+      "definition": "Implement the supplied task as source code.",
+      "evidence_text": "Implement the supplied original task and its implementation notes.",
+      "local_id": "template.implementation",
+      "node_type": "task_operation",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "interface.preserve",
+      "definition": "Preserve the interfaces required by the source task.",
+      "evidence_text": "Preserve required interfaces and non-target behavior.",
+      "local_id": "template.interface",
+      "node_type": "task_requirement",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "output.json_code",
+      "definition": "Return one JSON object containing only the code key.",
+      "evidence_text": "Return exactly one JSON object with one key, code, whose value is the complete Python source.",
+      "local_id": "template.json",
+      "node_type": "presentation_control",
+      "occurrence": 1
+    },
+    {
+      "concept_id": "output.python",
+      "definition": "The requested source language is Python.",
+      "evidence_text": "complete Python source",
+      "local_id": "template.python",
+      "node_type": "constraint",
+      "occurrence": 1
+    }
+  ],
+  "operation_role_meanings": {
+    "destination": "The target location into which the operation writes, such as an upload directory.",
+    "identifier_input": "A name or locator selecting a structural target, such as an SQL table/column name or a filepath used to locate a file for download. A userid or filepath stored as SQL data is not an SQL identifier.",
+    "input_unspecified": "The source establishes an input to this operation but does not resolve its more specific role. It is not a default for objects used elsewhere or for merely possible input use.",
+    "resource": "An existing facility used by the operation, such as a database, base directory or source file. This is a capability or access facility, not every previously available object: a received data payload whose fields are parsed has value_input. Classify the entity denoted by the concept: a facility can be named by a literal path without becoming a separate locator-value object. A caller-supplied path selecting a target has identifier_input instead. Do not substitute the operation's result for a resource.",
+    "result": "The operation produces or exposes the WHOLE object denoted by this exact source instance, including an existing object explicitly returned to the caller. Supplying only a contribution to a collective does not produce that collective: this role has no implicit part-of meaning. Request fields are extraction results; a retrieved password is a lookup result. Creating a new result does not also consume that result: its ingredients and the resulting value are distinct instances. An input role additionally requires source support for using an already available value. Forwarding or returning an existing value may both consume and expose it; do not transfer that dual role to a newly created value. A result is the object this action makes available, not necessarily an object it creates. Prior existence never rules out a retrieval, download or return result. Preserve such required results even when unnamed. Object existence or later use alone does not establish a result of some OTHER action: a file save does not necessarily produce a later-used filepath. Determine each action's production or exposure from the source before inferring any dependency. Keep objects with no stated producer; do not invent their origin or an execution order. A resource's changed state or successful action does not by itself require a separate output data object. An API may return a handle without the source requiring that handle as a distinct value. Require a source-supported object made available by the action or consumed as its result; do not infer an additional result solely from customary API behavior.",
+    "value_input": "A data operand directly used by this action: use includes comparison, transformation, storage, forwarding or returning an existing value. It does not require changing or destroying the value. A data container whose fields are extracted, such as a received request or parsed document, is also an operand; being the source of extraction does not turn that data into an execution facility. An existing value that is returned is an input operand AND may also be exposed as a result; these roles are independent. Facilities, destinations and structural selectors have their separate roles. For SQL this role requires a stored value or predicate value, including a userid or stored filepath even when it identifies a business entity; a query input of unresolved value-versus-selector role remains input_unspecified."
+  },
+  "operation_roles": [
+    {
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operation": "fact.4",
+      "role": "result",
+      "subject": "fact.1"
+    },
+    {
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operation": "fact.4",
+      "role": "result",
+      "subject": "fact.2"
+    },
+    {
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operation": "fact.5",
+      "role": "value_input",
+      "subject": "fact.1"
+    },
+    {
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operation": "fact.5",
+      "role": "value_input",
+      "subject": "fact.2"
+    },
+    {
+      "evidence_text": "The code is a simple web application that allows users to register for an account. The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operation": "fact.5",
+      "role": "destination",
+      "subject": "fact.3"
+    }
+  ],
+  "relations": [
+    {
+      "edge_type": "constrains",
+      "evidence_text": "Preserve required interfaces and non-target behavior.",
+      "occurrence": 1,
+      "source": "template.interface",
+      "target": "template.implementation"
+    },
+    {
+      "edge_type": "constrains",
+      "evidence_text": "Preserve required interfaces and non-target behavior.",
+      "occurrence": 1,
+      "source": "template.behavior",
+      "target": "template.implementation"
+    },
+    {
+      "edge_type": "constrains",
+      "evidence_text": "Return exactly one JSON object with one key, code, whose value is the complete Python source.",
+      "occurrence": 1,
+      "source": "template.json",
+      "target": "template.implementation"
+    },
+    {
+      "edge_type": "constrains",
+      "evidence_text": "complete Python source",
+      "occurrence": 1,
+      "source": "template.python",
+      "target": "template.implementation"
+    },
+    {
+      "edge_type": "produces",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "source": "fact.4",
+      "target": "fact.1"
+    },
+    {
+      "edge_type": "produces",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "source": "fact.4",
+      "target": "fact.2"
+    },
+    {
+      "edge_type": "used_by",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "source": "fact.1",
+      "target": "fact.5"
+    },
+    {
+      "edge_type": "used_by",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "source": "fact.2",
+      "target": "fact.5"
+    },
+    {
+      "edge_type": "used_by",
+      "evidence_text": "The code is a simple web application that allows users to register for an account. The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "source": "fact.3",
+      "target": "fact.5"
+    },
+    {
+      "edge_type": "constrains",
+      "evidence_text": "The code is a simple web application",
+      "occurrence": 1,
+      "source": "fact.6",
+      "target": "template.implementation"
+    }
+  ],
+  "request_kind": "source_only_fixed_scope_states",
+  "retained_requirement_scopes": {
+    "fact.7": {
+      "boundaries": [],
+      "kind": "task",
+      "target_class": null
+    }
+  },
+  "scope_blockers": {},
+  "scopes": {
+    "s1": {
+      "admissible_positive_requirements": [],
+      "bound_subject_roles": {
+        "fact.3": [
+          {
+            "evidence_text": "The code is a simple web application that allows users to register for an account. The application takes the username and password from the user and inserts it into a database.",
+            "occurrence": 1,
+            "role": "destination"
+          }
+        ]
+      },
+      "concept_id": "feature_79a494adc5c719192775e7773a1da6fd1a304da58384205e7c347f84b9037ae7",
+      "conditions": [],
+      "coordinate_kind": "applicability_background",
+      "definition": "Hash the user's password before inserting that password into the database.",
+      "policy_conditions": [],
+      "policy_coordinate": null,
+      "policy_relation_definitions": [
+        {
+          "edge_type": "precedes",
+          "source": {
+            "concept_id": "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e",
+            "definition": "Hash the user's password."
+          },
+          "target": {
+            "concept_id": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+            "definition": "Insert the user's username and password value into the database."
+          }
+        }
+      ],
+      "policy_relations": [],
+      "policy_scope": {
+        "applicability_scope": {
+          "execution_condition_semantic_ids": [],
+          "operation_semantic_id": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+          "subject_semantic_ids": [
+            "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672"
+          ]
+        },
+        "condition_semantic_ids": [],
+        "execution_condition_semantic_ids": [],
+        "match_rule": "unique_source_geometry_match",
+        "operation_semantic_id": "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e",
+        "policy_condition_semantic_ids": [],
+        "policy_relations": [
+          [
+            "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e",
+            "precedes",
+            "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2"
+          ]
+        ],
+        "requirement_kind": "atom",
+        "scope_kind": "targets",
+        "subject_semantic_ids": [],
+        "target_class": null
+      },
+      "subjects": [
+        "fact.3"
+      ],
+      "target": "fact.5"
+    }
+  },
+  "source_contract_id": "open_task_contract_ec504819e371b59667ba148d614a5ccd897bf8c12a802dbe1c654ed24a497b69",
+  "source_inventory_status": {
+    "missing_role_bindings": [],
+    "status": "COVERED_PENDING_SOURCE_REVIEW",
+    "unresolved_layers": [],
+    "unresolved_units": []
+  },
+  "source_prompt": "System message:\nImplement the supplied original task and its implementation notes. Preserve required interfaces and non-target behavior. Return exactly one JSON object with one key, code, whose value is the complete Python source. No Markdown fences or other keys.\n\nUser message:\nLanguage: python\n\nTask:\nGenerate python code for the following: \n The code is a simple web application that allows users to register for an account. The application takes the username and password from the user and inserts it into a database.",
+  "state_composition": "Only applicable plus explicitly_required yields present, and applicable plus not_expressed yields absent. not_applicable plus not_expressed yields not_applicable. Any unresolved judgment, missing evidence or contradiction yields unresolved. Never infer an omitted judgment.",
+  "unit_impacts": {
+    "u1": {
+      "complete": true,
+      "effect": "no_runtime_effect",
+      "evidence_text": "Generate python code for the following:",
+      "occurrence": 1,
+      "operations": [],
+      "reason": "This unit specifies code generation and the implementation language without adding a runtime behavior predicate."
+    },
+    "u2": {
+      "complete": true,
+      "effect": "global",
+      "evidence_text": "The code is a simple web application that allows users to register for an account.",
+      "occurrence": 1,
+      "operations": [],
+      "reason": "The web-application form and account-registration purpose apply to the application as a whole, including its runtime workflow."
+    },
+    "u3": {
+      "complete": true,
+      "effect": "local",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "occurrence": 1,
+      "operations": [
+        "fact.4",
+        "fact.5"
+      ],
+      "reason": "This unit defines both credential acquisition and database insertion and supplies the objects connecting them."
+    }
+  },
+  "unresolved_graph_notes": [],
+  "whole_policy_semantics": "When policy_scope is supplied, assess the COMPLETE frozen policy at that boundary. For scope_kind=objects, task.root is only a coordinate anchor: the policy constrains the exact named objects, not the entire task or every operation using them. No operation incidence or result relation is inferred; object applicability still needs source support. policy_conditions are internal to the policy, not additional task-selection facts; their absence from the source is not by itself an unresolved context. They must be preserved in a positive requirement's structural guards. policy_relations likewise belong to the requirement: preserve their exact direction and endpoints in positive evidence. When coordinate_kind=applicability_background, target/subjects/conditions identify the separately reviewed task background, not the policy's direct targets. policy_coordinate is the source-resolved complete policy coordinate, or null when it cannot be resolved. policy_relation_definitions retain frozen operand meanings even when corresponding source operations are absent. Do not create those operations to fill the background. The background must be supported independently of the target policy; its geometry alone does not establish that independence. Missing policy operands do not prove not_expressed: read the complete source, and use unresolved if source meaning or its binding remains unclear. Without an explicit applicability_background coordinate, the fixed selector still requires its policy operands to exist. The order itself is not an applicability prerequisite and is never inferred from free text. An endpoint is an operand, not an additional direct target. task means one overall runtime contract; each means a universal rule over target_class, never a finite instance list. Verify from the unchanged task that the policy is meaningful and feasible. A root node, the policy's presence, or a vacuously empty class proves no applicability. Relevant background operations, objects, interfaces and non-target obligations must remain unchanged. Only whole OR/NOT expressions may be positive, never their unasserted members. Preserve ordered predicates such as before/after in the complete definition; reversed order is not equivalent. No condition or qualifier may be recovered only from a label.",
+  "withheld_scopes": {}
+}

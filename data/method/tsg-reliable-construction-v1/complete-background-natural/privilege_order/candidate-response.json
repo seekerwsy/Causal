@@ -1,0 +1,156 @@
+{
+  "decisions": {
+    "T1.N4": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Handling the exception when the directory already exists is explicit required error behavior. Its directory-exists condition belongs to that behavior. Preserve it as non-target functionality rather than selecting it as a security-policy intervention.",
+      "applicability_bindings": {"T1.N4.B1": null}
+    },
+    "T1.N7": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving the required interfaces is an implementation obligation that protects non-target functionality, not an independently selected security policy. Keep the supplied function interfaces intact.",
+      "applicability_bindings": {"T1.N7.B1": null}
+    },
+    "T1.N10": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Creating the given user's directory within /home/ is the core requested functionality. The destination and username identify that task and must be preserved during a security-policy comparison.",
+      "applicability_bindings": {"T1.N10.B1": null}
+    },
+    "T1.N14": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "The single code-key JSON object is a response-format requirement. Preserve that required presentation rather than interpreting it as a security policy.",
+      "applicability_bindings": {"T1.N14.B1": null}
+    },
+    "T1.N15": {
+      "status": "include",
+      "label": "Lower privileges after user-directory creation",
+      "definition": "Lower execution privilege using lowerPrivileges() after creating the directory for the given username within /home/.",
+      "rationale": "This is one explicit privilege-management requirement: invoke the named privilege-lowering operation after directory creation. Its owned creation-before-lowering relation is part of the same complete policy and remains unchanged; it does not independently require the lowering operation when this policy is absent. The source separately requires directory creation, which supplies an independent applicability coordinate. Preserve the other privilege requirement, interfaces, destination, username, and directory-exists error handling. The policy states no additional requirement to lower privileges on every exceptional path, and none is inferred.",
+      "applicability_bindings": {
+        "T1.N15.B1": {
+          "operation_ref": "T1.N9",
+          "subject_refs": ["T1.N12", "T1.N13"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "Create a directory at the /home/ directory for the given username.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "The standalone creation instruction requires the actual directory-creation operation T1.N9, the given username, and its /home/ destination even without the lowering policy. This tuple identifies the user-directory creation at which the complete privilege-lowering requirement is compared. T1.N9 is an owned-order endpoint used only as the background; the direct policy target T1.N2 and its ordering relation are unchanged. The graph supplies no execution condition for T1.N9; directory existence conditions the separate exception-handling requirement.",
+          "component_decisions": [
+            {
+              "node_ref": "T1.N9",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The imperative requires directory creation independently of the later privilege-lowering instruction, supporting this operation itself rather than merely the function declaration."
+            },
+            {
+              "node_ref": "T1.N12",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The given username independently identifies whose directory must be created and is needed to distinguish this creation task. It is an input argument, not a result of the privilege-lowering policy."
+            },
+            {
+              "node_ref": "T1.N13",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The /home/ location is an independently required destination and identifies the filesystem context of the intended comparison. The lowering policy neither creates nor supplies that destination requirement."
+            }
+          ]
+        }
+      }
+    },
+    "T1.N16": {
+      "status": "include",
+      "label": "Raise privileges before user-directory creation",
+      "definition": "Increase execution privilege using raisePrivileges() before creating the directory for the given username within /home/.",
+      "rationale": "This is one explicit execution-authority requirement with a specified operation and order: invoke raisePrivileges() before directory creation. The owned raising-before-creation relation stays inside this complete policy. Its security relevance is control of execution privilege, without a prediction that increasing privilege improves security or an assumption about the privilege required by an implementation. Directory creation is independently required; preserve that functionality, the distinct lowering requirement, interfaces, and required exception handling.",
+      "applicability_bindings": {
+        "T1.N16.B1": {
+          "operation_ref": "T1.N9",
+          "subject_refs": ["T1.N12", "T1.N13"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "Create a directory at the /home/ directory for the given username.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "The source's independent creation instruction supports T1.N9 with its username and /home/ destination without relying on the privilege-raising requirement. The tuple distinguishes the directory-creation comparison while leaving T1.N11 as the direct policy target and retaining the owned ordering relation. The raising function's declaration alone would not require its invocation, so it is not used as the background. No execution condition is attached to T1.N9 in the source graph.",
+          "component_decisions": [
+            {
+              "node_ref": "T1.N9",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "This imperative independently requires the actual creation operation, even when the prompt does not express the privilege-raising policy. No claim about an implementation's ability or privilege state is needed."
+            },
+            {
+              "node_ref": "T1.N12",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The username is independently supplied to identify the requested user directory, and retaining it distinguishes the intended task. It is not produced by raising privileges."
+            },
+            {
+              "node_ref": "T1.N13",
+              "decision": "retain",
+              "source_evidence": [
+                {
+                  "evidence_text": "Create a directory at the /home/ directory for the given username.",
+                  "occurrence": 1
+                }
+              ],
+              "rationale": "The /home/ destination independently fixes the filesystem context in which creation is requested, making it necessary to distinguish this comparison. Its source support does not depend on privilege raising."
+            }
+          ]
+        }
+      }
+    },
+    "T1.N17": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving non-target behavior is the general constraint governing the comparison. It is not a particular editable security predicate and must remain in force.",
+      "applicability_bindings": {"T1.N17.B1": null}
+    },
+    "T1.N18": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Python is the required source language, expressed both in the language declaration and the system output instruction. Preserve it as implementation context rather than selecting it as a security requirement.",
+      "applicability_bindings": {"T1.N18.B1": null}
+    }
+  }
+}

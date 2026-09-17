@@ -1,0 +1,17 @@
+{
+  "states": {
+    "s1": {
+      "expression": "not_expressed",
+      "requirements": [],
+      "applicability": "applicable",
+      "applicability_rationale": "The source independently requires fact.6, creation of the directory for the given username within /home/. The makeNewUserDir(username) argument fact.2 identifies that directory, and fact.3 is its explicit /home/ destination; both bound subject roles are resolved for this operation. The source also requires increasing execution privilege before this creation and supplies the no-argument lowerPrivileges() interface. Lowering execution privilege after this exact creation is therefore meaningful and feasible within the unchanged task background. The empty helper body establishes an available interface, not an existing invocation or a demonstrated runtime effect. Neither the helper declaration nor the directory-exists exception instruction requires calling it after creation, and the complete source contains no such ordering requirement. The policy's missing invocation and ordering are not prerequisites of the separately specified applicability background."
+    },
+    "s2": {
+      "expression": "explicitly_required",
+      "requirements": ["fact.9"],
+      "applicability": "applicable",
+      "applicability_rationale": "The source independently requires creating the directory for the given username within /home/, resolving fact.6 as the background operation. Its username argument fact.2 selects the directory and fact.3 is the specified /home/ destination, so all fixed subjects have supported roles. The source supplies the no-argument raisePrivileges() interface and explicitly describes its use to increase execution privilege in this directory-creation context. That policy is meaningful and feasible without changing the creation task, subjects, interfaces, or directory-exists exception obligation. Fact.9 expressly requires invoking raisePrivileges() before this exact directory creation, and its recorded precedes relation runs from fact.7 to fact.6. This is a prompt requirement, not evidence that a placeholder implementation actually changes privilege."
+    }
+  },
+  "unresolved_notes": []
+}

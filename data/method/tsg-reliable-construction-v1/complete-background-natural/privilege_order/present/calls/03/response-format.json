@@ -1,0 +1,119 @@
+{
+  "json_schema": {
+    "name": "fixed_source_scope_states",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "states": {
+          "additionalProperties": false,
+          "properties": {
+            "s1": {
+              "additionalProperties": false,
+              "description": "feature_1658ecbaedfc98a71100b44ed50985a3682ecb84ee02ff0134769fb9cb242bb9 at fact.6 concept_56ecf22aefa9d4f45cb173d325f879acedc4e57db194de35d48ced5ee7c469e4; subjects: fact.2 concept_afadc8caf6897cbbfa1e77d1236ffda877aa3fbeb412af216381fe1d729987a9 roles=identifier_input; fact.3 concept_06557e8ce96b3cee81f6b47cd3f562906b5e4e6b2ed9e6e72741032d8ccbd5f1 roles=destination. Use complete fact definitions and quoted bound roles in the request; this label is not an applicability verdict.",
+              "properties": {
+                "applicability": {
+                  "enum": [
+                    "applicable",
+                    "not_applicable",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "applicability_rationale": {
+                  "description": "Explain the source-bound operation and subject roles, including every applicability prerequisite or ambiguity. Do not reason from future generated code.",
+                  "type": "string"
+                },
+                "expression": {
+                  "description": "Whether the source expresses the requirement, independently of applicability. not_expressed alone cannot become absent.",
+                  "enum": [
+                    "explicitly_required",
+                    "not_expressed",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "requirements": {
+                  "items": {
+                    "enum": [
+                      "fact.11"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "expression",
+                "requirements",
+                "applicability",
+                "applicability_rationale"
+              ],
+              "type": "object"
+            },
+            "s2": {
+              "additionalProperties": false,
+              "description": "feature_34f2a356e3872ed35cb623e7865bd6e00a5b0f169fa4d90efb324cbbbadf776d at fact.6 concept_56ecf22aefa9d4f45cb173d325f879acedc4e57db194de35d48ced5ee7c469e4; subjects: fact.2 concept_afadc8caf6897cbbfa1e77d1236ffda877aa3fbeb412af216381fe1d729987a9 roles=identifier_input; fact.3 concept_06557e8ce96b3cee81f6b47cd3f562906b5e4e6b2ed9e6e72741032d8ccbd5f1 roles=destination. Use complete fact definitions and quoted bound roles in the request; this label is not an applicability verdict.",
+              "properties": {
+                "applicability": {
+                  "enum": [
+                    "applicable",
+                    "not_applicable",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "applicability_rationale": {
+                  "description": "Explain the source-bound operation and subject roles, including every applicability prerequisite or ambiguity. Do not reason from future generated code.",
+                  "type": "string"
+                },
+                "expression": {
+                  "description": "Whether the source expresses the requirement, independently of applicability. not_expressed alone cannot become absent.",
+                  "enum": [
+                    "explicitly_required",
+                    "not_expressed",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "requirements": {
+                  "items": {
+                    "enum": [
+                      "fact.10"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "expression",
+                "requirements",
+                "applicability",
+                "applicability_rationale"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "s1",
+            "s2"
+          ],
+          "type": "object"
+        },
+        "unresolved_notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "states",
+        "unresolved_notes"
+      ],
+      "type": "object"
+    },
+    "strict": true
+  },
+  "type": "json_schema"
+}

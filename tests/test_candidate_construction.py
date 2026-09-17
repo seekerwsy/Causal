@@ -155,7 +155,8 @@ def _compact_response(request, response):
     return dict(decisions=decisions)
 
 
-def _explicit_background_response(request, response, evidence_text, *, operation_definition=None):
+def _explicit_background_response(request, response, evidence_text, *, operation_definition=None,
+                                  subject_definitions=None):
     """Authored current-wire decisions; no source semantics are certified by this helper."""
     compact = _compact_response(request, response)
     for source in candidate_model_request(request)["sources"]:
@@ -164,13 +165,30 @@ def _explicit_background_response(request, response, evidence_text, *, operation
             if "complete_bindings" not in node:
                 continue
             decision = compact["decisions"][node["node_ref"]]
-            decision["applicability_bindings"] = {binding["binding_ref"]: (
-                dict(operation_ref=override or binding["operation_ref"],
-                     subject_refs=[] if override else binding["subject_refs"],
-                     execution_condition_refs=[] if override else binding["execution_condition_refs"],
-                     independent_source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
-                     rationale="Authored reference: the cited non-target task requires this actual background without the policy.")
-                if decision["status"] == "include" else None) for binding in node["complete_bindings"]}
+            decision["applicability_bindings"] = {}
+            for binding in node["complete_bindings"]:
+                if decision["status"] != "include":
+                    decision["applicability_bindings"][binding["binding_ref"]] = None
+                    continue
+                operation = override or binding["operation_ref"]
+                subjects = (sorted(n["node_ref"] for n in source["nodes"] if n["definition"] in subject_definitions)
+                            if subject_definitions is not None else binding["subject_refs"])
+                guards = sorted(e["source_ref"] for e in source["edges"]
+                                if e["edge_type"] == "conditions" and e["target_ref"] == operation)
+                inputs = {e["source_ref"] for e in source["edges"]
+                          if e["edge_type"] == "used_by" and e["target_ref"] == operation}
+                if binding["scope_kind"] in {"objects", "task"} and operation == binding["operation_ref"]:
+                    inputs = set(binding["subject_refs"])
+                retained = {operation, *subjects, *guards}
+                decision["applicability_bindings"][binding["binding_ref"]] = dict(
+                    operation_ref=operation, subject_refs=subjects, execution_condition_refs=guards,
+                    independent_source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
+                    rationale="Authored reference: the cited non-target task requires this actual background without the policy.",
+                    component_decisions=[dict(node_ref=key, decision="retain" if key in retained else "omit_not_needed",
+                        source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
+                        rationale="Authored retained coordinate." if key in retained else
+                                  "The retained operation and subjects distinguish the comparison without this input.")
+                        for key in sorted({operation, *inputs, *guards})])
     return compact
 
 
@@ -775,14 +793,15 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         atomicity_rationale="One complete hashing policy with its required result and order.",
         occurrences=[dict(task_id=task["task_id"], requirement_node_ids=[nodes["policy"]["node_id"]],
             scope=dict(operation_node_id=nodes["hashing"]["node_id"], subject_node_ids=[nodes["password"]["node_id"]], condition_node_ids=[]),
-            applicability_scope=dict(operation_node_id=nodes["insertion"]["node_id"], subject_node_ids=[], condition_node_ids=[]))])],
+            applicability_scope=dict(operation_node_id=nodes["insertion"]["node_id"],
+                                     subject_node_ids=[nodes["account"]["node_id"]], condition_node_ids=[]))])],
         dispositions=[dict(task_id=task["task_id"], requirement_node_id=n["node_id"],
             status="included" if n["concept_id"] == "policy" else "not_actionable",
             rationale="Only the complete hashing policy is edited.")
             for n in request["sources"][0]["nodes"] if n["node_type"] in {"task_requirement", "safety_requirement"}])
     full_response = response
     response = _explicit_background_response(request, response, base,
-        operation_definition="insert the account into the database")
+        operation_definition="insert the account into the database", subject_definitions=["the account"])
     wire = candidate_model_request(request)
     assert "READ-ONLY" in wire["instructions"] and "NOT the policy's" in wire["instructions"]
     from prompt_mechanism_study.candidate_construction import candidate_response_format
@@ -793,9 +812,14 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
     assert occurrence["scope"] == full_response["factors"][0]["occurrences"][0]["scope"]
     assert occurrence["applicability_scope"] == full_response["factors"][0]["occurrences"][0]["applicability_scope"]
     assert occurrence["applicability_support"]["source_evidence"][0]["evidence_text"] == base
+    components = {row["node_id"]: row for row in occurrence["applicability_support"]["component_decisions"]}
+    assert set(components) == {nodes[key]["node_id"] for key in ("insertion", "account", "digest")}
+    assert components[nodes["account"]["node_id"]]["decision"] == "retain"
+    assert components[nodes["digest"]["node_id"]]["decision"] == "omit_not_needed"
     included = next(key for key, row in response["decisions"].items() if row["status"] == "include")
     binding_ref = next(iter(response["decisions"][included]["applicability_bindings"]))
-    for mutation in ("null", "missing", "quotation", "policy_scope"):
+    for mutation in ("null", "missing", "quotation", "policy_scope", "missing_component",
+                     "duplicate_component", "silent_omission", "component_quotation"):
         invalid = json.loads(json.dumps(response))
         row = invalid["decisions"][included]
         if mutation == "null":
@@ -804,21 +828,48 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
             row["applicability_bindings"].pop(binding_ref)
         elif mutation == "quotation":
             row["applicability_bindings"][binding_ref]["independent_source_evidence"][0]["evidence_text"] = "Invented source support."
-        else:
+        elif mutation == "policy_scope":
             row["scope"] = full_response["factors"][0]["occurrences"][0]["applicability_scope"]
+        elif mutation == "missing_component":
+            row["applicability_bindings"][binding_ref]["component_decisions"].pop()
+        elif mutation == "duplicate_component":
+            items = row["applicability_bindings"][binding_ref]["component_decisions"]
+            items.append(items[0])
+        elif mutation == "silent_omission":
+            row["applicability_bindings"][binding_ref]["subject_refs"] = []
+        else:
+            row["applicability_bindings"][binding_ref]["component_decisions"][0]["source_evidence"][0]["evidence_text"] = "Invented component support."
         with pytest.raises(ValueError):
             compile_candidate_proposal(request, invalid, _design())
     # Matching valid geometry with a persuasive but mismatched rationale remains
     # reviewable, not automatically accepted as independent source support.
     wrong = json.loads(json.dumps(response))
     policy_node = next(n for n in wire["sources"][0]["nodes"] if n["node_ref"] == included)
-    wrong["decisions"][included]["applicability_bindings"][binding_ref]["operation_ref"] = policy_node["complete_bindings"][0]["operation_ref"]
+    choice = wrong["decisions"][included]["applicability_bindings"][binding_ref]
+    choice["operation_ref"] = policy_node["complete_bindings"][0]["operation_ref"]
+    choice["subject_refs"] = policy_node["complete_bindings"][0]["subject_refs"]
+    choice["component_decisions"] = [dict(node_ref=key, decision="retain",
+        source_evidence=[dict(evidence_text=base, occurrence=1)], rationale="Incorrect but structurally complete support.")
+        for key in [choice["operation_ref"], *choice["subject_refs"]]]
     wrong_draft = compile_candidate_proposal(request, wrong, _design())
     review = _review(request, wrong, wrong_draft)
     review["decisions"][0].update(decision="reject", context_independent=False,
         rationale="The selected hashing action is policy-only; the cited independent source requires insertion.")
     rejected = compile_candidate_proposal(request, wrong, _design(), review)
     assert rejected["policies"] == rejected["queries"] == []
+    # Independent operation alone is insufficient when a selected input depends on
+    # the policy. Exact accounting locates this claim; only semantic review judges it.
+    leaked = json.loads(json.dumps(response))
+    choice = leaked["decisions"][included]["applicability_bindings"][binding_ref]
+    omitted = next(item for item in choice["component_decisions"] if item["decision"] != "retain")
+    choice["subject_refs"].append(omitted["node_ref"])
+    omitted["decision"] = "retain"
+    leaked_draft = compile_candidate_proposal(request, leaked, _design())
+    assert leaked_draft["status"] == "PENDING_SEMANTIC_REVIEW"
+    review = _review(request, leaked, leaked_draft)
+    review["decisions"][0].update(decision="reject", context_independent=False,
+        rationale="Insertion is independent, but its selected digest input exists only under the hashing policy.")
+    assert compile_candidate_proposal(request, leaked, _design(), review)["policies"] == []
     reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
     factor = reviewed["factors"][0]
     feature, selector = factor["feature_id"], factor["scope_selector"]
@@ -849,6 +900,13 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
     duplicate_background = replace(absent[2], nodes=tuple(replace(n,
         semantic_id=selector["applicability_scope"]["operation_semantic_id"])
         if n.semantic_id == catalog["normalization_map"]["task_operation::returning"] else n for n in absent[2].nodes))
+    # The retained account input distinguishes operations with the same meaning.
+    assert choose_candidate_scope(duplicate_background, selector) == absent[3]
+    return_node = next(n for n in absent[2].nodes
+                       if n.semantic_id == catalog["normalization_map"]["task_operation::returning"])
+    account_node = next(n for n in absent[2].nodes if n.node_id == absent[3].subject_node_ids[0])
+    duplicate_background = replace(duplicate_background, edges=(*duplicate_background.edges,
+        _edge(account_node, return_node, "used_by", {("data_object", "used_by", "task_operation")})))
     assert choose_candidate_scope(duplicate_background, selector) is None
     # Background matching cannot certify a positive graph with lost/changed order.
     for mutation in ("missing", "reversed"):

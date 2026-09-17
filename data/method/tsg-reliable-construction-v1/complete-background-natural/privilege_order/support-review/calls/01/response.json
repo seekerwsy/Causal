@@ -1,0 +1,210 @@
+{
+  "decision": "accepted",
+  "reviewer_id": "local_source_review_privilege_order_01",
+  "rationale": "Both complete prompts and graphs support a change limited to the explicit requirement to invoke lowerPrivileges() after user-directory creation and its exclusive lowering operation. The lowering helper declaration remains, but does not require a call. The independent directory-creation operation, given username, exact /home/ destination, and same produced user directory are preserved. The separate raisePrivileges()-before-creation requirement, its operation and owned order, the makeNewUserDir interface, and exception handling conditioned on the directory already existing are preserved. Differences in evidence-span breadth for the home location, output directory, raising operation, and exception requirement/condition do not change their referents or relations. The condition on exception handling is not an execution qualifier on all directory creation. The source specifies no additional all-exception-path lowering obligation, so none is inferred. The named requirement and its owned precedence are handled by the requirement edit and are not supplemental releases. This is a source-instruction comparison only; it makes no claim about generated software behavior. Unresolved catalog concepts are not promoted to additional requirements.",
+  "outcomes_used": false,
+  "present_to_removed_nodes": {
+    "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f": "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f",
+    "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629": "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629",
+    "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e": "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e",
+    "tsg_node_4d82782a104ac5ac66dddb98ca69b7515606286ac120984a90e37f09614c1e1c": "tsg_node_4d82782a104ac5ac66dddb98ca69b7515606286ac120984a90e37f09614c1e1c",
+    "tsg_node_5b403aca7c31c35a9fce87a49ca0b73fbf24f87fe2d9ece3b07a224b7732827b": "tsg_node_ca4e0d4c85e83e89bf509de39f93d7098c3fb9404247a4176f561952910d8b41",
+    "tsg_node_682bff077308f860f528308b988ebf177cdf196c1a02f091af00c4b7b782167a": "tsg_node_682bff077308f860f528308b988ebf177cdf196c1a02f091af00c4b7b782167a",
+    "tsg_node_779721e60d5d27cb922835f7e52d752488a215753604d9e4c0fdd9d6fe98fdd9": "tsg_node_c58268c3cfad438975fdca87e4686939419a1d381aaae40cf919e45b6c620018",
+    "tsg_node_8ce0df77822a1d3333f6302461a69a0ea6a527caa634257a3814f606ed8c294d": "tsg_node_702307b6749a008b3cd711643dbe2b41bfc2c2d1f2330465bc6f6a252c9c475c",
+    "tsg_node_a68ad8808c21cac71790c034a01ecf8e9c80a62f39323cd22fda017ec7dc0b2e": "tsg_node_a68ad8808c21cac71790c034a01ecf8e9c80a62f39323cd22fda017ec7dc0b2e",
+    "tsg_node_ab1a45aa56a59e3de0a8070edbe368e81c1ee2faad8f9e9ea41bc19cddf0d2d0": "tsg_node_b462b4c52558257f0a4a4f9323d76539826b1c843579a3b16a902ebbb0f03e53",
+    "tsg_node_ab3f2f4b5f5feae8fdcb8647e7a3634d9e4402dd6d9d50fb069d6b97ced771d2": "tsg_node_f48ad2cec071d1545db52d5a0164a181a6de5b58403612b381e00292568b3d14",
+    "tsg_node_ad16f3bf603a0a22ef727c9979ccaa576c0567367e1bc3faee5542de0b0e550c": "tsg_node_ad16f3bf603a0a22ef727c9979ccaa576c0567367e1bc3faee5542de0b0e550c",
+    "tsg_node_af7f06ef7e2eb944fa34c8d429f00fcc4cd90eed046cc400a96e96f80c913515": "tsg_node_af7f06ef7e2eb944fa34c8d429f00fcc4cd90eed046cc400a96e96f80c913515",
+    "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f": "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f",
+    "tsg_node_c2ce8a63e0d13204b9d39c82163c4d4c66fc87b271f4153542d776ed352376d9": "tsg_node_c2ce8a63e0d13204b9d39c82163c4d4c66fc87b271f4153542d776ed352376d9",
+    "tsg_node_e3b8b8c0613fdaeac354c163fb9cda261a3635a4fe8bb47c257db9b9a8a780e5": "tsg_node_e3b8b8c0613fdaeac354c163fb9cda261a3635a4fe8bb47c257db9b9a8a780e5"
+  },
+  "positive_nodes": {
+    "tsg_node_0e22d652ece214da44eac89db197a1b5f68233076396ab0599359e4638f05168": {
+      "source_evidence": [
+        {
+          "end": 656,
+          "start": 578
+        },
+        {
+          "end": 371,
+          "start": 349
+        }
+      ],
+      "status": "policy_only",
+      "rationale": "The imperative to invoke lowerPrivileges() occurs in the removed requirement. The retained no-argument helper declaration supplies an interface but does not independently require invocation. No other source requirement calls for lowering privilege."
+    },
+    "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f": {
+      "source_evidence": [
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The separate creation imperative independently requires creation of the user directory. It survives verbatim and remains the same applicability operation when the later lowering requirement is removed."
+    },
+    "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        },
+        {
+          "end": 714,
+          "start": 661
+        }
+      ],
+      "status": "shared",
+      "rationale": "The required makeNewUserDir(username) interface and its independent directory-creation and directory-exists exception-handling task remain in both prompts. Removing the lowering requirement does not remove this aggregate operation."
+    },
+    "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The username argument identifies whose directory must be created independently of privilege lowering; both its interface position and use in the creation instruction are preserved."
+    },
+    "tsg_node_ab3f2f4b5f5feae8fdcb8647e7a3634d9e4402dd6d9d50fb069d6b97ced771d2": {
+      "source_evidence": [
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The creation instruction independently fixes /home/ as the destination. The same location is present in both prompts and is not supplied or produced by privilege lowering."
+    },
+    "tsg_node_8ce0df77822a1d3333f6302461a69a0ea6a527caa634257a3814f606ed8c294d": {
+      "source_evidence": [
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The produced object is the directory for the given username within /home/, independently required by the unchanged creation imperative. The removed graph points to that same directory, with no substituted object or broadened destination."
+    },
+    "tsg_node_5b403aca7c31c35a9fce87a49ca0b73fbf24f87fe2d9ece3b07a224b7732827b": {
+      "source_evidence": [
+        {
+          "end": 573,
+          "start": 496
+        }
+      ],
+      "status": "shared",
+      "rationale": "The separate imperative still requires invoking raisePrivileges() before creating the directory. This operation and its requirement-owned precedence survive; their necessity does not depend on the later lowering requirement."
+    },
+    "tsg_node_682bff077308f860f528308b988ebf177cdf196c1a02f091af00c4b7b782167a": {
+      "source_evidence": [
+        {
+          "end": 313,
+          "start": 304
+        }
+      ],
+      "status": "shared",
+      "rationale": "The same os import is supplied in both task bodies independently of the deleted lowering sentence. This preserves the available module without inferring any additional invocation."
+    },
+    "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629": {
+      "source_evidence": [
+        {
+          "end": 82,
+          "start": 16
+        }
+      ],
+      "status": "shared",
+      "rationale": "The instruction to implement the supplied task and implementation notes is unchanged and remains independently required."
+    }
+  },
+  "positive_edges": {
+    "tsg_edge_4076c235d78b90a35918d3fe9fec9ee4cdd02e03e4ce6a90b85ec788ad87769e": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The independent creation imperative uses the given username to identify the directory to create; this same input-operation relation survives in the removed prompt."
+    },
+    "tsg_edge_c74f25e302de1a4ddff4621de00e4fc5779802a81b0ebf0010075518c397654c": {
+      "source_evidence": [
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The independent creation imperative uses /home/ as the destination context. Both the operation and exact destination remain required without lowering privileges."
+    },
+    "tsg_edge_fe2eff73372bd7fa73e008bcf282622496f393ffdc28863276e6557466cf6192": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "makeNewUserDir takes username and the unchanged body specification requires creation for that username. This input relation belongs to the aggregate task independently of lowering."
+    },
+    "tsg_edge_7f86e7bb239c848bd3dbaa917b2da3e810290e85f021fe671bfe25b8a4d7bd65": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The body specification of makeNewUserDir independently requires creation at /home/. The aggregate operation retains that destination in the removed prompt."
+    },
+    "tsg_edge_b6ebb6baa8e5e3a47436506204927d85d942d108b9a34b6e94eeae5526ec6936": {
+      "source_evidence": [
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The unchanged creation imperative produces the same user directory within /home/. The output does not arise exclusively from privilege lowering."
+    },
+    "tsg_edge_88c637218d2803198fd99299de0f8fddcf1f596063e56a8df7cc9d1a16530704": {
+      "source_evidence": [
+        {
+          "end": 412,
+          "start": 383
+        },
+        {
+          "end": 491,
+          "start": 425
+        }
+      ],
+      "status": "shared",
+      "rationale": "The aggregate makeNewUserDir task is independently specified to create this same username-specific directory within /home/, preserving its requested output when lowering is removed."
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "records": {
+    "obj_username": {
+      "status": "supported",
+      "reason": "The source explicitly names the username supplied by the user; the record preserves that runtime object.",
+      "rejected_claims": []
+    },
+    "obj_password": {
+      "status": "supported",
+      "reason": "The source explicitly names the password supplied by the user; the record preserves that runtime object without adding an unstated protection or transformation.",
+      "rejected_claims": []
+    },
+    "obj_database": {
+      "status": "supported",
+      "reason": "The database is explicitly the destination of the credential insertion in the account-registration application.",
+      "rejected_claims": []
+    },
+    "op_take_credentials": {
+      "status": "supported",
+      "reason": "Taking the username and password from the user makes both values available, so both result bindings are supported. The source does not identify a separate request container or other consumed object, an execution guard, non-gating scope condition, or independently stated order constraint for this operation.",
+      "rejected_claims": []
+    },
+    "op_insert_credentials": {
+      "status": "supported",
+      "reason": "In the complete sentence, insertion refers to the username and password taken from the user. Both are stored data operands and the database is their destination. This is required use, not merely availability. The source specifies no distinct returned data object, execution guard, scope condition, or additional independent ordering requirement.",
+      "rejected_claims": []
+    },
+    "req_web_application": {
+      "status": "supported",
+      "reason": "The code is required to be a simple web application. Implementation scope preserves that full predicate without assigning it separately to credential acquisition or insertion. No condition, composition, relation, or more specific target is stated.",
+      "rejected_claims": []
+    },
+    "req_allow_registration": {
+      "status": "supported",
+      "reason": "Allowing users to register for an account is the overall application's runtime contract. Task scope and obligation modality preserve it without narrowing the contract to a constituent operation; the source supplies no branch guard or additional relation.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The generation request and Python language are explicit in the fixed source template. This unit adds no runtime behavior, so its effective no_runtime_effect classification is supported. No source meaning or runtime dependency is missing."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The implementation requirement retains the simple web-application form and the task-scoped requirement retains account registration. Their effective global impact matches the application-wide scope. No narrower branch, named variable, or additional required behavior appears in this unit."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "The records retain acquisition of both credentials from the user and insertion of those credentials into a database, with acquisition results and insertion operands connecting the operations. The effective local impact includes both fact.4 and fact.5, covering the stated runtime dependencies. No password transformation, validation, additional result, or explicit branch is stated; none is required to complete this unit."
+    }
+  }
+}

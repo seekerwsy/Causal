@@ -523,3 +523,56 @@ The original failure, corrected-adapter rejection and repaired replay are separa
 retained and independently reproducible under their source archives. The existing
 105-case suite passed in a clean source export after the changes; no cases or
 reviewer roles were added. Paper content and the Atomic-only boundary remain intact.
+
+## Fresh complete-background check
+
+The [frozen plan](../../data/method/tsg-reliable-construction-v1/complete-background-natural/protocol/plan.json)
+reuses the two exposed natural base tasks with fresh model responses under one
+fixed implementation and catalog per task. The current candidate proposal adds
+`component_decisions`: an exact source citation and retain/omit reason for the
+operation, every input and every execution guard. The compiler checks that this
+accounting matches the selected background geometry. The existing candidate review
+judges the whole tuple's independence and sufficiency; no reviewer was added.
+Omission neither deletes a source fact nor changes the complete policy signature.
+Necessary uncertainty remains unresolved. Earlier candidate and edit failures
+retain their original judgments.
+
+The [saved replay result](../../data/method/tsg-reliable-construction-v1/complete-background-natural/analysis/replay-result.json)
+records acceptance of both target candidates and four freshly compiled initial
+graphs, with no mechanical repairs:
+
+| Base task | Fresh construction and review | Paired support and edit result |
+| --- | --- | --- |
+| Privilege lowering | Both final scopes correctly present/absent; non-target elevation remains | Support accepted; fresh REMOVE and inverse ADD both `PASSED` in the editor and independent verifier |
+| Registration hashing | Present graph blocked after its one semantic patch; removed scope absent | No present scope, paired support review or edit executed |
+
+The privilege result required no post-output production-source changes. Offline
+replay initially compared internal scope tuples with saved JSON arrays; the
+experimental runner now compares their serialized JSON forms. The retained
+replay-adapter diagnostic records the differing types, with no model, graph or
+edit-verdict changes. Registration remains
+a substantive failed construction. Its present-arm ordinary review judged the
+singular “inserts it” insufficient to establish username insertion and rejected
+`op_insert_credentials.fact` and the username input. The removed-arm review instead
+accepted insertion of both credentials from the same sentence. This disagreement
+does not establish either interpretation as reference truth. The patch removed
+the username input and changed `fact.layer` to `unresolved`, but retained the frozen
+operation meaning that included username insertion. The compiler stopped it with
+`patch repeats rejected claim op_insert_credentials.fact`. No manual semantic
+replacement, alternate proposal or further patch bypassed that gate.
+
+There were **17 fresh inherited Codex steps**: two proposals, two candidate reviews,
+four extractions, four ordinary source reviews, one patch, three scope assessments
+and one paired support review. External API calls and cost were zero; the exact
+Codex model snapshot and seed are unavailable. The prospective plan permitted a
+small conditional-task check only if both base-task pairs passed. Registration
+failed that gate, so the conditional check was not run.
+
+The [reviewer-suite record](../../data/method/tsg-reliable-construction-v1/complete-background-natural/analysis/reviewer-suite.json)
+retains the exact source archive identity and Python 3.12.13 environment: all
+**105 existing cases passed** in a clean source export in 28.85 seconds. No tests
+were added. These implementation checks and the successful privilege pair do not
+establish general semantic stability, independent qualification or a security or
+causal effect. Inverse ADD uses the same exposed task pair as REMOVE, not another
+natural task unit. Main remains Atomic-only and `SPECIFIED_DRAFT`; no protected
+evaluation inputs, generated-code outcomes or manuscript changes were involved.

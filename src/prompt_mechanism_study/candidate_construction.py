@@ -82,11 +82,25 @@ direct target. Selecting another owned-order endpoint as background does not cha
 target, predicate, policy conditions or order. The program retains that policy binding unchanged.
 Use an existing source operation (or the original task.root coordinate) that the source still
 requires independently of this policy. It may equal the direct target or be an owned-order
-endpoint. Copy its source-bound input refs and ALL its execution-condition refs; do not copy
-policy-only guards into this background. A valid endpoint or declaration alone does not prove
+endpoint. Select only its independently supported input refs that are needed to distinguish this
+comparison, and ALL its independent execution-condition refs. Do not copy every input automatically:
+a policy-produced result can be an input to an otherwise independent operation. Do not clear all
+subjects merely to avoid that dependency. Policy-only guards stay inside the unchanged policy.
+A valid endpoint or declaration alone does not prove
 an independently required action. Cite the exact source text that supports the selected background
 without relying on the target policy, and explain why that text requires this actual coordinate.
 Check the chosen operation_ref itself: a rationale naming a different operation cannot justify it.
+Account for the operation, EVERY source used_by input to it and EVERY source execution condition in
+component_decisions. For task.root, account for the original binding's subject refs instead of
+inventing root inputs. Each component has its own source quotation and rationale; a source sentence
+may be reused. Retain exactly the operation, selected subjects and all execution conditions.
+An omitted input must be omit_policy_dependent, or omit_not_needed with an explanation of why the
+retained tuple still distinguishes the intended comparison. An unrelated input need not have its
+entire semantics resolved before omission. Independently supported does not mean every input is
+necessary. Never omit a source execution guard; if a necessary component's independence or the
+retained tuple's sufficiency is unresolved, mark the requirement unresolved. Omissions do not delete
+graph facts or alter the complete policy. The whole retained tuple, not just the operation, must
+remain supported without the policy. Quotations locate evidence, not certify this semantic judgment.
 Do not infer an implementation or missing software protection. If any necessary background is
 unresolved, mark this requirement unresolved; do not silently reuse the policy-only action.
 Describe requirements without predicting code security. Missing prompt text is not missing software protection.
@@ -95,7 +109,9 @@ every required decision key. Use exactly those keys, once each, including non-ac
 status is include, not_actionable or unresolved. For include, label and definition normalize only
 THIS node's complete meaning; rationale explains its one editable predicate and preserved behavior.
 applicability_bindings maps each listed binding_ref to {operation_ref, subject_refs,
-execution_condition_refs, independent_source_evidence: [{evidence_text, occurrence}], rationale}.
+execution_condition_refs, independent_source_evidence: [{evidence_text, occurrence}], rationale,
+component_decisions: [{node_ref, decision: retain|omit_policy_dependent|omit_not_needed,
+source_evidence: [{evidence_text, occurrence}], rationale}]}.
 Every included binding needs a non-null selection and nonempty supporting citations, including
 when background and direct target coincide. occurrence is the one-based source occurrence.
 For other statuses, label and definition must be empty strings and rationale explains the decision.
@@ -261,7 +277,8 @@ def _expand_unit_decisions(request, response):
                         raise ValueError("excluded requirement cannot select an applicability binding")
                     continue
                 _fields(choice, {"operation_ref", "subject_refs", "execution_condition_refs",
-                                 "independent_source_evidence", "rationale"}, "included applicability binding")
+                                 "independent_source_evidence", "rationale", "component_decisions"},
+                        "included applicability binding")
                 refs = source_nodes[occurrence["task_id"]]
                 def resolve(value):
                     if not isinstance(value, str) or value not in refs:
@@ -271,12 +288,20 @@ def _expand_unit_decisions(request, response):
                     if (not isinstance(choice[name], list) or any(not isinstance(value, str) for value in choice[name])
                             or len(set(choice[name])) != len(choice[name])):
                         raise ValueError("applicability binding refs must be unique source-node lists")
+                if not isinstance(choice["component_decisions"], list):
+                    raise ValueError("applicability component decisions must be an array")
+                components = []
+                for item in choice["component_decisions"]:
+                    _fields(item, {"node_ref", "decision", "source_evidence", "rationale"},
+                            "applicability component decision")
+                    components.append(dict(node_id=resolve(item["node_ref"]),
+                        **{key: item[key] for key in ("decision", "source_evidence", "rationale")}))
                 occurrences.append(dict(occurrence,
                     applicability_scope=dict(operation_node_id=resolve(choice["operation_ref"]),
                         subject_node_ids=sorted(resolve(value) for value in choice["subject_refs"]),
                         condition_node_ids=sorted(resolve(value) for value in choice["execution_condition_refs"])),
                     applicability_support=dict(source_evidence=choice["independent_source_evidence"],
-                                               rationale=choice["rationale"])))
+                        rationale=choice["rationale"], component_decisions=components)))
         if row["status"] == "include":
             if not bindings[ref]:
                 raise ValueError("included requirement has no complete source binding")
@@ -298,9 +323,13 @@ def candidate_response_format(request: dict) -> dict:
         return dict(type="object", properties=properties, required=list(properties), additionalProperties=False)
     requirements, bindings, _ = _candidate_units(request)
     citation = obj(dict(evidence_text=text, occurrence=dict(type="integer", minimum=1)))
+    component = obj(dict(node_ref=text,
+        decision=dict(type="string", enum=["retain", "omit_policy_dependent", "omit_not_needed"]),
+        source_evidence=dict(type="array", items=citation, minItems=1), rationale=text))
     choice = obj(dict(operation_ref=text, subject_refs=dict(type="array", items=text),
         execution_condition_refs=dict(type="array", items=text),
-        independent_source_evidence=dict(type="array", items=citation, minItems=1), rationale=text))
+        independent_source_evidence=dict(type="array", items=citation, minItems=1), rationale=text,
+        component_decisions=dict(type="array", items=component, minItems=1)))
     decisions = {ref: obj(dict(status=dict(type="string", enum=["include", "not_actionable", "unresolved"]),
         label=text, definition=text, rationale=text,
         applicability_bindings=obj({f"{ref}.B{i}": dict(anyOf=[choice, dict(type="null")])
@@ -437,16 +466,41 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         if "applicability_scope" not in occurrence:
             raise ValueError("applicability support requires an explicit background coordinate")
         support = occurrence["applicability_support"]
-        _fields(support, {"source_evidence", "rationale"}, "applicability support")
+        _fields(support, {"source_evidence", "rationale"}
+                | ({"component_decisions"} if "component_decisions" in support else set()), "applicability support")
         require_text(support["rationale"], "independent applicability rationale")
-        if not isinstance(support["source_evidence"], list) or not support["source_evidence"]:
-            raise ValueError("independent applicability requires source evidence")
-        for citation in support["source_evidence"]:
-            _fields(citation, {"evidence_text", "occurrence"}, "independent applicability citation")
-            require_text(citation["evidence_text"], "independent applicability quotation")
-            if type(citation["occurrence"]) is not int or citation["occurrence"] < 1:
-                raise ValueError("independent applicability occurrence must be a positive integer")
-            _occurrence_span(source["source_prompt"], citation["evidence_text"], citation["occurrence"])
+        evidence_rows = [support]
+        if "component_decisions" in support:
+            components = support["component_decisions"]
+            if not isinstance(components, list):
+                raise ValueError("applicability component decisions must be an array")
+            inputs = (set(subjects) if root_anchor else
+                      {a for a, rel, b in links if rel == "used_by" and b == anchor})
+            required = {anchor, *inputs, *guards}
+            retained = {anchor, *background.subject_node_ids, *guards}
+            seen = set()
+            for item in components:
+                _fields(item, {"node_id", "decision", "source_evidence", "rationale"},
+                        "applicability component decision")
+                key, decision = item["node_id"], item["decision"]
+                if (not isinstance(key, str) or key not in required or key in seen
+                        or decision not in {"retain", "omit_policy_dependent", "omit_not_needed"}
+                        or (decision == "retain") != (key in retained)):
+                    raise ValueError("applicability component decisions must account for the exact retained and omitted inputs")
+                seen.add(key)
+                require_text(item["rationale"], "applicability component rationale")
+            if seen != required:
+                raise ValueError("applicability component decisions must cover the operation, every input and execution guard")
+            evidence_rows.extend(components)
+        for row in evidence_rows:
+            if not isinstance(row["source_evidence"], list) or not row["source_evidence"]:
+                raise ValueError("independent applicability requires source evidence")
+            for citation in row["source_evidence"]:
+                _fields(citation, {"evidence_text", "occurrence"}, "independent applicability citation")
+                require_text(citation["evidence_text"], "independent applicability quotation")
+                if type(citation["occurrence"]) is not int or citation["occurrence"] < 1:
+                    raise ValueError("independent applicability occurrence must be a positive integer")
+                _occurrence_span(source["source_prompt"], citation["evidence_text"], citation["occurrence"])
         # Exact quotation proves source location only; the existing semantic reviewer
         # still decides whether it supports this actual background without the policy.
         evidence["applicability_support"] = canonical_value(support)

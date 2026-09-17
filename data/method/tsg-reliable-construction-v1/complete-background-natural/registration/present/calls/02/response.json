@@ -1,0 +1,72 @@
+{
+  "records": {
+    "obj_username": {
+      "status": "supported",
+      "reason": "The source explicitly names a username taken from the user. The object record asserts no unsupported storage or production behavior.",
+      "rejected_claims": []
+    },
+    "obj_password": {
+      "status": "supported",
+      "reason": "The password taken from the user in u3 is the password hashed in u4. Keeping that input instance distinct from its hashed form is supported.",
+      "rejected_claims": []
+    },
+    "obj_hashed_password": {
+      "status": "supported",
+      "reason": "Hashing the password before its insertion establishes the hashed password value used by insertion, distinct from the received password.",
+      "rejected_claims": []
+    },
+    "obj_database": {
+      "status": "supported",
+      "reason": "The source explicitly identifies a database into which the password is inserted; u4 refers back to the database in u3.",
+      "rejected_claims": []
+    },
+    "op_take_credentials": {
+      "status": "supported",
+      "reason": "The application explicitly takes both the username and password from the user, exposing those two values as collection results. The source specifies no separate request object, execution guard, non-gating condition or independent order relation for this operation.",
+      "rejected_claims": []
+    },
+    "op_hash_password": {
+      "status": "supported",
+      "reason": "The password is expressly hashed, supporting the received password as a value input and its hashed form as the result. No execution or context condition is stated. Hashing-before-insertion is retained by its owner requirement rather than asserted as independent operation context.",
+      "rejected_claims": []
+    },
+    "op_insert_credentials": {
+      "status": "unresolved",
+      "reason": "Password insertion, use of its hashed form, and the database destination are explicit across u3 and u4. However, u3 says 'inserts it' after naming username and password: the singular pronoun does not unambiguously require inserting the username as well, and u4 resolves only password insertion. The compiled fact asserts insertion of both values, and inputs.0 independently requires username storage. Account registration and collection of a username do not by themselves settle its storage. Preserve this binding uncertainty rather than certifying the full predicate. No separate insertion result, guard or independent precedence is required by the source.",
+      "rejected_claims": ["fact", "inputs.0"]
+    },
+    "req_web_application": {
+      "status": "supported",
+      "reason": "The task requires the generated implementation to be a simple web application. An unconditional implementation-scoped obligation preserves that full requirement without assigning it independently to each runtime operation.",
+      "rejected_claims": []
+    },
+    "req_account_registration": {
+      "status": "supported",
+      "reason": "Allowing users to register for an account is an unconditional overall runtime-task contract. Task scope, atomic structure and the absence of narrower targets or conditions fit the source.",
+      "rejected_claims": []
+    },
+    "req_hash_before_insertion": {
+      "status": "supported",
+      "reason": "The source requires password hashing before database insertion. The hashing operation is the direct predicate target, and the owned precedes relation binds hashing to insertion without requiring insertion itself to perform hashing. Obligation modality, an unconditional atom and both cited source units preserve the stated predicate and relation.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The fixed source template already requires complete Python source implementing the supplied task. Its generation and language meaning is covered there, and global impact is appropriate. No additional runtime target or variable name is specified."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The simple web application implementation form and task-wide account-registration behavior are both represented with their respective scopes. Global impact preserves their task-wide reach. No further interface, variable name or conditional behavior is stated."
+    },
+    "u3": {
+      "complete": false,
+      "reason": "Collection of the username and password and database insertion are represented, and the effective local impacts cover collection, hashing through its password input, and insertion. However, coverage incorrectly treats username insertion as settled: the referent of 'it' is ambiguous between the password and the collected credentials, while u4 confirms only password insertion. This binding must remain unresolved; collection or the account-registration purpose is insufficient to infer mandatory username storage. No additional concrete variable names are supplied."
+    },
+    "u4": {
+      "complete": true,
+      "reason": "The password transformation, hashed result consumed by insertion, and requirement-owned hashing-before-insertion relation are represented. The effective table includes hashing and insertion plus collection through the shared received-password dependency, so the original impact declaration's omission of collection is not a missing compiled dependency. No hashing algorithm, salt rule, branch condition or named variable is specified."
+    }
+  }
+}

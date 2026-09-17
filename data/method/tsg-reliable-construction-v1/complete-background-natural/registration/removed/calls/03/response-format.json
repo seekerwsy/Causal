@@ -1,0 +1,72 @@
+{
+  "json_schema": {
+    "name": "fixed_source_scope_states",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "states": {
+          "additionalProperties": false,
+          "properties": {
+            "s1": {
+              "additionalProperties": false,
+              "description": "feature_79a494adc5c719192775e7773a1da6fd1a304da58384205e7c347f84b9037ae7 at fact.5 concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2; subjects: fact.3 concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672 roles=destination. Use complete fact definitions and quoted bound roles in the request; this label is not an applicability verdict.",
+              "properties": {
+                "applicability": {
+                  "enum": [
+                    "applicable",
+                    "not_applicable",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "applicability_rationale": {
+                  "description": "Explain the source-bound operation and subject roles, including every applicability prerequisite or ambiguity. Do not reason from future generated code.",
+                  "type": "string"
+                },
+                "expression": {
+                  "description": "Whether the source expresses the requirement, independently of applicability. not_expressed alone cannot become absent.",
+                  "enum": [
+                    "not_expressed",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                "requirements": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 0,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "expression",
+                "requirements",
+                "applicability",
+                "applicability_rationale"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "s1"
+          ],
+          "type": "object"
+        },
+        "unresolved_notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "states",
+        "unresolved_notes"
+      ],
+      "type": "object"
+    },
+    "strict": true
+  },
+  "type": "json_schema"
+}

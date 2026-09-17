@@ -160,6 +160,16 @@ agent workflow executes, but reliable semantic repair is not established.
    Missing policy operands alone never establish absence. Background selection must
    use frozen source meanings and existing semantic review of independent support.
    No alternate anchor is inferred from a remaining relation endpoint.
+   The default compact proposer keeps policy bindings read-only. Its
+   `component_decisions` account for the chosen operation, every source input and
+   every execution guard, each with an exact source quotation and reason. Retained
+   components must match the selected tuple; omitted inputs are policy-dependent or
+   unnecessary to distinguish this comparison. All execution guards remain. The
+   compiler checks this accounting against source geometry; the existing candidate
+   review judges whether the whole retained tuple is independently supported and
+   sufficient. Citations and complete accounting do not certify those semantics.
+   Necessary unresolved components or insufficient support leave the candidate
+   unresolved. These decisions neither remove graph facts nor alter the policy.
    At editing time only, the existing reviewed realization may supply a local
    `source_review.edit_scope`. Default preservation remains. Explicit policy-only
    operation/object facts and their reviewed input/output relations can change with
@@ -170,19 +180,17 @@ agent workflow executes, but reliable semantic repair is not established.
    ownership field, extraction gate, second graph or reviewer. Authored controls
    demonstrate the mechanical ADD/REMOVE boundary, not automatic attribution accuracy
    or qualification of the two historical natural edits.
-   The first natural model-driven background check proposed a policy-dependent
-   coordinate for privilege lowering (caught by candidate review) and returned
-   unresolved for registration. No candidate passed, so its planned construction
-   and edit steps did not run. The request's original-scope preservation wording
-   may also contribute to the confusion; this result does not isolate model ability.
-   The default compact interface now makes the policy binding read-only and requires
-   an independently cited background per binding. The subsequent two-task check used
-   11 fresh Codex steps: privilege lowering passed candidate review and both fresh
-   graph/state assessments; registration's background wrongly included the hashed
-   result and was rejected. Experimental adapter corrections and a source-continuity
-   check for different citation lengths then let the same saved privilege pair pass
-   REMOVE/inverse ADD and independent replay. The original failures remain saved.
-   No model was resampled, and only this one exposed edit pair was demonstrated.
+   The latest [fresh complete-background check](experiments/2026-09-17-tsg-reliable-construction.md#fresh-complete-background-check)
+   accepted both target candidates and compiled all four initial graphs without
+   mechanical repair. Privilege lowering passed both final scopes, paired support,
+   REMOVE, inverse ADD and independent verification while retaining elevation.
+   Registration's present-arm review disputed username insertion; its one local
+   patch repeated the rejected operation fact and was blocked before scope
+   assessment. Its removed-arm scope was absent; no registration support or edit ran.
+   The frozen both-task gate stopped the conditional follow-up. Seventeen fresh
+   inherited Codex steps used zero external API calls; the result is one exposed
+   task's edit pair, not general stability. The report retains earlier candidate,
+   adapter and saved-replay failures under their original rules.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.

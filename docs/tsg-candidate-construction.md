@@ -142,7 +142,19 @@ envelope. Different OR/NOT member envelopes remain represented but unprojected.
 The default compact response selects an `applicability_bindings` entry for each
 read-only complete binding. Each entry names existing operation, subject and execution
 condition references, with exact `independent_source_evidence` quotations and a
-rationale. The compiler restores the original policy signature and translates only
+rationale. Its `component_decisions` accounts once for the selected operation, every
+source input to that operation and every execution condition. Each component has a
+source citation and is retained, omitted as policy-dependent, or omitted as unnecessary
+to this comparison. Retained components must equal the submitted background tuple;
+the operation and all execution conditions remain required. Inputs are not copied
+wholesale merely because they participate in the original operation. Omitting an
+input must preserve enough information to distinguish the intended comparison;
+emptying the subject list is not an automatic escape from uncertainty.
+The compiler checks coverage, references and quotations. The existing semantic review
+judges independence of the entire retained tuple and sufficiency of the omissions.
+Uncertainty in a necessary component keeps the candidate unresolved; an unrelated
+input's unspecified type does not by itself exclude the comparison.
+The compiler restores the original policy signature and translates only
 this separate choice into `applicability_scope`. Included decisions must supply the
 choice explicitly, including when the background coincides with the policy target.
 The background must be an existing direct target or owned-order operand; an original

@@ -1,0 +1,172 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_username",
+      "fact": {
+        "concept_id": "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c",
+        "evidence_source_unit": "u3",
+        "evidence_text": "username",
+        "source_units": ["u3"],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_password",
+      "fact": {
+        "concept_id": "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5",
+        "evidence_source_unit": "u3",
+        "evidence_text": "password",
+        "source_units": ["u3"],
+        "layer": "runtime"
+      }
+    },
+    {
+      "record_id": "obj_database",
+      "fact": {
+        "concept_id": "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672",
+        "evidence_source_unit": "u3",
+        "evidence_text": "database",
+        "source_units": ["u2", "u3"],
+        "layer": "runtime"
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_take_credentials",
+      "fact": {
+        "concept_id": "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e",
+        "evidence_source_unit": "u3",
+        "evidence_text": "takes the username and password from the user",
+        "source_units": ["u3"],
+        "layer": "runtime"
+      },
+      "inputs": [],
+      "results": [
+        {
+          "subject": "obj_username",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        },
+        {
+          "subject": "obj_password",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_insert_credentials",
+      "fact": {
+        "concept_id": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+        "evidence_source_unit": "u3",
+        "evidence_text": "inserts it into a database",
+        "source_units": ["u3"],
+        "layer": "runtime"
+      },
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "value_input",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user and inserts it into a database"
+        },
+        {
+          "subject": "obj_password",
+          "role": "value_input",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user and inserts it into a database"
+        },
+        {
+          "subject": "obj_database",
+          "role": "destination",
+          "evidence_source_unit": "u3",
+          "evidence_text": "inserts it into a database"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_web_application",
+      "modality": "obligation",
+      "structure": {"kind": "atom", "members": []},
+      "scope_kind": "implementation",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [],
+      "fact": {
+        "concept_id": "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7",
+        "evidence_source_unit": "u2",
+        "evidence_text": "The code is a simple web application",
+        "source_units": ["u2"],
+        "layer": "generation"
+      }
+    },
+    {
+      "record_id": "req_allow_registration",
+      "modality": "obligation",
+      "structure": {"kind": "atom", "members": []},
+      "scope_kind": "task",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [],
+      "fact": {
+        "concept_id": "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1",
+        "evidence_source_unit": "u2",
+        "evidence_text": "allows users to register for an account",
+        "source_units": ["u2"],
+        "layer": "runtime"
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "no_task_fact",
+      "reason": "The code-generation request and Python language are already represented by the fixed template."
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The implementation must be a simple web application, and the overall runtime task must allow account registration."
+    },
+    "u3": {
+      "status": "represented",
+      "reason": "Taking the user-supplied username and password and inserting those values into a database are represented with the required objects and participants. No password transformation is specified."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This unit specifies code generation and the implementation language without adding a runtime behavior predicate.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Generate python code for the following:"
+    },
+    "u2": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The web-application form and account-registration purpose apply to the application as a whole, including its runtime workflow.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "The code is a simple web application that allows users to register for an account."
+    },
+    "u3": {
+      "effect": "local",
+      "operations": ["op_take_credentials", "op_insert_credentials"],
+      "reason": "This unit defines both credential acquisition and database insertion and supplies the objects connecting them.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database."
+    }
+  },
+  "unresolved_notes": []
+}

@@ -1,0 +1,76 @@
+{
+  "objects": [],
+  "operations": [
+    {
+      "execution_conditions": [],
+      "fact": {
+        "concept_id": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+        "evidence_source_unit": "u3",
+        "evidence_text": "inserts it into a database",
+        "layer": "unresolved",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "inputs": [
+        {
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed before it is inserted into the database.",
+          "role": "value_input",
+          "subject": "obj_hashed_password"
+        },
+        {
+          "evidence_source_unit": "u3",
+          "evidence_text": "inserts it into a database",
+          "role": "destination",
+          "subject": "obj_database"
+        }
+      ],
+      "precedes": [],
+      "record_id": "op_insert_credentials",
+      "results": [],
+      "scope_conditions": []
+    }
+  ],
+  "requirements": [],
+  "coverage": {
+    "u3": {
+      "status": "unresolved",
+      "reason": "The username and password are collected, but 'inserts it' does not resolve whether username storage is required. The unsupported username input has been removed. The frozen insertion concept also requires username storage, so its complete predicate remains unresolved."
+    },
+    "u4": {
+      "status": "unresolved",
+      "reason": "Password hashing, the hashed insertion input, the database destination, and the owned hashing-before-insertion relation remain supported. A faithful password-only insertion operation cannot be certified with the supplied frozen concept, which additionally requires unresolved username storage."
+    }
+  },
+  "unit_impacts": {
+    "u3": {
+      "effect": "local",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "operations": [
+        "op_take_credentials",
+        "op_hash_password",
+        "op_insert_credentials"
+      ],
+      "reason": "This unit establishes collection and insertion and identifies the user-supplied password subsequently consumed by hashing."
+    },
+    "u4": {
+      "effect": "local",
+      "evidence_source_unit": "u4",
+      "evidence_text": "The password is hashed before it is inserted into the database.",
+      "operations": [
+        "op_hash_password",
+        "op_insert_credentials"
+      ],
+      "reason": "This unit requires hashing, determines the password form supplied to insertion, and binds the order of those two operations."
+    }
+  },
+  "unresolved_notes": [
+    "The source confirms insertion of the hashed password but does not settle whether the username is also inserted. Username collection does not entail username storage.",
+    "The only frozen insertion concept requires insertion of both the username and password. Its full definition is not source-certified. The retained insertion record is explicitly unresolved; its remaining participants express only the supported hashed-password input and database destination. The unresolved layer does not establish generation-time insertion or uncertainty about the runtime nature of insertion.",
+    "No narrower password-only insertion concept may be invented under FROZEN. The original hashing-before-insertion relation and accepted source-unit influence declarations are preserved; the affected coverage remains unresolved rather than certifying the broader concept."
+  ],
+  "delete_record_ids": []
+}

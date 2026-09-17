@@ -1,0 +1,11 @@
+{
+  "states": {
+    "s1": {
+      "expression": "not_expressed",
+      "requirements": [],
+      "applicability": "applicable",
+      "applicability_rationale": "The source states that the registration application takes the username and password from the user and inserts them into a database. This independently supports fact.5 as credential insertion and fact.3 as its database destination, including the user origin and password identity of the value governed by the complete policy. Hashing that password before its database insertion is meaningful and feasible in this stated account-registration workflow; no declared interface or non-target obligation requires storing the original plaintext password. This is an applicability-background coordinate, so the absence of an existing hashing operation or hashing-before-insertion relation does not remove the independently supported background. The complete source does not express password hashing or its required precedence."
+    }
+  },
+  "unresolved_notes": []
+}

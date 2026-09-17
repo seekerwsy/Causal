@@ -1,0 +1,28 @@
+{
+  "request_sha256": "de103a0a000dc8ff787a41a83afb0ec6d20d8741db7827acbfe2e2bcfe19ac06",
+  "response_sha256": "2e9d1186c94d1e5c1377150f78c7e160996f1469e16eb2a4c43e944559aa08c7",
+  "reviewer_id": "fresh-source-semantic-reviewer-privilege-order",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "feature_id": "feature_1658ecbaedfc98a71100b44ed50985a3682ecb84ee02ff0134769fb9cb242bb9",
+      "decision": "accept",
+      "rationale": "The source expressly requires lowering privilege using lowerPrivileges() after directory creation. Invocation and its creation-before-lowering relation form one complete requirement; the definition does not add a guarantee about exceptional paths. The compiled direct operation, empty direct input list, and owned precedes relation preserve that meaning. The separate imperative 'Create a directory at the /home/ directory for the given username.' independently requires the selected creation operation, username input, and /home/ destination without the lowering requirement. Each retained component has matching evidence and its own component decision. These are all available inputs to that creation operation in the supplied graph; the resulting directory is an output, not an omitted input, and the imported os module is not an additional task-scope qualifier. The directory-already-exists condition qualifies exception handling rather than execution of the creation operation, so an empty execution-condition list does not discard a creation guard. The complete background adequately identifies the requested creation task. The normalization keeps creation and lowering distinct, retains the direction of their relation, and maps both background subjects to their source meanings. Comparing this single requirement leaves directory creation, username, destination, the distinct privilege-raising requirement, exception handling, interfaces, and output requirements intact. This judgment concerns the prompt requirement and implies neither successful runtime privilege lowering nor a favorable security outcome.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": true,
+      "scope_preserves_task": true
+    },
+    {
+      "feature_id": "feature_34f2a356e3872ed35cb623e7865bd6e00a5b0f169fa4d90efb324cbbbadf776d",
+      "decision": "accept",
+      "rationale": "The source expressly requires increasing privilege through raisePrivileges() before creating the directory. This is one execution-authority requirement with its own ordering qualifier; it does not assert that privilege raising improves security. The compiled policy still targets the no-argument raising operation and preserves raising-before-creation as its owned relation. Independently, 'Create a directory at the /home/ directory for the given username.' supports the actual creation operation and both selected inputs, username and /home/, even if the raising requirement is not expressed. None of these components is supplied or produced by the raising policy. The component decisions cover the operation and all available input subjects, with evidence for their exact meanings. The created directory is an output rather than an omitted input, and the imported os module adds no comparison-scope qualifier. No source execution guard on creation is omitted: directory existence is the stated condition for the separate exception-handling requirement. Thus the background identifies this user-directory creation sufficiently without using the mere declaration of raisePrivileges() as an independent invocation obligation. The normalized operation, subjects, and precedes endpoints remain distinct and source-faithful. The comparison preserves creation, its username and destination, the separate lowering requirement, exception handling, interfaces, and response requirements. Acceptance does not assume that a particular runtime needs elevated privilege or that an implementation without the expressed policy lacks it.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": true,
+      "scope_preserves_task": true
+    }
+  ]
+}

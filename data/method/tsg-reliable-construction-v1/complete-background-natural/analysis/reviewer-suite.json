@@ -1,0 +1,11 @@
+{
+  "python_version": "Python 3.12.13",
+  "environment": "D:\\MyCode\\Causal\\.tmp\\tsg-workflow-review-env\\Scripts\\python.exe",
+  "source": "Clean copy of tracked working files with revised source; no untracked old outputs.",
+  "command": "python -m pytest -q --basetemp TEMP",
+  "exit_code": 0,
+  "stdout": "........................................................................ [ 68%]\n.................................                                        [100%]\n105 passed in 28.85s\n",
+  "stderr": "",
+  "execution_source_sha256": "627e730f262adff6aceee06429f576c9a980f7276923d2db0ce9bd73ae1e0ec6",
+  "external_provider_calls": 0
+}

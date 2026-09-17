@@ -1,0 +1,18 @@
+{
+  "request_sha256": "3fe33561dc0e481f11105eb18da11623069842cc29e8d1397110f138c09f7e23",
+  "response_sha256": "7639c8f3a9fb1579875004bfb4c383e1133dca5fb61b3d23e742c334c167a8e4",
+  "reviewer_id": "fresh-source-semantic-reviewer-registration",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "feature_id": "feature_79a494adc5c719192775e7773a1da6fd1a304da58384205e7c347f84b9037ae7",
+      "decision": "accept",
+      "rationale": "The source expressly states, 'The password is hashed before it is inserted into the database.' The proposed factor retains that one complete password-storage requirement, including its precedence relation, without adding a hashing algorithm or a stronger protection. The direct hashing target and the normalized hashing-before-insertion relation match the source graph. The separate background is supported by the preceding sentence, 'The application takes the username and password from the user and inserts it into a database.' That sentence independently requires the selected insertion operation T1.N10 and database T1.N7 even when the hashing requirement is not expressed. All three inputs attached to that insertion operation are accounted for: the database is retained; the specifically hashed-password object T1.N2 is correctly omitted because its transformed form depends on the target policy; and the username T1.N15 is reasonably omitted from the comparison coordinate because the insertion operation already identifies the registration information, and no username-specific branch distinguishes the password-storage comparison. The operation's definition still identifies insertion of the user's password, so omitting the hashed form does not leave an unspecified storage operation. The source supplies no execution guard for this insertion; the before relation belongs to the preserved policy and is not a missing execution condition. The background therefore remains independently supported and sufficiently specific. Varying expression of this requirement can preserve registration, the web application, username and password collection, database insertion, Python, and the required response format. This judgment concerns prompt requirements and does not assert that generated code would omit hashing when the requirement is absent.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": true,
+      "scope_preserves_task": true
+    }
+  ]
+}

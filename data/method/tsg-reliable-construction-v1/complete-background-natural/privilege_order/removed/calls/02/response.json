@@ -1,0 +1,100 @@
+{
+  "records": {
+    "obj_os": {
+      "status": "supported",
+      "reason": "The supplied import establishes the os module as available. The object asserts no consumer, and the complete task permits directory creation without using that particular module.",
+      "rejected_claims": []
+    },
+    "obj_username": {
+      "status": "supported",
+      "reason": "The function signature explicitly names username, and the directory-creation instruction refers to the given username. These identify the same input without adding a validation or rejection policy.",
+      "rejected_claims": []
+    },
+    "obj_home": {
+      "status": "supported",
+      "reason": "The creation instruction explicitly identifies the /home/ directory as the destination facility. It is not a newly produced filepath or an inferred auxiliary input.",
+      "rejected_claims": []
+    },
+    "obj_user_directory": {
+      "status": "supported",
+      "reason": "The requested directory for the given username is explicitly the object to be created. Its representation adds neither a returned handle nor an unstated path-validation rule.",
+      "rejected_claims": []
+    },
+    "op_make_user_dir": {
+      "status": "supported",
+      "reason": "The named enclosing function has the username parameter and the directory-creation contract. Username selects the user directory and /home/ supplies its destination; both are required by the full task. The directory is the aggregate operation's stated creation result, without implying a Python return value. The existing-directory condition governs exception handling rather than gating the whole function, and no independent precedence or other context condition is prescribed.",
+      "rejected_claims": []
+    },
+    "op_create_directory": {
+      "status": "supported",
+      "reason": "The source requires creation of the directory for username at /home/, supporting the identifier input, destination and whole directory result. The directory is newly created rather than consumed as its own input. The exception clause does not require a preliminary nonexistence gate. Required ordering is owned by the privilege requirement, so empty independent precedence and scope-condition lists are appropriate.",
+      "rejected_claims": []
+    },
+    "op_raise_privileges": {
+      "status": "supported",
+      "reason": "The source explicitly requires increasing privilege by invoking the supplied no-argument raisePrivileges function. It specifies no data operand or separate result object for that invocation. Username and /home/ need not be used by this helper. No whole-operation gate or independent ordering context is stated; the before relation remains in its owning requirement.",
+      "rejected_claims": []
+    },
+    "req_create_directory": {
+      "status": "supported",
+      "reason": "The imperative creation contract belongs to makeNewUserDir, the function whose docstring contains it. The single target receives the complete predicate, with no unsupported targets, subjects or universal scope. Existing-directory exception handling is a separate conditional obligation and does not prescribe a precondition on the creation contract.",
+      "rejected_claims": []
+    },
+    "req_raise_before_create": {
+      "status": "supported",
+      "reason": "The instruction obliges the privilege-increase action to use raisePrivileges before directory creation. The privilege operation alone is its direct target; the creation operation appears as the other operand of the owned precedes relation. Both operands and the relation's source unit are retained, with no unsupported guard, lowering operation or independent order assertion.",
+      "rejected_claims": []
+    },
+    "req_handle_exists_exception": {
+      "status": "supported",
+      "reason": "The source explicitly requires makeNewUserDir to handle the exception if the requested directory already exists. The existing-directory condition is structurally attached to that complete obligation. It neither gates all function execution nor prescribes a particular handler response, return value or privilege-lowering action.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The named os module is represented as available without a required consumer. Global availability is a conservative impact classification; no required use by directory creation or either helper follows from the import. No additional task meaning is missing."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The raisePrivileges name and no-argument interface are retained by the explicit invocation operation. Its effective impacts include the enclosing function, privilege operation and directory endpoint of the owned order relation. The effective table already includes that endpoint, so no dependency is missing."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "The pass statement is the supplied helper placeholder and adds no further required runtime action or data participant. Its no-runtime-effect classification does not suppress the explicit invocation and privilege-increase requirement supplied elsewhere."
+    },
+    "u4": {
+      "complete": true,
+      "reason": "The lowerPrivileges declaration supplies an available no-argument interface under the implementation instruction to preserve required interfaces. No source clause requires invoking it or lowering privilege. Treating it as global interface context with no localized consumer preserves the distinction between availability and use; no runtime lowering requirement is missing."
+    },
+    "u5": {
+      "complete": true,
+      "reason": "The second pass is the lowerPrivileges placeholder body. It does not establish a call, ordering relation or additional runtime obligation, so the no-runtime-effect classification is supported."
+    },
+    "u6": {
+      "complete": true,
+      "reason": "The exact makeNewUserDir boundary and username parameter are represented. The effective impacts cover the aggregate function and both required internal actions, matching the docstring's scope without assigning username as an input to the no-argument privilege helper."
+    },
+    "u7": {
+      "complete": true,
+      "reason": "The opening docstring delimiter contributes structural punctuation rather than an independent task predicate. The enclosed instructions are reviewed in their own source units."
+    },
+    "u8": {
+      "complete": true,
+      "reason": "The creation action, requested user directory, username selector, /home/ destination and enclosing-function obligation are represented. Effective impacts cover the aggregate, creation action and privilege-order dependency through the referenced creation endpoint. No source-required return, validation policy or additional operation is omitted."
+    },
+    "u9": {
+      "complete": true,
+      "reason": "The privilege increase, exact raisePrivileges invocation and before-creation constraint are represented with requirement-owned ordering. Effective impacts include the enclosing function and both relation operands. The source does not prescribe subsequent lowering, and no such extra behavior is introduced."
+    },
+    "u10": {
+      "complete": true,
+      "reason": "Exception handling and the existing-directory guard are represented at the enclosing function. Effective impacts include that function and the creation action whose existing-directory exception is handled. The clause supplies no handler output, whole-operation gate or changed privilege behavior, so no further impact is required."
+    },
+    "u11": {
+      "complete": true,
+      "reason": "The closing docstring delimiter supplies no additional predicate or runtime dependency. Its no-runtime-effect classification is supported."
+    }
+  }
+}

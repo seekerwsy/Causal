@@ -1,0 +1,32 @@
+{
+  "initial_replay_status": "FAILED_JSON_RUNTIME_TYPE_COMPARISON",
+  "differences": [
+    {
+      "field": ".renderer.result.expected_scoped_feature_states[0].scope.condition_node_ids",
+      "stored_type": "list",
+      "runtime_type": "tuple"
+    },
+    {
+      "field": ".renderer.result.expected_scoped_feature_states[0].scope.subject_node_ids",
+      "stored_type": "list",
+      "runtime_type": "tuple"
+    },
+    {
+      "field": ".renderer.result.factor_scopes[0].condition_node_ids",
+      "stored_type": "list",
+      "runtime_type": "tuple"
+    },
+    {
+      "field": ".renderer.result.factor_scopes[0].subject_node_ids",
+      "stored_type": "list",
+      "runtime_type": "tuple"
+    }
+  ],
+  "correction": "Canonicalize only the experimental runner keep() comparison through JSON serialization, matching its retained JSON files.",
+  "production_source_changed": false,
+  "model_outputs_changed": false,
+  "graphs_changed": false,
+  "edit_results_changed": false,
+  "new_model_steps": 0,
+  "scientific_interpretation_changed": false
+}

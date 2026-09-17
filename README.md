@@ -50,62 +50,28 @@ Secure-code yield, Oracle coverage, functionality and joint success remain separ
 ## Current research bottleneck
 
 Automatic TSG extraction can preserve a plausible description while misbinding
-its condition or target. The current bounded workflow uses one ordinary source
-review and at most one local semantic patch; detailed binding review was not
-promoted after its cross-task diagnostic. Candidate-local unknown handling helps
-limit unusable comparisons but does not prove semantic accuracy.
+its condition or target. The current path preserves complete policy bindings and
+reviews a separate applicability background. Candidate proposals account for the
+operation, every input and every execution guard with cited retain/omit decisions;
+the existing reviewer judges the independence and sufficiency of the whole tuple.
+Construction still uses one ordinary source review and at most one local semantic
+patch. Component accounting adds no reviewer or scientific stage.
 
-The current binding repair separates direct targets from requirement-owned order.
-Owned relations retain their requirement, guards and operands through compilation,
-candidate matching and edit checks. A [two-task development check](docs/experiments/2026-09-17-tsg-reliable-construction.md#repairing-ownership-of-temporal-requirements)
-retained all nine fixed source meanings and three order bindings; one sample per
-task does not establish stability. The subsequent complete repair round corrected
-two planted target errors, but both natural policy deletions were blocked by
-policy-dependent anchors. The current candidate-local revision separates an explicitly
-reviewed applicability background from the complete policy signature and permits
-reviewed policy-only facts to change during an edit. Authored ADD/REMOVE controls
-pass; automatic support judgments and natural edit qualification remain unproved.
-TSG construction itself gains no global ownership gate or extra reviewer.
-The first natural check of the new background interface stopped at candidate
-selection: one proposed background still named the policy action and was rejected;
-the other proposal remained unresolved. Three model steps ran, with no fresh
-construction or actual edit. Automatic delivery of the separate background remains
-unproved in that round. The default candidate interface now keeps policy bindings
-read-only and requires a separately cited applicability background. The
-[follow-up check](data/method/tsg-reliable-construction-v1/default-candidate-natural/README.md)
-accepted the privilege task and freshly reconstructed its original/deleted prompts.
-After correcting experimental adapter data and distinguishing quotation length from
-changed source content, the same saved judgments passed REMOVE and inverse ADD in
-both the editor and independent verifier. Registration remained rejected because its
-background included the policy-dependent hashed result. This is one exposed edit
-pair with a subsequent mechanical replay, not demonstrated automatic stability.
+The latest [fresh two-task check](docs/experiments/2026-09-17-tsg-reliable-construction.md#fresh-complete-background-check)
+accepted both target candidates and compiled four initial graphs without mechanical
+repair. Privilege lowering passed fresh REMOVE, inverse ADD and independent
+verification while preserving elevation. Registration stopped after its present-arm
+review disputed username insertion and the local patch repeated the rejected claim;
+its removed-arm scope was absent, but no paired support or edit ran. The frozen
+both-task gate therefore blocked the conditional follow-up. These 17 fresh Codex
+steps used zero external API calls. The successful directions remain one exposed
+task's edit pair, not general construction stability or a causal/security result.
 
-Complete conditional, whole-task and universal requirements can now enter Atomic
-candidate construction at their original boundary. Policy-internal conditions
-are separate from task-selection context. The [bounded projection check](docs/experiments/2026-09-17-complete-policy-projection.md)
-tests this path through actual prompt edits on authored structures; it does not
-establish better automatic extraction or qualify a formal study.
-The subsequent [two-task natural check](docs/experiments/2026-09-17-complete-policy-natural.md)
-completed both graphs, but its one automatic candidate response truncated. Source
-guard/target defects and inappropriate functional candidates remained; no candidate
-gain or actual edit was established. Six calls and their failures replay offline.
-The [next bounded check](docs/experiments/2026-09-17-tsg-reliable-construction.md)
-removed candidate truncation and reference re-entry: one decision now names each
-original requirement and the program preserves its bindings. Two factors survived
-author review, but inappropriate selections and source-construction errors remain.
-Independent inventories were not adopted as a default stage or a reliable reference.
-The subsequent source-only agent check compiled all 16 drafts from eight tasks
-run twice. Author audit matched 88/96 fixed meanings; 12/16 graphs passed, below
-the frozen gate. Repeated source-interpretation and target-binding ambiguities
-remain. Direct object requirements now project without invented operation edges,
-but candidate editability and a stable automatic construction path are unproved.
-
-The [TSG workflow](docs/tsg-workflow-stability.md) records the exact active procedure,
-negative results and next research decision. The
-[candidate guide](docs/tsg-candidate-construction.md) explains its downstream use.
-Independent representation and measurement qualification, natural candidate
-support and a prospectively frozen formal study remain unfinished. This scope
-reduction does not claim to solve those empirical gaps.
+The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
+the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)
+retains earlier failures and the [candidate guide](docs/tsg-candidate-construction.md)
+explains downstream use. Independent representation and measurement qualification,
+natural candidate support and a prospectively frozen formal study remain unfinished.
 
 ## Reproduction
 

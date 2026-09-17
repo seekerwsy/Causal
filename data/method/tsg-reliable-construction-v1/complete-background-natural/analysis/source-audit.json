@@ -1,0 +1,25 @@
+{
+  "kind": "Author source audit of retained development evidence; not an independent reference",
+  "cases": [
+    {
+      "base_task": "privilege_order",
+      "candidate": "Each selected background component has independent support in the creation sentence: creation operation, username and /home/ destination. The complete lowering target and creation-before-lowering relation remain immutable.",
+      "source_change": "Only the predeclared lowering clause is removed; the lowerPrivileges helper declaration remains without prescribing invocation.",
+      "graph_check": "Both fresh graphs retain the creation/aggregate operations, input roles, produced user directory, elevation-before-creation requirement and its owned order, and existing-directory exception guard. The original additionally has lowering and its requirement-owned order. No universal exceptional-path lowering is inferred.",
+      "scope_check": "Lowering is present/absent and elevation is present in both at the independent creation background.",
+      "support_and_edit": "The paired model review maps 16 retained non-task nodes and releases only the policy-only lowering operation. Both directions pass renderer and independently implemented verification; no model output or production code changed after observation.",
+      "caveat": "Independent program replay checks retained source judgments and preservation rules, not their semantic truth. The generic reviewed renderer marks non_target_source_bytes_preserved false; the experiment separately checks that the exact predeclared clause is the sole prompt deletion."
+    },
+    {
+      "base_task": "registration",
+      "candidate": "The background retains insertion and database. Hashed output is explicitly policy-dependent; username is omitted with a rationale that insertion definition already identifies the credential comparison. Existing review accepts.",
+      "graph_review_disagreement": "The original-side reviewer treats the singular inserts it as insufficient to mandate username insertion. The removed-side reviewer accepts it as referring to both collected credentials. The shared sentence is unchanged; the original also expressly confirms password insertion. This audit records an interpretation disagreement rather than treating either model as gold.",
+      "frozen_meaning": "Insert the user's username and password value into the database.",
+      "patch": "Removed username from explicit inputs but retained the same concept_id in fact, changed layer to unresolved, and marked u3/u4 coverage unresolved. A layer value cannot erase the rejected predicate. Frozen concepts provide no narrower insertion predicate.",
+      "failure": "PromptContractExtractionError: patch repeats rejected claim op_insert_credentials.fact",
+      "disposition": "Original construction failed after its only semantic patch; no original scope assessment or paired support/edit followed. The removed graph and absent assessment completed. No manual replacement or further retry.",
+      "method_implication": "Component-level omission prevents the earlier dependent-hash background but cannot remove participant claims embedded in an operation definition. Fixing this requires a clear division between operation identity and participant bindings, plus a principled way to retain local semantic uncertainty; more reviews alone do not address the representational restriction."
+    }
+  ],
+  "research_boundary": "No stability estimate, model ranking, Discovery support or causal/security effect; the optional third task was not started because the fixed two-task gate failed."
+}

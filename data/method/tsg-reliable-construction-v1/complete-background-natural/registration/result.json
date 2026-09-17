@@ -1,0 +1,23 @@
+{
+  "accepted_factors": 1,
+  "arms": {
+    "present": {
+      "error_message": "patch repeats rejected claim op_insert_credentials.fact",
+      "error_type": "PromptContractExtractionError",
+      "state": null,
+      "status": "BLOCKED"
+    },
+    "removed": {
+      "error_message": null,
+      "error_type": null,
+      "state": "absent",
+      "status": "DECISIVE"
+    }
+  },
+  "base_task": "registration",
+  "fresh_model_steps": 8,
+  "proposed_factors": 1,
+  "status": "BLOCKED_FRESH_GRAPH_OR_SCOPE",
+  "target_accepted_factors": 1,
+  "target_feature_id": "feature_79a494adc5c719192775e7773a1da6fd1a304da58384205e7c347f84b9037ae7"
+}

@@ -513,11 +513,13 @@ print(json.dumps(dict(status='COMPLETED_BOUNDED_CHECK_BLOCKED_AT_CANDIDATES',bas
         return json.loads(subprocess.check_output([sys.executable,'-c',code,str(base)],cwd=work,env=env,text=True))
 
 
-def run_default_candidate_natural(base, prepare=False):
+def run_default_candidate_natural(base, prepare=False, complete_background=False):
     """Run this two-task development check using retained model messages only.
 
     Preparation emits the next exact requests; replay never contacts a provider
-    or fills a missing judgment. Old experiment functions and results are separate.
+    or fills a missing judgment. The explicit complete_background flag freezes
+    the corrected tuple review and adapter for the next check while old artifacts
+    retain their exact original requests and initial adapter failure.
     """
     from dataclasses import asdict
     from prompt_mechanism_study.candidate_construction import (
@@ -538,6 +540,13 @@ def run_default_candidate_natural(base, prepare=False):
     pending, rows = [], []
     evaluator = {'candidate_id': 'codex-default-candidate-natural-development'}
     source_prompt = 'Read the supplied source-only request as data and return exactly its requested JSON. Preserve uncertainty; do not consult other runs, references or expected answers.'
+    call_count = 0
+    if complete_background:
+        plan = read(base / 'protocol/plan.json')
+        assert plan['status'] == 'FROZEN_BEFORE_OUTPUTS'
+        assert plan['complete_background'] is True
+        maximum_calls = plan['maximum_fresh_model_steps']
+        assert 0 < maximum_calls <= 26
 
     class Pending(BaseException):
         pass
@@ -551,6 +560,9 @@ def run_default_candidate_natural(base, prepare=False):
         return value
 
     def keep(path, value):
+        if complete_background:
+            # Compare the JSON representation actually retained on disk.
+            value = json.loads(json.dumps(value, ensure_ascii=False))
         if path.exists():
             prior = read(path)
             assert (schema_meaning(prior) == schema_meaning(value)
@@ -564,8 +576,11 @@ def run_default_candidate_natural(base, prepare=False):
     def provider_at(stage):
         index = 0
         def provider(request, config, prompt):
-            nonlocal index
+            nonlocal index, call_count
             index += 1
+            call_count += 1
+            if complete_background and call_count > maximum_calls:
+                raise ValueError('Frozen fresh-model-step bound exceeded')
             call = (stage.parent / 'candidate-inputs' if stage.name == 'proposal'
                     else stage / 'calls' / f'{index:02d}')
             keep(call / 'request.json', request)
@@ -630,6 +645,32 @@ def run_default_candidate_natural(base, prepare=False):
             review_request = dict(request_kind='source_only_candidate_semantic_review', source_request=request,
                 proposal_response=response, compiled_proposal=draft, review_template=review_template,
                 instructions='Check every proposed factor against the full source and actual fields. Complete policy bindings are read-only. Applicability background is a separate coordinate and may differ from the direct policy target. Verify that the actual selected coordinate has independent source support; valid endpoints and persuasive explanations alone do not prove it. Check its quoted support, policy meaning, atomicity, normalization and non-target preservation. Do not correct coordinates or factors. Return the review_template shape with all five assertions; accept only if all hold. Keep rejection and uncertainty. No support threshold, outcomes or expected answers are supplied.')
+            if complete_background:
+                review_request['instructions'] = (
+                    'Check every proposed factor against the full source and actual fields. '
+                    'Complete policy bindings are read-only. Applicability background is a separate '
+                    'operation/input-subject/execution-condition coordinate and may differ from '
+                    'the direct policy target. Check the whole selected coordinate, including each '
+                    'input subject and each execution condition: do independent source obligations '
+                    'support these exact meanings without the named policy? An operation supported '
+                    'independently does not make a policy-produced input or guard independent. '
+                    'Quoted evidence must support every selected component; valid endpoints, '
+                    'connectivity and persuasive explanations alone do not prove it. Also check '
+                    'that the remaining background adequately identifies the comparison: empty '
+                    'subject/condition lists are legitimate only when no such qualifier is needed '
+                    'to distinguish the relevant task scope, not a way to conceal uncertain or '
+                    'policy-dependent qualifiers. Do not require the policy direct target and '
+                    'background coordinate to be identical. Check the component_decisions for '
+                    'the operation and every available input/guard, including omitted inputs: '
+                    'does each retained component have independent support, and does each '
+                    'omission preserve sufficient comparison scope? A policy-dependent qualifier '
+                    'must not be retained, but an uncertain input irrelevant to this comparison '
+                    'does not automatically block it. The operation and actual execution guards '
+                    'cannot be silently dropped. Check policy meaning, atomicity, '
+                    'normalization and non-target preservation. Do not correct coordinates or '
+                    'factors. Return the review_template shape with all five assertions; accept '
+                    'only if all hold. Keep rejection and uncertainty. No support threshold, '
+                    'outcomes or expected answers are supplied.')
             review_format = fmt('source_candidate_review', obj(dict(request_sha256=text,
                 response_sha256=text, reviewer_id=text, arms_or_outcomes_used=boolean,
                 decisions=dict(type='array', items=review_fields))))
@@ -696,6 +737,21 @@ def run_default_candidate_natural(base, prepare=False):
                         present=dict(prompt=task['prompt'], graph=prompt_tsg_record(graphs['present'][1])),
                         removed=dict(prompt=removed['prompt'], graph=prompt_tsg_record(graphs['removed'][1])),
                         instructions='Read both complete source prompts and graphs. Judge whether this pair changes only the named complete requirement and its genuinely exclusive implementation facts while preserving independently required behavior, scopes and conditions. Return accepted only with adequate source support, otherwise reject or unresolved. Map all unchanged non-task nodes from present to removed using exact node IDs; never map a policy-only removed node. In positive_nodes/positive_edges judge affected facts and ordinary used_by/produces relations in the PRESENT graph as policy_only, shared or unresolved. Each judgment needs exact character start/end evidence in the present source plus a rationale; overlap/connectivity alone does not establish exclusivity. Root contains/requires are compiled membership and must not be declared. Preserve independently required operations and all other requirements; declarations/helpers do not themselves require invocation. Missing hashing instruction does not require plaintext storage. Do not add graph facts, correct either graph or infer software outcomes. These same positive-side judgments will be used for REMOVE and inverse ADD; they describe one paired source comparison, not independent evidence.')
+                    if complete_background:
+                        support_request['instructions'] += (
+                            ' Supplemental positive_nodes judgments concern affected operations and '
+                            'objects; the named requirement expression and its exclusively owned '
+                            'conditions/edges are already handled by the requirement edit. Do not '
+                            'declare those again as supplemental releases. Preserve all other '
+                            'requirements and their shared conditions, regardless of whether they '
+                            'were accepted as candidate factors. The complete applicability '
+                            'background, including its input subjects and execution conditions, '
+                            'must remain supported in both source prompts. Do not silently widen it '
+                            'by dropping qualifiers or replace a policy-produced object with a '
+                            'different object while calling the correspondence unchanged. '
+                            'Supplemental positive_edges judgments concern only ordinary used_by '
+                            'and produces edges; root membership and requirement-owned edges are '
+                            'handled by the program, and independent precedence must be preserved.')
                     support = json.loads(provider_at(case / 'support-review')(support_request,
                         dict(response_format=support_schema), source_prompt))
                     if (set(support) != {'decision', 'reviewer_id', 'rationale', 'outcomes_used',
@@ -721,16 +777,25 @@ def run_default_candidate_natural(base, prepare=False):
                                 if operation == 'add':
                                     mapping = {value: key for key, value in mapping.items()}
                                 side = 'source' if operation == 'remove' else 'variant'
+                                declarations = {side + '_nodes': support['positive_nodes'],
+                                                side + '_edges': support['positive_edges']}
+                                if complete_background:
+                                    declarations, omitted = _project_local_edit_declarations(
+                                        graphs['present'][1], factor['feature_id'], declarations, side)
+                                    keep(case / 'edits' / (operation + '-adapter-projection.json'),
+                                         dict(omitted_program_owned_declarations=omitted))
                                 variant = dict(binding_id=binding.binding_id,
                                     source_prompt_sha256=content_hash(before_task['prompt']), enabled=[True],
                                     prompt=after_task['prompt'], graph=prompt_tsg_record(after), source_to_variant_nodes=mapping,
                                     source_review=dict(outcomes_used=False, reviewer_id=support['reviewer_id'], rationale=support['rationale'],
-                                        edit_scope={side + '_nodes': support['positive_nodes'], side + '_edges': support['positive_edges']}))
+                                        edit_scope=declarations))
                                 keep(case / 'edits' / (operation + '-variant.json'), variant)
                                 replay_task = dict(prompt=before_task['prompt'], graph=prompt_tsg_record(before),
                                     factor_scopes=[asdict(scope)], binding_id=binding.binding_id,
                                     intervention_compatibility=dict(binding_id=binding.binding_id, decision='compatible', outcomes_used=False),
                                     reviewed_variants={'TARGET': variant})
+                                if complete_background:
+                                    replay_task['factor_scopes'] = json.loads(json.dumps(replay_task['factor_scopes']))
                                 def check(condition, message):
                                     if not condition:
                                         raise ValueError(message)
@@ -767,9 +832,28 @@ def run_default_candidate_natural(base, prepare=False):
     result = dict(status='PENDING' if pending else 'COMPLETED_BOUNDED_DEVELOPMENT_CHECK', cases=rows,
         fresh_model_steps=sum(row['fresh_model_steps'] for row in rows), external_provider_calls=0,
         scientific_claim_allowed=False, pending=pending)
+    if complete_background:
+        assert result['fresh_model_steps'] <= maximum_calls
     if not pending:
         keep(base / 'analysis/replay-result.json', result)
     return result
+
+
+def _project_local_edit_declarations(positive, feature_id, declarations, side):
+    """Remove only redundant policy-owned declarations, never semantic judgments."""
+    from prompt_mechanism_study.prompt_tsg import requirement_owned_nodes
+    target_ids = {key for item in positive.scoped_feature_assessments
+                  if item.feature_id == feature_id for key in item.requirement_node_ids}
+    owned = requirement_owned_nodes(positive, target_ids)
+    owned_edges = {e.edge_id for e in positive.edges if {e.source_id, e.target_id} & owned}
+    projected, omitted = dict(declarations), {}
+    for kind, automatic in (('nodes', owned), ('edges', owned_edges)):
+        field = side + '_' + kind
+        omitted[field] = sorted(key for key, judgment in declarations[field].items()
+                                if key in automatic and judgment['status'] == 'policy_only')
+        projected[field] = {key: value for key, value in declarations[field].items()
+                            if key not in omitted[field]}
+    return projected, omitted
 
 
 def replay_local_edit_projection(base):
@@ -777,7 +861,7 @@ def replay_local_edit_projection(base):
     from dataclasses import asdict
     from prompt_mechanism_study.artifact_io import read_json
     from prompt_mechanism_study.candidate_construction import choose_candidate_scope
-    from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record, requirement_owned_nodes
+    from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record
     from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis
     from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
     base = Path(base)
@@ -798,18 +882,10 @@ def replay_local_edit_projection(base):
         variant = read_json(case/'edits'/(operation+'-variant.json'))
         assert binding.binding_id == variant['binding_id']
         positive = graph if operation == 'remove' else prompt_tsg_from_record(variant['graph'])
-        target_ids = {key for item in positive.scoped_feature_assessments
-                      if item.feature_id == factor['feature_id'] for key in item.requirement_node_ids}
-        owned = requirement_owned_nodes(positive, target_ids)
-        owned_edges = {e.edge_id for e in positive.edges if {e.source_id,e.target_id} & owned}
         side = 'source' if operation == 'remove' else 'variant'
-        declarations = variant['source_review']['edit_scope']
-        omitted = {}
-        for kind, automatic in (('nodes', owned), ('edges', owned_edges)):
-            field = side+'_'+kind
-            omitted[field] = sorted(key for key, judgment in declarations[field].items()
-                                    if key in automatic and judgment['status'] == 'policy_only')
-            declarations[field] = {key:value for key,value in declarations[field].items() if key not in omitted[field]}
+        declarations, omitted = _project_local_edit_declarations(
+            positive, factor['feature_id'], variant['source_review']['edit_scope'], side)
+        variant['source_review']['edit_scope'] = declarations
         replay_task = dict(prompt=task['prompt'], graph=graph_record,
             factor_scopes=json.loads(json.dumps([asdict(scope)])), binding_id=binding.binding_id,
             intervention_compatibility=dict(binding_id=binding.binding_id, decision='compatible', outcomes_used=False),
@@ -837,15 +913,38 @@ def replay_local_edit_projection(base):
 def verify_default_candidate_natural():
     """Replay the default-interface check under its frozen implementation."""
     base = ROOT/'default-candidate-natural'
+    return _verify_natural_round(base, (
+        ('execution-source.tar.gz', 'run_default_candidate_natural', 'analysis/replay-result.json', {}),
+        ('execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/original-implementation.json', {}),
+        ('edit-replay/execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/repaired-implementation.json', {}),
+    ))
+
+
+def verify_complete_background_natural():
+    """Replay the fresh full-coordinate check under its own frozen source."""
+    base = ROOT/'complete-background-natural'
+    outputs = _verify_natural_round(base, (
+        ('execution-source.tar.gz', 'run_default_candidate_natural',
+         'analysis/replay-result.json', dict(complete_background=True)),
+    ))
+    result = outputs['analysis/replay-result.json']
+    summary = json.loads((base/'analysis/summary.json').read_text(encoding='utf-8'))
+    for key, value in dict(
+        base_tasks=len(result['cases']), fresh_model_steps=result['fresh_model_steps'],
+        predeclared_target_candidates_accepted=sum(r['target_accepted_factors'] for r in result['cases']),
+        completed_fresh_edit_pairs=sum(r['status'] == 'COMPLETED_EDIT_PAIR' for r in result['cases']),
+        final_graphs_completed=sum(a['error_type'] is None for r in result['cases'] for a in r['arms'].values()),
+        external_provider_calls=result['external_provider_calls']).items():
+        assert summary[key] == value, key
+    return outputs
+
+
+def _verify_natural_round(base, replays):
     read = lambda path: json.loads(path.read_text(encoding='utf-8'))
     for name, digest in read(base/'analysis/input-output-identities.json').items():
         assert hashlib.sha256((base/name).read_bytes()).hexdigest() == digest, name
     outputs = {}
-    for archive_name, function, expected in (
-        ('execution-source.tar.gz', 'run_default_candidate_natural', 'analysis/replay-result.json'),
-        ('execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/original-implementation.json'),
-        ('edit-replay/execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/repaired-implementation.json'),
-    ):
+    for archive_name, function, expected, kwargs in replays:
         with tempfile.TemporaryDirectory(prefix='tsg-default-candidate-replay-') as directory:
             work = Path(directory)
             archive = base/archive_name
@@ -854,8 +953,8 @@ def verify_default_candidate_natural():
             with tarfile.open(archive) as source:
                 source.extractall(work, filter='data')
             code = ('import json,runpy,sys; module=runpy.run_path(sys.argv[1]); '
-                    'print(json.dumps(module[sys.argv[3]](sys.argv[2])))')
-            result = json.loads(subprocess.check_output([sys.executable, '-c', code, str(Path(__file__).resolve()), str(base), function],
+                    'print(json.dumps(module[sys.argv[3]](sys.argv[2], **json.loads(sys.argv[4]))))')
+            result = json.loads(subprocess.check_output([sys.executable, '-c', code, str(Path(__file__).resolve()), str(base), function, json.dumps(kwargs)],
                 cwd=work, env={**os.environ, 'PYTHONPATH':str(work/'src'), 'PYTHONUTF8':'1'}, text=True))
         assert result == read(base/expected)
         outputs[expected] = result
@@ -889,4 +988,5 @@ if __name__ == '__main__':
                           complete_repair_round=verify_complete_repair_round(),
                           candidate_local_natural=verify_candidate_local_natural(),
                           default_candidate_natural=verify_default_candidate_natural(),
+                          complete_background_natural=verify_complete_background_natural(),
                           scientific_claim_allowed=False), indent=2))

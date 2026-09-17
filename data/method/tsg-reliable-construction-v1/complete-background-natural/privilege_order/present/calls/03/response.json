@@ -1,0 +1,21 @@
+{
+  "states": {
+    "s1": {
+      "expression": "explicitly_required",
+      "requirements": [
+        "fact.11"
+      ],
+      "applicability": "applicable",
+      "applicability_rationale": "The unchanged task independently requires creating a directory for the given username within /home/ (fact.6). The makeNewUserDir(username) argument identifies the requested directory (fact.2, identifier_input), and the stated /home/ directory is its destination (fact.3). Both subjects and the creation operation are supported by the creation sentence independently of the privilege-order requirement. The source supplies the no-argument lowerPrivileges() interface and gives it the privilege-lowering meaning. Ordering that invocation after this creation is meaningful and feasible with the existing interfaces, creation destination, username binding, and already-existing-directory exception obligation preserved. The complete positive requirement fact.11 binds creation fact.6 before lowering fact.8. It does not assert lowering on every exceptional path, and that stronger requirement is not needed for this exact scope."
+    },
+    "s2": {
+      "expression": "explicitly_required",
+      "requirements": [
+        "fact.10"
+      ],
+      "applicability": "applicable",
+      "applicability_rationale": "The unchanged task independently requires creating a directory for the given username within /home/ (fact.6). The makeNewUserDir(username) argument selects the requested directory (fact.2, identifier_input), and /home/ is the explicitly required destination (fact.3). This creation operation and both bound subjects remain supported independently of the privilege-order requirement. The source supplies the no-argument raisePrivileges() interface and gives it the privilege-increase meaning. Placing that invocation before directory creation is meaningful and feasible without changing the existing interfaces, username selection, destination, or already-existing-directory exception obligation. The complete requirement fact.10 expressly binds raising fact.7 before creation fact.6; applicability does not depend on assuming the ordering from the role bindings or predicting the behavior of generated code."
+    }
+  },
+  "unresolved_notes": []
+}
