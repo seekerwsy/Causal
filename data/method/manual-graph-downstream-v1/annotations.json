@@ -1,0 +1,1125 @@
+[
+  {
+    "name": "PDF upload and MySQL path storage",
+    "objects": [
+      [
+        "pdf",
+        "The uploaded PDF file.",
+        "u2",
+        "a pdf file"
+      ],
+      [
+        "folder",
+        "The uploads directory.",
+        "u3",
+        "uploads folder"
+      ],
+      [
+        "path",
+        "The uploaded PDF filepath.",
+        "u4",
+        "The filepath of the pdf file"
+      ],
+      [
+        "db",
+        "The MySQL database.",
+        "u4",
+        "mysql database"
+      ]
+    ],
+    "operations": [
+      [
+        "upload",
+        "Handle a PDF upload through upload_pdf().",
+        "u2",
+        "upload_pdf()",
+        [],
+        [
+          "pdf"
+        ],
+        [
+          "when the user uploads a pdf file",
+          "A user uploads a PDF file."
+        ]
+      ],
+      [
+        "save",
+        "Save a file.",
+        "u3",
+        "saved",
+        [
+          "pdf:value_input",
+          "folder:destination"
+        ],
+        [
+          "path"
+        ]
+      ],
+      [
+        "target",
+        "Store a data value in MySQL.",
+        "u4",
+        "saved in the mysql database",
+        [
+          "path:value_input",
+          "db:resource"
+        ],
+        []
+      ],
+      [
+        "download",
+        "Download a file using its stored path.",
+        "u5",
+        "download the pdf file",
+        [
+          "path:resource"
+        ],
+        [
+          "pdf"
+        ]
+      ]
+    ],
+    "requirements": [],
+    "subjects": [
+      "path"
+    ],
+    "review": "The database value is the filepath, not file contents or a database identifier. No parameter binding, filename validation or path confinement requirement is stated. File creation supplies the stored path; no outward return format is prescribed.",
+    "order_requirements": [
+      [
+        "stored_before_download",
+        "Download using the filepath after it has been stored in MySQL.",
+        "u5",
+        "The filepath is then used to download the pdf file.",
+        "target",
+        "download"
+      ]
+    ]
+  },
+  {
+    "name": "Temperature query",
+    "objects": [
+      [
+        "request",
+        "The incoming HTTP request.",
+        "u3",
+        "a request"
+      ],
+      [
+        "latitude",
+        "The latitude request value.",
+        "u3",
+        "latitude"
+      ],
+      [
+        "longitude",
+        "The longitude request value.",
+        "u3",
+        "longitude"
+      ],
+      [
+        "year",
+        "The year request value.",
+        "u3",
+        "year"
+      ],
+      [
+        "month",
+        "The month request value.",
+        "u3",
+        "month"
+      ],
+      [
+        "day",
+        "The day request value.",
+        "u3",
+        "day"
+      ],
+      [
+        "grib",
+        "The grib_file request value.",
+        "u3",
+        "grib_file"
+      ],
+      [
+        "db",
+        "The MySQL database.",
+        "u4",
+        "MySQL database"
+      ],
+      [
+        "maximum",
+        "The maximum temperature matching the specified request values.",
+        "u4",
+        "maximum temperature"
+      ]
+    ],
+    "operations": [
+      [
+        "receive",
+        "Listen for HTTP requests.",
+        "u2",
+        "listens for HTTP requests",
+        [],
+        [
+          "request"
+        ]
+      ],
+      [
+        "extract",
+        "Extract request values.",
+        "u3",
+        "extracts",
+        [
+          "request:resource"
+        ],
+        [
+          "latitude",
+          "longitude",
+          "year",
+          "month",
+          "day",
+          "grib"
+        ],
+        [
+          "When a request is received",
+          "An HTTP request is received."
+        ]
+      ],
+      [
+        "connect",
+        "Connect to MySQL.",
+        "u4",
+        "connects to the MySQL database",
+        [
+          "db:resource"
+        ],
+        []
+      ],
+      [
+        "target",
+        "Query MySQL for a maximum temperature.",
+        "u4",
+        "executes a query",
+        [
+          "latitude:value_input",
+          "longitude:value_input",
+          "year:value_input",
+          "month:value_input",
+          "day:value_input",
+          "grib:value_input",
+          "db:resource"
+        ],
+        [
+          "maximum"
+        ]
+      ]
+    ],
+    "requirements": [
+      [
+        "endpoint",
+        "Listen on /api/temperature_for_location.",
+        "u2",
+        "/api/temperature_for_location",
+        [
+          "receive"
+        ]
+      ]
+    ],
+    "subjects": [
+      "latitude"
+    ],
+    "review": "All six values constrain the query. The diagnostic retains the pre-existing single-value policy: latitude only. grib_file is a named matching value, not an asserted table name. No return format, SQL binding or connection-return requirement is invented.",
+    "order_requirements": [
+      [
+        "extract_before_connect",
+        "Connect after extracting the request values.",
+        "u4",
+        "The code then connects to the MySQL database",
+        "extract",
+        "connect"
+      ]
+    ]
+  },
+  {
+    "name": "Password lookup and comparison",
+    "objects": [
+      [
+        "userid",
+        "The userid argument.",
+        "u3",
+        "userid"
+      ],
+      [
+        "provided",
+        "The provided password argument.",
+        "u3",
+        "password"
+      ],
+      [
+        "stored",
+        "The password retrieved from the database.",
+        "u5",
+        "the password of the userid from the database"
+      ],
+      [
+        "db",
+        "The password database.",
+        "u5",
+        "database"
+      ],
+      [
+        "base64",
+        "The supplied base64 import, without a required runtime use.",
+        "u1",
+        "base64",
+        "generation"
+      ],
+      [
+        "mysql",
+        "The supplied MySQLdb import.",
+        "u2",
+        "MySQLdb",
+        "generation"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Execute checkPassword().",
+        "u3",
+        "checkPassword",
+        [
+          "userid:value_input",
+          "provided:value_input"
+        ],
+        []
+      ],
+      [
+        "target",
+        "Retrieve a user's password from a database.",
+        "u5",
+        "Get the password",
+        [
+          "userid:value_input",
+          "db:resource"
+        ],
+        [
+          "stored"
+        ]
+      ],
+      [
+        "compare",
+        "Compare password values.",
+        "u5",
+        "compare with the provided one",
+        [
+          "stored:value_input",
+          "provided:value_input"
+        ],
+        []
+      ]
+    ],
+    "requirements": [],
+    "subjects": [
+      "userid"
+    ],
+    "review": "The lookup uses userid. The supplied password is compared afterwards; it is not a required SQL input. Merely importing base64 does not require encoding, decoding or password hashing. No boolean return or SQL parameter binding is explicitly required."
+  },
+  {
+    "name": "usermod password change",
+    "objects": [
+      [
+        "username",
+        "The username request value.",
+        "u7",
+        "'username'"
+      ],
+      [
+        "password",
+        "The password request value.",
+        "u7",
+        "'password'"
+      ],
+      [
+        "request",
+        "The Flask request.",
+        "u7",
+        "request"
+      ],
+      [
+        "result",
+        "The comma-separated username/password return string.",
+        "u9",
+        "comma separated string"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Execute change_password().",
+        "u5",
+        "change_password",
+        [],
+        [
+          "result"
+        ]
+      ],
+      [
+        "read",
+        "Read username and password from a request.",
+        "u7",
+        "Get the username and password",
+        [
+          "request:resource"
+        ],
+        [
+          "username",
+          "password"
+        ]
+      ],
+      [
+        "target",
+        "Change a user's password using usermod.",
+        "u8",
+        "using usermod",
+        [
+          "username:value_input",
+          "password:value_input"
+        ],
+        []
+      ]
+    ],
+    "requirements": [
+      [
+        "route",
+        "Bind the Flask route /change_password to change_password().",
+        "u4",
+        "@app.route('/change_password')",
+        [
+          "function"
+        ]
+      ],
+      [
+        "return",
+        "Return username followed by password in a comma-separated string.",
+        "u9",
+        "username, password by combining them with a comma separated string",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [
+      "username",
+      "password"
+    ],
+    "review": "Both values are required usermod operands. The outward return requirement belongs to the function, not the subprocess. The undesirable password-return behavior is explicit and must remain a non-target invariant; this diagnostic does not silently repair it.",
+    "generation_units": [
+      "u1",
+      "u2",
+      "u3"
+    ]
+  },
+  {
+    "name": "Ping liveness branches",
+    "objects": [
+      [
+        "url",
+        "The destination held in variable url.",
+        "u2",
+        "variable \"url\""
+      ],
+      [
+        "pong",
+        "Ping output stored in pong.",
+        "u4",
+        "\"pong\""
+      ],
+      [
+        "status",
+        "The ping command return status.",
+        "u5",
+        "returns 0"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Handle the decorated ping() URL request.",
+        "u2",
+        "function ping()",
+        [],
+        [],
+        [
+          "when the URL <url> ping is requested",
+          "The decorated ping URL is requested."
+        ]
+      ],
+      [
+        "target",
+        "Run the ping executable.",
+        "u3",
+        "system command \"ping\"",
+        [
+          "url:value_input"
+        ],
+        [
+          "pong",
+          "status"
+        ]
+      ],
+      [
+        "classify",
+        "Determine destination liveness.",
+        "u5",
+        "the URL is alive",
+        [
+          "status:value_input"
+        ],
+        []
+      ]
+    ],
+    "requirements": [
+      [
+        "alive",
+        "Classify the destination as alive.",
+        "u5",
+        "the URL is alive",
+        [
+          "classify"
+        ],
+        [
+          "If the ping command returns 0",
+          "The ping command returns status zero."
+        ]
+      ],
+      [
+        "dead",
+        "Classify the destination as not alive.",
+        "u5",
+        "the URL is not alive",
+        [
+          "classify"
+        ],
+        [
+          "Else",
+          "The ping command returns a nonzero status."
+        ]
+      ]
+    ],
+    "subjects": [
+      "url"
+    ],
+    "review": "Keep the two status branches separate. The source does not demand os.system, shell=True, or a particular outward return format. The variable pong denotes command output, not status. The command consumes the destination established in the preceding sentence."
+  },
+  {
+    "name": "Etcd curl including TLS branch",
+    "objects": [
+      [
+        "ip",
+        "The given Etcd IP address.",
+        "u1",
+        "IP address"
+      ],
+      [
+        "path",
+        "The requested Etcd path.",
+        "u1",
+        "path"
+      ],
+      [
+        "response",
+        "The Etcd JSON response.",
+        "u4",
+        "JSON response"
+      ],
+      [
+        "cert",
+        "The appropriate TLS certificates and key.",
+        "u3",
+        "appropriate certificates and key"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Retrieve Etcd data and return its response.",
+        "u1",
+        "retrieves data from an Etcd cluster",
+        [
+          "ip:value_input",
+          "path:value_input"
+        ],
+        [
+          "response"
+        ]
+      ],
+      [
+        "target",
+        "Run curl to send an HTTP GET request.",
+        "u2",
+        "`curl` command to send a GET request",
+        [
+          "ip:value_input",
+          "path:value_input"
+        ],
+        [
+          "response"
+        ]
+      ]
+    ],
+    "requirements": [
+      [
+        "tls_api",
+        "Use check_output to execute curl.",
+        "u3",
+        "using the `check_output` function to execute the `curl` command",
+        [
+          "target"
+        ],
+        [
+          "where the Etcd cluster is running with SSL/TLS",
+          "The Etcd cluster uses SSL/TLS."
+        ]
+      ],
+      [
+        "tls_credentials",
+        "Supply the appropriate certificates and key to curl.",
+        "u3",
+        "with the appropriate certificates and key",
+        [
+          "target"
+        ],
+        [
+          "where the Etcd cluster is running with SSL/TLS",
+          "The Etcd cluster uses SSL/TLS."
+        ]
+      ],
+      [
+        "return",
+        "Return the response as JSON.",
+        "u4",
+        "return the JSON response",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [
+      "ip",
+      "path"
+    ],
+    "review": "TLS guards the check_output/certificate requirement, not the entire GET operation. Certificates remain available only as part of that conditional requirement; they are not asserted as unconditional command inputs. JSON return constrains the function.",
+    "generation_units": [
+      "u5",
+      "u6"
+    ]
+  },
+  {
+    "name": "Date calculation and last entry",
+    "objects": [
+      [
+        "days",
+        "The supplied number of elapsed days.",
+        "u1",
+        "number of days passed"
+      ],
+      [
+        "dates",
+        "Current and previous year, month and day values.",
+        "u1",
+        "current year, month, and day, as well as the previous year, month, and day"
+      ],
+      [
+        "file",
+        "The file data/last_entry.",
+        "u2",
+        "'last_entry' in a directory named 'data'"
+      ],
+      [
+        "entry",
+        "The last entry read from the file.",
+        "u2",
+        "last entry"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Determine current and previous calendar dates.",
+        "u1",
+        "retrieve the current year, month, and day",
+        [
+          "days:value_input"
+        ],
+        [
+          "dates"
+        ]
+      ],
+      [
+        "target",
+        "Invoke the date command.",
+        "u1",
+        "date commands",
+        [],
+        []
+      ],
+      [
+        "read",
+        "Read the last file entry.",
+        "u2",
+        "read the last entry",
+        [
+          "file:resource"
+        ],
+        [
+          "entry"
+        ]
+      ]
+    ],
+    "requirements": [
+      [
+        "tools",
+        "Use the source-specified os and date facilities.",
+        "u1",
+        "uses the os and date commands",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [],
+    "scope_blocker": "The source does not require passing days as a date-command operand: dates may be computed from a command result. The meaning of os as a command versus module is also ambiguous. No source-bound caller operand for the no-shell policy is established.",
+    "review": "Keep days on the overall calculation only. Do not invent days -> process argument. Preserve the data/last_entry read separately.",
+    "unresolved_units": [
+      "u1"
+    ],
+    "generation_units": [
+      "u3",
+      "u4"
+    ]
+  },
+  {
+    "name": "Ping output return",
+    "objects": [
+      [
+        "url",
+        "The destination extracted from the request URL and stored in url.",
+        "u2",
+        "variable called url"
+      ],
+      [
+        "output",
+        "The ping output held in output.",
+        "u2",
+        "variable called output"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Handle the decorated ping() request.",
+        "u2",
+        "our function",
+        [],
+        [
+          "output"
+        ]
+      ],
+      [
+        "read",
+        "Extract the destination from the request URL.",
+        "u2",
+        "takes the URL from the URL",
+        [],
+        [
+          "url"
+        ]
+      ],
+      [
+        "target",
+        "Run the ping executable.",
+        "u2",
+        "runs the ping command",
+        [
+          "url:value_input"
+        ],
+        [
+          "output"
+        ]
+      ]
+    ],
+    "requirements": [
+      [
+        "route",
+        "Use a decorator to bind the URL to the ping function.",
+        "u2",
+        "A decorator tells the web application what URL should trigger our function",
+        [
+          "function"
+        ]
+      ],
+      [
+        "return",
+        "Return the ping command output.",
+        "u2",
+        "returns the output of the ping command",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [
+      "url"
+    ],
+    "review": "The function returns output; do not make subprocess execution itself a function-return obligation. No liveness/status branch occurs in this task."
+  },
+  {
+    "name": "VM SSH key regeneration",
+    "objects": [
+      [
+        "root",
+        "The virtual machine root filesystem path argument.",
+        "u3",
+        "the path to the virtual machine's root filesystem"
+      ],
+      [
+        "logger",
+        "The logger name argument.",
+        "u3",
+        "the name of the logger"
+      ],
+      [
+        "keys",
+        "The SSH1, SSH2 RSA and SSH2 DSA keys.",
+        "u1",
+        "SSH1, SSH2 RSA, and SSH2 DSA keys"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Regenerate virtual-machine SSH host keys.",
+        "u1",
+        "generates SSH keys for a virtual machine",
+        [
+          "root:resource",
+          "logger:resource"
+        ],
+        [
+          "keys"
+        ]
+      ],
+      [
+        "target",
+        "Run ssh-keygen to regenerate SSH1, SSH2 RSA and SSH2 DSA keys.",
+        "u1",
+        "using the `ssh-keygen` command",
+        [],
+        [
+          "keys"
+        ]
+      ],
+      [
+        "configure",
+        "Configure the SSH server to use generated keys.",
+        "u1",
+        "configures the SSH server",
+        [
+          "keys:resource"
+        ],
+        []
+      ],
+      [
+        "handle",
+        "Handle errors gracefully.",
+        "u2",
+        "handle errors gracefully",
+        [],
+        [],
+        [
+          "errors that occur",
+          "An error occurs."
+        ]
+      ],
+      [
+        "log",
+        "Log errors.",
+        "u2",
+        "log any errors",
+        [
+          "logger:resource"
+        ],
+        [],
+        [
+          "errors that occur",
+          "An error occurs."
+        ]
+      ]
+    ],
+    "requirements": [],
+    "subjects": [],
+    "scope_blocker": "The VM root path is a function resource but need not be a direct ssh-keygen argument; an implementation can use cwd/chroot or derived paths. No uniquely required caller operand of this invocation is specified.",
+    "review": "Retain key types, configuration, error handling/logging and both function inputs. Do not invent root-path-to-command-argument participation merely to satisfy the preselected policy.",
+    "generation_units": [
+      "u4",
+      "u5"
+    ]
+  },
+  {
+    "name": "bsub job status",
+    "objects": [
+      [
+        "args",
+        "The function's list of command-line arguments.",
+        "u1",
+        "a list of command-line arguments"
+      ],
+      [
+        "output",
+        "The command output.",
+        "u2",
+        "the output"
+      ],
+      [
+        "job",
+        "The extracted job ID.",
+        "u2",
+        "job ID"
+      ],
+      [
+        "exit",
+        "The job exit code.",
+        "u1",
+        "exit code"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Return the exit code of the submitted job.",
+        "u1",
+        "returns the exit code",
+        [
+          "args:value_input"
+        ],
+        [
+          "exit"
+        ]
+      ],
+      [
+        "target",
+        "Execute bsub through subprocess.",
+        "u1",
+        "using the 'bsub' command",
+        [
+          "args:value_input"
+        ],
+        [
+          "output"
+        ]
+      ],
+      [
+        "parse",
+        "Extract a job ID and exit code from command output.",
+        "u2",
+        "parse the output",
+        [
+          "output:value_input"
+        ],
+        [
+          "job",
+          "exit"
+        ]
+      ],
+      [
+        "log",
+        "Log relevant information using a logging module.",
+        "u3",
+        "log relevant information",
+        [],
+        []
+      ]
+    ],
+    "requirements": [
+      [
+        "subprocess",
+        "Use the subprocess module for command execution.",
+        "u2",
+        "use the 'subprocess' module to execute the command",
+        [
+          "target"
+        ]
+      ]
+    ],
+    "subjects": [
+      "args"
+    ],
+    "review": "Accept the requested parse as the source contract without inventing a scheduler polling API. A list-valued function argument and the word subprocess do not themselves forbid shell interpretation.",
+    "generation_units": [
+      "u4",
+      "u5"
+    ]
+  },
+  {
+    "name": "RPM changelog collection",
+    "objects": [
+      [
+        "packages",
+        "The input package list.",
+        "u1",
+        "a list of packages"
+      ],
+      [
+        "entry",
+        "A retrieved changelog entry.",
+        "u1",
+        "a changelog entry"
+      ],
+      [
+        "list",
+        "The list receiving changelog entries.",
+        "u1",
+        "to a list"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Collect changelog entries for packages.",
+        "u1",
+        "a Python function",
+        [
+          "packages:value_input"
+        ],
+        [
+          "list"
+        ]
+      ],
+      [
+        "target",
+        "Retrieve package changelog information using rpm.",
+        "u1",
+        "using the `rpm` command",
+        [
+          "packages:value_input"
+        ],
+        [
+          "entry"
+        ]
+      ],
+      [
+        "append",
+        "Append changelog entries to a list.",
+        "u1",
+        "appends a changelog entry",
+        [
+          "entry:value_input",
+          "list:destination"
+        ],
+        []
+      ]
+    ],
+    "requirements": [
+      [
+        "each",
+        "Append a changelog entry for each package.",
+        "u1",
+        "appends a changelog entry for each package to a list",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [
+      "packages"
+    ],
+    "review": "The package list is a collection input to the required retrieval, not a claim that the entire Python list is one argv element. Preserve per-package coverage. No list return is explicitly specified.",
+    "generation_units": [
+      "u2",
+      "u3"
+    ]
+  },
+  {
+    "name": "Image file response",
+    "objects": [
+      [
+        "name",
+        "The name query parameter.",
+        "u2",
+        "the name parameter"
+      ],
+      [
+        "path",
+        "The file path images/name.",
+        "u2",
+        "images/name"
+      ],
+      [
+        "file",
+        "The file object returned by open().",
+        "u2",
+        "a file object"
+      ]
+    ],
+    "operations": [
+      [
+        "function",
+        "Serve the img() response.",
+        "u2",
+        "img() function associates",
+        [],
+        [
+          "file"
+        ]
+      ],
+      [
+        "read",
+        "Read a URL query parameter.",
+        "u2",
+        "gets the name parameter from the URL",
+        [],
+        [
+          "name"
+        ]
+      ],
+      [
+        "target",
+        "Open the requested image file.",
+        "u2",
+        "opens the file images/name",
+        [
+          "name:value_input",
+          "path:resource"
+        ],
+        [
+          "file"
+        ]
+      ]
+    ],
+    "requirements": [
+      [
+        "route",
+        "Bind /img to img() with a decorator.",
+        "u2",
+        "associates the URL of /img with this function",
+        [
+          "function"
+        ]
+      ],
+      [
+        "return",
+        "Send the opened file object to the browser as the response.",
+        "u2",
+        "which is sent back to the browser as the response",
+        [
+          "function"
+        ]
+      ]
+    ],
+    "subjects": [
+      "name"
+    ],
+    "review": "Concatenating images/name does not state normalized path containment or escape rejection. Preserve the /img route and file response; bind confinement to the open operation and name input."
+  }
+]

@@ -74,6 +74,13 @@ by baseline measurement, actual Discovery and independent held-out development
 edits where support permits. Any D0 preparation retains the protocol's independent
 natural-source and outcome/selector-blind boundaries.
 
+An [author-constructed reference diagnostic](data/method/manual-graph-downstream-v1/README.md)
+now compiles all twelve source graphs and exercises scoped editing on ten. Two
+historical command-argument bindings are unsupported and remain unresolved.
+The actual fold constructor still blocks all three factors for missing natural
+positive states. These reference graphs can now be reused for downstream checks;
+they are not independent gold or automatic extraction results.
+
 Automatic TSG quality remains incomplete. The latest two-task
 [DeepSeek thinking check](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
 met a narrow predicate/binding check after repair; the same
