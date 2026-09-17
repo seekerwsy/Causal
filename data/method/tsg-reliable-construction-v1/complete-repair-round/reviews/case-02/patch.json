@@ -1,0 +1,79 @@
+{
+  "objects": [],
+  "operations": [],
+  "requirements": [
+    {
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "registration.hash_before_insert",
+          "definition": "Hash the user's password before inserting that password into the database.",
+          "node_type": "safety_requirement"
+        },
+        "evidence_source_unit": "u4",
+        "evidence_text": "The password is hashed before it is inserted into the database.",
+        "layer": "runtime",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "modality": "obligation",
+      "operations": [
+        "op_hash_password"
+      ],
+      "record_id": "req_hash_before_insert",
+      "relations": [
+        {
+          "edge_type": "precedes",
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed before it is inserted into the database.",
+          "source": "op_hash_password",
+          "target": "op_insert_credentials"
+        }
+      ],
+      "scope_kind": "targets",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "subjects": [],
+      "target_class": null
+    }
+  ],
+  "coverage": {
+    "u3": {
+      "reason": "The user-supplied username and password are exposed by credential collection; the username and password value are inserted into the database, with the password's transformed form resolved by u4.",
+      "status": "represented"
+    },
+    "u4": {
+      "reason": "Password hashing has its input and required hashed result; the hashing obligation owns the order relation to database insertion without making insertion a direct target of the hashing predicate.",
+      "status": "represented"
+    }
+  },
+  "unit_impacts": {
+    "u3": {
+      "effect": "local",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "operations": [
+        "op_take_credentials",
+        "op_hash_password",
+        "op_insert_credentials"
+      ],
+      "reason": "This clause supplies the collection and insertion operations, the password subsequently hashed in u4, and the shared database destination."
+    },
+    "u4": {
+      "effect": "local",
+      "evidence_source_unit": "u4",
+      "evidence_text": "The password is hashed before it is inserted into the database.",
+      "operations": [
+        "op_hash_password",
+        "op_insert_credentials"
+      ],
+      "reason": "The clause requires hashing, supplies the stored transformed password value, and orders hashing before insertion; both relation endpoints are affected."
+    }
+  },
+  "unresolved_notes": [],
+  "delete_record_ids": []
+}

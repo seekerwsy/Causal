@@ -270,6 +270,81 @@ The batch used zero external API calls. The exact Codex model snapshot and seed 
 unavailable. The main path remains Atomic-only and `SPECIFIED_DRAFT`; no manuscript,
 Discovery, Confirmation, security generation or effect estimate changed.
 
+## Complete review/repair and natural deletion check
+
+This round tests whether the owned-order representation can complete the existing
+review/patch path, and whether removing a whole natural policy passes the actual
+editor. A plan frozen before outputs uses only the same two exposed tasks. Four
+separate reviewer contexts receive a correct binding or an added wrong recipient,
+with identical original source and predicate text. Variant labels and expected
+answers are withheld. Each review may trigger one existing local patch; there is
+no second review or semantic retry. Two further contexts independently reconstruct
+the prompts after deleting the lowering and password-hashing instructions.
+
+| Review input | Observed result after at most one patch |
+| --- | --- |
+| Registration, extra insertion target | Removed the extra target; hashing actor and owned order retained |
+| Privilege, extra creation target | Removed the extra target; lowering actor and owned order retained |
+| Registration control | Supported without changes |
+| Privilege control | Critical binding retained; username participation/role weakened and two source units marked unresolved |
+
+All four reviewed graphs compiled. The two planted target errors were repaired;
+all six owned order rows and both existing-directory condition bindings remained.
+Only one of the two controls was unchanged. The other control's username role has
+an interpretation boundary; its conservative contraction is not demonstrated
+repair benefit, nor does the control label certify every original field. These
+are author-audited results, separately checked by another Codex agent, not
+independent human gold or a population reliability estimate.
+
+Both deleted-source first drafts also compiled. The privilege graph preserves a
+declared `lowerPrivileges` helper but no required lowering call or after-creation
+lowering policy. Creation under `/home/`, prior privilege increase and handling an
+existing directory remain. The registration graph omits hashing, its result and
+its owned order while retaining registration, credential intake and insertion.
+An unexpressed hashing instruction does not prescribe plaintext storage. The
+privilege graph's `import os` influence assertion still lacks independent
+qualification; these targeted source checks do not certify the entire graph.
+
+**Both actual REMOVE calls remain blocked** with `removal overlaps non-target
+source evidence`. The current editor protects all operation/object evidence,
+including actions and results introduced by the policy itself. Its selector also
+needs those original anchors. Deleting a whole hashing policy can legitimately
+remove its hashing operation and result, so retaining them as mandatory neutral
+context would change the comparison. Open re-extraction also changes concept IDs;
+a missing exact selector alone is not an extraction-error score. Root-selected
+diagnostic bindings exercised the real renderer but are not approved candidates.
+Reinserting the removed clause restores original bytes; it is not a separately
+executed, qualified ADD intervention. No candidate is released by this round.
+
+The review outputs exposed one narrower, deterministic interface defect:
+`unit_impacts` in raw records omitted dependencies that the compiler had already
+included. The reviewer and patch could therefore spend effort fixing a graph
+omission that did not exist. The active review now receives the actual compiled
+impact table and its canonical operation dictionary alongside the original
+records. This preserves one review call and uses the existing preview compilation.
+The table is a lower bound, not semantic truth; actual omissions and unsupported
+impacts remain reviewable. Two existing tests were extended, with no new test
+function. The clean exported reviewer suite passed **104 tests in 29.57 seconds**.
+The four model reviews above used the frozen earlier implementation; they do not
+establish an empirical benefit from this newly corrected review input.
+
+There were **nine fresh Codex model steps**: two constructions, four reviews and
+three patches, with zero external API calls. Exact model snapshot and seed remain
+unavailable. Replaying four retained initial record sets is not four additional
+extractions. The first replay had an overly strict comparison of schema array
+ordering after JSON key sorting. That harness failure is retained; comparing
+`required`/`enum` collections by their schema meaning allowed the same responses
+to replay, without resampling or altering a judgment. Requests still match exactly
+as objects. This incident is not a semantic model failure.
+
+`complete-repair-round` preserves the plan, masked requests, responses, patches,
+both re-extractions, failed and completed replay, source audit and implementation
+check. The complete bounded repair cycle is executed; natural whole-policy
+editability remains unsupported. The next methodological change needs explicit
+ownership of policy-introduced facts and a separately supported applicability
+boundary. More reviewers or weakened preservation gates would not resolve that
+specific limitation. Paper, Pair research and formal study stages are unchanged.
+
 ## Reproduction and boundaries
 
 Artifact root: `data/method/tsg-reliable-construction-v1`. Each provider experiment
@@ -291,3 +366,7 @@ The verifier does not resample agents or certify the author's semantic judgments
 Implementation checks do not compensate for the observed semantic limitations.
 It also replays the two owned-relation constructions and their three structural
 candidate projections, then recounts the retained nine source-audit judgments.
+It also replays the complete repair round through the frozen `attempt_graph`,
+recompiles the two actual deleted-source responses and reproduces both edit
+rejections. The new effective-impact review view is tested in the current suite;
+old model requests retain their original implementation and interpretation.

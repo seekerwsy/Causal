@@ -256,3 +256,13 @@ completed two automatic graphs but its single proposal response truncated. Parti
 item diagnostics exposed unsupported scope changes and ordinary functionality
 proposed as factors. No candidate catalogue or actual edit was accepted; the
 expanded structural capability has not yet demonstrated a natural candidate gain.
+
+The [complete TSG repair round](experiments/2026-09-17-tsg-reliable-construction.md#complete-reviewrepair-and-natural-deletion-check)
+subsequently reconstructed two actual policy deletions. Both target instructions
+were absent from the new source representations, but neither deletion passed the
+active editor: the policy's own operation/result evidence was still treated as
+non-target content. Unchanged selectors also lost their original anchors. These
+are unqualified development edits, not accepted ADD/REMOVE policies. Supporting
+them requires explicit policy ownership of introduced facts and an independently
+supported applicability boundary; matching IDs or dropping preservation checks
+would not establish either.

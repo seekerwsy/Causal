@@ -1,0 +1,72 @@
+{
+  "records": {
+    "obj_username": {
+      "status": "supported",
+      "reason": "u3 explicitly names the username taken from the user. The concept preserves that runtime value and does not invent a validation rule or a different source instance.",
+      "rejected_claims": []
+    },
+    "obj_password": {
+      "status": "supported",
+      "reason": "u3 supplies the user's password and u4 refers to that password as the operand of hashing. Keeping this supplied value distinct from its hashed form is supported by the complete task.",
+      "rejected_claims": []
+    },
+    "obj_hashed_password": {
+      "status": "supported",
+      "reason": "u4 requires the supplied password to be hashed before insertion, establishing its transformed form as the value to store. This is a source-supported result object, not an invented handle or a claim that the raw password is already hashed when collected.",
+      "rejected_claims": []
+    },
+    "obj_database": {
+      "status": "supported",
+      "reason": "u3 expressly provides the database receiving registration information, and u4 refers to the same database for password insertion. Its definition adds neither a database technology nor an unstated schema.",
+      "rejected_claims": []
+    },
+    "op_take_credentials": {
+      "status": "supported",
+      "reason": "u3 requires taking both username and password from the user, so both complete credential values are exposed results. The operation need not consume a separately specified request object, since none is named. Empty execution conditions and scope conditions preserve the absence of a stated gate or non-gating context; no independent precedence is asserted.",
+      "rejected_claims": []
+    },
+    "op_hash_password": {
+      "status": "supported",
+      "reason": "Hashing in u4 directly consumes the supplied password and produces its hashed form, which the full task then inserts. Omitting that operand would fail the prescribed hashing of this user's password. The result is not incorrectly also consumed as an already available value. No branch guard or independent context is stated, and the required order is properly left to the requirement-owned relation.",
+      "rejected_claims": []
+    },
+    "op_insert_credentials": {
+      "status": "supported",
+      "reason": "Read together, u3 requires inserting the collected username and password information, and u4 resolves the stored password value to its hashed form. Both are direct stored-value operands, not merely available objects or structural SQL identifiers. The named database is the target into which this insertion writes, supporting destination. The source requires no distinct returned object, branch condition, non-gating context, or independent order assertion for this operation.",
+      "rejected_claims": []
+    },
+    "req_web_application": {
+      "status": "supported",
+      "reason": "In this implementation request, u2 prescribes that the artifact be a simple web application. Obligation modality and generation-layer implementation scope match that complete predicate. No narrower runtime target, conditional guard, composition member, or relation is required.",
+      "rejected_claims": []
+    },
+    "req_registration": {
+      "status": "supported",
+      "reason": "u2 prescribes allowing users to register for an account as the overall application behavior. The task scope retains that boundary without assigning the entire registration contract to each extracted operation. Its obligation modality and unconditional atomic predicate are supported, with no omitted source branch or owned relation.",
+      "rejected_claims": []
+    },
+    "req_hash_before_insert": {
+      "status": "supported",
+      "reason": "u4 prescribes hashing the user's password before inserting it. The complete predicate is bound to the hashing action, while the owned precedes relation names insertion as the other endpoint without making insertion itself perform hashing. Both endpoints and the relation's evidence are preserved, and u4 is included in the owner fact's sources. There is no source guard to add; the order is not duplicated as unconditional operation context.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "No missing task meaning: this unit requests generated Python code, already accounted for by the fixed generation and Python-language facts. It introduces no distinct runtime operation or value, so no_task_fact coverage and no_runtime_effect with an empty operation list are consistent with the unit."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "No missing meaning: req_web_application preserves the simple web application form and req_registration preserves the account-registration purpose at the overall task boundary. Their modalities and scopes match the source. The declared global impact is supported by these application-wide constraints; the unit supplies no variable names, conditional branches, or narrower operation targets."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "No missing meaning: the username and password remain identified as user-supplied values, collection exposes both, and insertion stores their registration information into the stated database with the password's form resolved by u4. The local impact list includes collection and insertion as direct operations and hashing as the consumer of the password established here. No extra validation, success response, schema, or context condition is stated by this unit."
+    },
+    "u4": {
+      "complete": true,
+      "reason": "No missing meaning: the password operand, hashing action, hashed result, database insertion of that result, and mandatory hashing-before-insertion relation are represented. The relation retains its owner and both endpoints without introducing an execution guard or giving insertion the hashing predicate. The local impact includes both hashing and insertion, covering the direct target and the owned relation endpoints. No algorithm, salt, strength threshold, branch alternative, or other non-target behavior is specified here."
+    }
+  }
+}

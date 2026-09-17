@@ -1091,7 +1091,7 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     from copy import deepcopy
     from dataclasses import replace
     from annotation_fixture import record_annotation
-    from prompt_mechanism_study.source_records import record_request, compile_records, structural_readback
+    from prompt_mechanism_study.source_records import record_request, compile_records, structural_readback, review_request
     from prompt_mechanism_study.prompt_contract import compile_task_context_contract
     from prompt_mechanism_study.prompt_tsg import (
         graph_requirement_membership, requirement_binding, requirement_matches_policy,
@@ -1121,6 +1121,9 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     owner = records['requirements'][0]
     owner['relations'] = [dict(source='prepare', edge_type='precedes', target='publish',
         evidence_source_unit=owner['fact']['evidence_source_unit'], evidence_text=owner['fact']['evidence_text'])]
+    unit = owner['fact']['evidence_source_unit']
+    records['unit_impacts'][unit].update(effect='local', operations=['prepare'],
+        reason='Authored declaration omits the owned relation destination.')
 
     def compile_value(value):
         contract = compile_records(value, request=request, task=task, catalog=catalog,
@@ -1128,6 +1131,21 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
         return contract, compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
 
     contract, graph = compile_value(records)
+    # Review the compiler's actual dependency lower bound, not just the narrower
+    # declaration. This does not certify that the source has no other influence.
+    check = review_request(request, records, compiled_contract=contract)
+    assert check['records']['unit_impacts'][unit]['operations'] == ['prepare']
+    assert check['effective_unit_impacts'] == contract.source_inventory['unit_impacts']
+    assert {check['compiled_operations'][key]['definition']
+            for key in check['effective_unit_impacts'][unit]['operations']} == {
+        'The preparation operation.', 'The publication operation.'}
+    assert {check['compiled_operations'][key]['evidence_text']
+            for key in check['effective_unit_impacts'][unit]['operations']} == {'prepare', 'publish'}
+    assert all(check['compiled_operations'][key]['layer'] == 'runtime'
+               for key in check['effective_unit_impacts'][unit]['operations'])
+    assert 'effective_unit_impacts' not in review_request(request, records)
+    check['effective_unit_impacts'][unit]['operations'].clear()
+    assert len(contract.source_inventory['unit_impacts'][unit]['operations']) == 2
     owned, prepare, relation, publish = graph.requirement_relations[0]
     guard = next(n.node_id for n in graph.nodes if n.node_type == 'condition')
     links = {(e.source_id,e.edge_type,e.target_id) for e in graph.edges}
@@ -1203,6 +1221,10 @@ def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider(
     def provider(request, _config, _prompt):
         calls.append(request["request_kind"])
         assert request["request_kind"] != "source_only_fixed_scope_states"
+        if request['request_kind'] == 'source_only_record_review':
+            assert request['effective_unit_impacts']
+            assert request['compiled_operations']
+            assert set(request['effective_unit_impacts']) == set(request['source_units'])
         value = indexed_annotation(request, canonical)
         if request["request_kind"] == "source_only_atomic_records":
             value["coverage"]["u1"].update(status="unresolved", reason="A relevant source meaning remains unresolved.")

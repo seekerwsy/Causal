@@ -1,0 +1,158 @@
+{
+  "objects": [],
+  "operations": [],
+  "requirements": [
+    {
+      "conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "req_lower_after_create",
+          "definition": "Lower the privilege using lowerPrivileges() after creating the user directory.",
+          "node_type": "safety_requirement"
+        },
+        "evidence_source_unit": "u10",
+        "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+        "layer": "runtime",
+        "source_units": [
+          "u4",
+          "u6",
+          "u8",
+          "u10"
+        ]
+      },
+      "modality": "obligation",
+      "operations": [
+        "op_lower_privilege"
+      ],
+      "record_id": "req_lower_after_create",
+      "relations": [
+        {
+          "edge_type": "precedes",
+          "evidence_source_unit": "u10",
+          "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+          "source": "op_create_directory",
+          "target": "op_lower_privilege"
+        }
+      ],
+      "scope_kind": "targets",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "subjects": [],
+      "target_class": null
+    }
+  ],
+  "coverage": {
+    "u10": {
+      "status": "represented",
+      "reason": "Privilege lowering using lowerPrivileges targets op_lower_privilege; directory creation remains the source endpoint of its owned after-creation relation."
+    },
+    "u11": {
+      "reason": "Exception handling targets the aggregate function and carries the explicit directory-exists condition.",
+      "status": "represented"
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The no-argument raisePrivileges interface identifies the privilege-increase operation, with influence retained for the aggregate and both endpoints of its owned before-creation relation."
+    },
+    "u4": {
+      "status": "represented",
+      "reason": "The no-argument lowerPrivileges interface identifies the privilege-decrease operation, with influence retained for the aggregate and both endpoints of its owned after-creation relation."
+    },
+    "u6": {
+      "reason": "The named aggregate function and its username parameter are retained.",
+      "status": "represented"
+    },
+    "u8": {
+      "reason": "Creation, username participation, /home/ destination, and the user-directory result are represented.",
+      "status": "represented"
+    },
+    "u9": {
+      "reason": "Privilege increase using raisePrivileges owns its before-creation relation.",
+      "status": "represented"
+    }
+  },
+  "unit_impacts": {
+    "u10": {
+      "effect": "local",
+      "evidence_source_unit": "u10",
+      "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_lower_privilege"
+      ],
+      "reason": "The aggregate workflow must lower privilege after creation; both relation endpoints are affected."
+    },
+    "u11": {
+      "effect": "local",
+      "evidence_source_unit": "u11",
+      "evidence_text": "Handle the exception if the directory already exists.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory"
+      ],
+      "reason": "The existing-directory case affects the aggregate exception-handling contract and the directory-creation behavior."
+    },
+    "u2": {
+      "effect": "local",
+      "evidence_source_unit": "u2",
+      "evidence_text": "def raisePrivileges():",
+      "operations": [
+        "op_make_user_dir",
+        "op_raise_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The helper interface determines the named privilege operation and its invocation within makeNewUserDir; support for its owned before-creation relation also affects the creation endpoint."
+    },
+    "u4": {
+      "effect": "local",
+      "evidence_source_unit": "u4",
+      "evidence_text": "def lowerPrivileges():",
+      "operations": [
+        "op_make_user_dir",
+        "op_lower_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The helper interface determines the named privilege operation and its invocation within makeNewUserDir; support for its owned after-creation relation also affects the creation endpoint."
+    },
+    "u6": {
+      "effect": "local",
+      "evidence_source_unit": "u6",
+      "evidence_text": "def makeNewUserDir(username):",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_raise_privilege",
+        "op_lower_privilege"
+      ],
+      "reason": "The aggregate function boundary encloses creation and both privilege operations, and binds the username."
+    },
+    "u8": {
+      "effect": "local",
+      "evidence_source_unit": "u8",
+      "evidence_text": "Create a directory at the /home/ directory for the given username.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_raise_privilege",
+        "op_lower_privilege"
+      ],
+      "reason": "The specified user-directory creation is the aggregate task, both privilege-order endpoints refer to it, and existing-directory handling refers to this directory."
+    },
+    "u9": {
+      "effect": "local",
+      "evidence_source_unit": "u9",
+      "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),",
+      "operations": [
+        "op_make_user_dir",
+        "op_raise_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The aggregate workflow must increase privilege before creation; both relation endpoints are affected."
+    }
+  },
+  "unresolved_notes": [],
+  "delete_record_ids": []
+}

@@ -1,0 +1,72 @@
+{
+  "records": {
+    "obj_username": {
+      "status": "supported",
+      "reason": "u3 explicitly names the username supplied by the user. The concept, runtime layer, and source binding preserve that data object without adding a format or validation requirement.",
+      "rejected_claims": []
+    },
+    "obj_password": {
+      "status": "supported",
+      "reason": "u3 names the user-supplied password, and u4 refers to that password as the hashing operand. The record preserves the original credential separately from its hashed form.",
+      "rejected_claims": []
+    },
+    "obj_hashed_password": {
+      "status": "supported",
+      "reason": "u4 requires the password to be hashed before database insertion, supporting the hashed form as the hashing result and stored password value. No algorithm or additional security property is asserted.",
+      "rejected_claims": []
+    },
+    "obj_database": {
+      "status": "supported",
+      "reason": "u3 explicitly names the database receiving registration information; u4 refers to that same insertion destination. The object definition introduces no unsupported database implementation.",
+      "rejected_claims": []
+    },
+    "op_take_credentials": {
+      "status": "supported",
+      "reason": "u3 requires taking both username and password from the user, so both exact credential objects are exposed results. No separate request container is stated, and empty inputs do not invent one. The source specifies no execution guard or independent non-gating context. Empty precedes adds no unsupported ordering.",
+      "rejected_claims": []
+    },
+    "op_hash_password": {
+      "status": "supported",
+      "reason": "u4 directly requires hashing the password supplied in u3. That password is a value operand and its hashed form is the whole result of this action, with no unsupported result-as-input role. No execution or context condition is stated. Keeping precedes empty correctly leaves the expressly required order in its requirement owner.",
+      "rejected_claims": []
+    },
+    "op_insert_credentials": {
+      "status": "supported",
+      "reason": "Read together, u3 requires storing the collected credentials and u4 resolves the stored password to its hashed form. Username and hashed password are stored data operands, and the database is the stated write destination. A source-compatible implementation cannot omit either credential from this insertion. No separate output object, execution guard, scope context, or independent order is required by these clauses.",
+      "rejected_claims": []
+    },
+    "req_web_application": {
+      "status": "supported",
+      "reason": "u2 prescribes implementing a simple web application. Implementation scope and generation layer are appropriate for this form constraint; obligation modality, unconditional atomic structure, and empty runtime targets and relations add no unsupported claims.",
+      "rejected_claims": []
+    },
+    "req_registration": {
+      "status": "supported",
+      "reason": "u2 requires the overall application to allow user account registration. Task scope preserves that overall contract without imposing the entire registration function on every operation. The obligation is unconditional, and no narrower named operation, composite branch, or relation is omitted.",
+      "rejected_claims": []
+    },
+    "req_hash_before_insert": {
+      "status": "unsupported",
+      "reason": "The complete predicate, obligation modality, unconditional atomic structure, target scope, and owned hashing-before-insertion relation are supported by u4. However, operations.1 independently makes op_insert_credentials receive the entire predicate 'Hash the user's password before inserting that password into the database.' The source permits a separate hashing action followed by an insertion action that only stores the already hashed value; insertion need not perform hashing. Its participation as the target endpoint of relations.0 does not justify this extra direct target. The source supports op_hash_password as the direct target while preserving op_insert_credentials as the owned order relation endpoint.",
+      "rejected_claims": ["operations.1"]
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The instruction requests Python code, which the request identifies as fixed implementation/language coverage rather than a distinct runtime task fact. no_task_fact and no_runtime_effect with no operation dependencies are appropriate; this clause supplies no additional variable, branch, or non-target runtime behavior."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The simple web application form and permission for users to register an account are both represented with their respective implementation and task scopes. The global unit impact preserves the overall task boundary. No source condition, named variable, or additional registration behavior is omitted."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "Collection of username and password from the user, both credential objects, and insertion into the database are represented. u4 supplies the required transformed password form without losing username storage. The local impact includes credential collection and insertion directly and hashing through its user-password operand. No further input container, named variable, validation behavior, or output is stated in this unit."
+    },
+    "u4": {
+      "complete": false,
+      "reason": "Hashing the user password, its hashed result, storage of that result, and hashing-before-insertion order are represented. The local impact correctly includes both the hashing operation and the insertion relation endpoint. Nevertheless, req_hash_before_insert.operations.1 imposes the complete hashing predicate on insertion itself, an unsupported extra obligation. The coverage explanation says insertion is not a direct target, but the actual record lists it as one. Remove that extra direct-target claim while retaining the owned precedence relation; no additional algorithm, branch, or variable requirement is supplied by u4."
+    }
+  }
+}

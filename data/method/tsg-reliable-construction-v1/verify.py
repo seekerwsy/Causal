@@ -305,6 +305,128 @@ def verify_agent_repairs():
                 provider_calls=0, semantic_correctness_not_certified=True)
 
 
+def replay_complete_repair_round():
+    """Replay the frozen record-review-patch path and actual edit diagnostics."""
+    base = ROOT/'complete-repair-round'
+    code = r'''
+import json,sys
+from pathlib import Path
+from dataclasses import replace
+from prompt_mechanism_study.artifact_io import read_json
+from prompt_mechanism_study.source_records import attempt_graph
+from prompt_mechanism_study.prompt_contract import task_context_contract_record
+from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record,prompt_tsg_record,ScopedFeatureAssessment,catalog_sha256
+from prompt_mechanism_study.candidate_construction import _query,choose_candidate_scope
+from prompt_mechanism_study.mechanisms import bind_task_hypothesis,render_task_hypothesis
+base=Path(sys.argv[1]);plan=read_json(base/'protocol/plan.json');reviews=[]
+for name in plan['reviews']:
+    case=base/'reviews'/name; calls=[]
+    def provider(request,config,prompt):
+        kind=request['request_kind'];calls.append(kind)
+        request_file,response_file,schema_file={
+            'source_only_atomic_records':('inputs/original-request.json','inputs/records.json',None),
+            'source_only_record_review':('inputs/request.json','review.json','inputs/response-format.json'),
+            'source_only_record_patch':('repair-inputs/request.json','patch.json','repair-inputs/response-format.json')}[kind]
+        assert request==read_json(case/request_file),(name,kind)
+        if schema_file:
+            def schema_meaning(value):
+                if isinstance(value,dict): return {k:sorted(v) if k in {'required','enum'} else schema_meaning(v) for k,v in value.items()}
+                if isinstance(value,list): return [schema_meaning(v) for v in value]
+                return value
+            assert schema_meaning(config['response_format'])==schema_meaning(read_json(case/schema_file)),(name,kind,'schema meaning drift')
+        return (case/response_file).read_bytes()
+    attempt=attempt_graph(read_json(case/'inputs/task.json'),catalog=read_json(case/'inputs/catalog.json'),evaluator={'candidate_id':'retained-codex-round'},annotator_prompt='Replay retained bounded development responses.',review_status='development_exposed',provider=provider)
+    reviews.append(dict(case=name,error_type=attempt.error_type,error_message=attempt.error_message,request_kinds=calls,
+        records=attempt.binding_annotation.get('records'),contract=task_context_contract_record(attempt.contract) if attempt.contract else None,
+        graph=prompt_tsg_record(attempt.graph) if attempt.graph else None))
+edits=[];projections=read_json(base.parent/'owned-relations/analysis/projection.json')['cases']
+for row in plan['cases']:
+    prior=base.parent/'owned-relations'/(row['base_task']+'-r1');task=read_json(prior/'inputs/task.json')
+    graph=prompt_tsg_from_record(read_json(prior/'checks/attempt-1/graph.json'));contract=read_json(prior/'checks/attempt-1/contract.json')
+    records=read_json(prior/'attempt-1.json');record=next(r for r in records['requirements'] if r['record_id']==row['target_record_id'])
+    definition=record['fact']['concept']['definition'];catalog=contract['catalog']
+    owner=next(n for n in graph.nodes if n.node_type=='safety_requirement' and catalog['semantic_guidance'][n.semantic_id]==definition)
+    case_projection=next(r for r in projections if r['run']==row['base_task']+'-r1')
+    selector=next(r for r in case_projection['policies'] if r['requirement_node_id']==owner.node_id)['complete_bindings'][0]['selector']
+    scope=choose_candidate_scope(graph,selector);query=_query(selector,owner.semantic_id)
+    catalog={**catalog,'queries':[query],'feature_scope_selectors':{owner.semantic_id:selector}}
+    graph=replace(graph,catalog_sha256=catalog_sha256(catalog),scoped_feature_assessments=(ScopedFeatureAssessment(scope,owner.semantic_id,'present',(owner.node_id,)),))
+    binding=bind_task_hypothesis(policy_id='author-selected-development-edit',graph=graph,query=query,factor_feature_ids=(owner.semantic_id,),factor_operations=('remove',),factor_scopes=(scope,))
+    try:
+        rendered=render_task_hypothesis(binding,graph,prompt=task['prompt'],catalog=catalog,enabled=(True,),additions={})
+        outcome=dict(status='RENDERED',prompt=rendered['prompt'])
+    except Exception as error:
+        outcome=dict(status='BLOCKED',error_type=type(error).__name__,reason=str(error))
+    edited=read_json(base/row['run']/'inputs/task.json')
+    after=prompt_tsg_from_record(read_json(base/row['run']/'checks/attempt-1/graph.json'))
+    body=task['generation_input']['request']['task'];clause=row['removed_source_clause']
+    assert edited['generation_input']['request']['task']==body.replace(clause,'')
+    index=body.index(clause);reconstructed=edited['generation_input']['request']['task'][:index]+clause+edited['generation_input']['request']['task'][index:]
+    edits.append(dict(run=row['run'],target_record_id=row['target_record_id'],removal=outcome,
+        unchanged_selector_scope_after_reextraction=str(choose_candidate_scope(after,selector)) if choose_candidate_scope(after,selector) is not None else None,
+        inverse_add_restores_original_source_bytes=reconstructed==body,
+        inverse_add_is_not_an_executed_qualified_intervention=True,
+        comparison_limit='Fresh open extraction may use different semantic IDs; missing scope alone is not a semantic-error score. Source audit separately checks whether the policy action remains required.'))
+print(json.dumps(dict(reviews=reviews,actual_edit_diagnostics=edits,external_provider_calls=0,source_record_deliveries_replayed_not_resampled=4,scientific_claim_allowed=False)))
+'''
+    with tempfile.TemporaryDirectory(prefix='tsg-complete-round-') as directory:
+        work = Path(directory)
+        archive = base/'execution-source.tar.gz'
+        plan = json.loads((base/'protocol/plan.json').read_text(encoding='utf-8'))
+        assert hashlib.sha256(archive.read_bytes()).hexdigest() == plan['execution_source_sha256']
+        with tarfile.open(archive) as source:
+            source.extractall(work, filter='data')
+        env = {**os.environ,'PYTHONPATH':str(work/'src'),'PYTHONUTF8':'1'}
+        return json.loads(subprocess.check_output([sys.executable,'-c',code,str(base)],cwd=work,env=env,text=True))
+
+
+def summarize_complete_repair_round(result):
+    """Count structural changes separately from retained source judgments."""
+    base = ROOT/'complete-repair-round'
+    read = lambda path: json.loads(path.read_text(encoding='utf-8'))
+    audit = read(base/'analysis/source-audit.json')
+    rows = []
+    for row in result['reviews']:
+        original = read(base/'reviews'/row['case']/'inputs/records.json')
+        final = row['records']
+        before = {r['record_id']:r for group in ('objects','operations','requirements') for r in original[group]}
+        after = {r['record_id']:r for group in ('objects','operations','requirements') for r in final[group]}
+        rows.append(dict(case=row['case'],compiled=row['error_type'] is None and row['graph'] is not None,
+            patched='source_only_record_patch' in row['request_kinds'],
+            changed_record_ids=sorted(k for k in set(before)|set(after) if before.get(k)!=after.get(k)),
+            records_unchanged=original==final,
+            owned_order_count=len(row['graph']['requirement_relations']),
+            unresolved_source_units=sorted(k for k,v in final['coverage'].items() if v['status']=='unresolved')))
+    assert {r['case'] for r in rows} == {r['case'] for r in audit['reviews']}
+    return dict(base_tasks=2,fresh_edited_constructions=2,
+        fresh_review_responses=len(rows),fresh_patch_responses=sum(r['patched'] for r in rows),
+        codex_model_steps=2+len(rows)+sum(r['patched'] for r in rows),
+        final_reviewed_graphs_compiled=sum(r['compiled'] for r in rows),
+        wrong_target_variants=2,
+        wrong_target_variants_repaired=sum(r['critical_binding_after']=='correct' for r in audit['reviews'] if r['variant']=='wrong_target'),
+        correct_controls=2,correct_controls_unchanged=sum(r['records_unchanged'] for r in rows if r['case'] in {'case-01','case-04'}),
+        owned_order_rows_preserved=sum(r['owned_order_count'] for r in rows),
+        actual_remove_attempts=len(result['actual_edit_diagnostics']),
+        actual_removes_blocked=sum(r['removal']['status']=='BLOCKED' for r in result['actual_edit_diagnostics']),
+        external_provider_calls=0,scientific_claim_allowed=False,source_audit_independently_certified=False,cases=rows)
+
+
+def verify_complete_repair_round():
+    base = ROOT/'complete-repair-round'
+    read = lambda path: json.loads(path.read_text(encoding='utf-8'))
+    for name,digest in read(base/'analysis/input-output-identities.json').items():
+        assert hashlib.sha256((base/name).read_bytes()).hexdigest()==digest,name
+    constructions = verify_agent_repetitions('complete-repair-round',expected_runs=2)
+    result = replay_complete_repair_round()
+    assert result == read(base/'completed-execution/result.json')
+    counts = summarize_complete_repair_round(result)
+    assert counts == read(base/'analysis/summary.json')
+    # Preserve the failed harness attempt; it is not a model semantic failure.
+    assert all(r['error_type']=='AssertionError' for r in read(base/'execution/result.json')['reviews'])
+    return dict(constructions=constructions,retained_review_patch_path_replayed=True,
+                counts=counts,semantic_correctness_not_certified=True)
+
+
 def verify_owned_relations():
     base = ROOT/'owned-relations'
     read = lambda path: json.loads(path.read_text(encoding='utf-8'))
@@ -346,4 +468,5 @@ if __name__ == '__main__':
                           agent_audit_counts=audit,
                           agent_repairs=verify_agent_repairs(),
                           owned_relations=verify_owned_relations(),
+                          complete_repair_round=verify_complete_repair_round(),
                           scientific_claim_allowed=False), indent=2))

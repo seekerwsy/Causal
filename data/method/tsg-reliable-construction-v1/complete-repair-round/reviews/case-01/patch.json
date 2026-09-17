@@ -1,0 +1,190 @@
+{
+  "objects": [],
+  "operations": [
+    {
+      "execution_conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "op_make_user_dir",
+          "definition": "The aggregate runtime function makeNewUserDir(username), whose task is creation of a user directory.",
+          "node_type": "task_operation"
+        },
+        "evidence_source_unit": "u6",
+        "evidence_text": "def makeNewUserDir(username):",
+        "layer": "runtime",
+        "source_units": [
+          "u6",
+          "u8",
+          "u9",
+          "u10",
+          "u11"
+        ]
+      },
+      "inputs": [
+        {
+          "evidence_source_unit": "u6",
+          "evidence_text": "def makeNewUserDir(username):",
+          "role": "input_unspecified",
+          "subject": "obj_username"
+        }
+      ],
+      "precedes": [],
+      "record_id": "op_make_user_dir",
+      "results": [],
+      "scope_conditions": []
+    },
+    {
+      "execution_conditions": [],
+      "fact": {
+        "concept": {
+          "concept_id": "op_create_directory",
+          "definition": "Create the directory for the given username within /home/, inside makeNewUserDir.",
+          "node_type": "task_operation"
+        },
+        "evidence_source_unit": "u8",
+        "evidence_text": "Create a directory",
+        "layer": "runtime",
+        "source_units": [
+          "u6",
+          "u8"
+        ]
+      },
+      "inputs": [
+        {
+          "evidence_source_unit": "u8",
+          "evidence_text": "at the /home/ directory",
+          "role": "destination",
+          "subject": "obj_home"
+        }
+      ],
+      "precedes": [],
+      "record_id": "op_create_directory",
+      "results": [
+        {
+          "evidence_source_unit": "u8",
+          "evidence_text": "Create a directory",
+          "subject": "obj_user_directory"
+        }
+      ],
+      "scope_conditions": []
+    }
+  ],
+  "requirements": [],
+  "coverage": {
+    "u10": {
+      "reason": "Privilege decrease using lowerPrivileges owns its after-creation relation.",
+      "status": "represented"
+    },
+    "u11": {
+      "reason": "Exception handling targets the aggregate function and carries the explicit directory-exists condition.",
+      "status": "represented"
+    },
+    "u2": {
+      "reason": "The no-argument raisePrivileges interface and its influence on the aggregate, privilege increase, and the owned before-creation endpoint are retained.",
+      "status": "represented"
+    },
+    "u4": {
+      "reason": "The no-argument lowerPrivileges interface and its influence on the aggregate, privilege decrease, and the owned after-creation endpoint are retained.",
+      "status": "represented"
+    },
+    "u6": {
+      "reason": "The makeNewUserDir interface establishes username as an aggregate input; its specific value-versus-structural-selector role is not resolved by the source.",
+      "status": "unresolved"
+    },
+    "u8": {
+      "reason": "Creation under /home/, the directory result, and association with the given username remain represented. The source does not establish direct use of username by the creation action or its structural-selector role; that unsupported input is removed without inventing a path derivation.",
+      "status": "unresolved"
+    },
+    "u9": {
+      "reason": "Privilege increase using raisePrivileges owns its before-creation relation.",
+      "status": "represented"
+    }
+  },
+  "unit_impacts": {
+    "u10": {
+      "effect": "local",
+      "evidence_source_unit": "u10",
+      "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_lower_privilege"
+      ],
+      "reason": "The aggregate workflow must lower privilege after creation; both relation endpoints are affected."
+    },
+    "u11": {
+      "effect": "local",
+      "evidence_source_unit": "u11",
+      "evidence_text": "Handle the exception if the directory already exists.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory"
+      ],
+      "reason": "The existing-directory case affects the aggregate exception-handling contract and the directory-creation behavior."
+    },
+    "u2": {
+      "effect": "local",
+      "evidence_source_unit": "u2",
+      "evidence_text": "def raisePrivileges():",
+      "operations": [
+        "op_make_user_dir",
+        "op_raise_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The helper interface determines the named privilege operation and its invocation within makeNewUserDir; its owned before-creation requirement also affects the creation endpoint."
+    },
+    "u4": {
+      "effect": "local",
+      "evidence_source_unit": "u4",
+      "evidence_text": "def lowerPrivileges():",
+      "operations": [
+        "op_make_user_dir",
+        "op_lower_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The helper interface determines the named privilege operation and its invocation within makeNewUserDir; its owned after-creation requirement also affects the creation endpoint."
+    },
+    "u6": {
+      "effect": "local",
+      "evidence_source_unit": "u6",
+      "evidence_text": "def makeNewUserDir(username):",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_raise_privilege",
+        "op_lower_privilege"
+      ],
+      "reason": "The aggregate function boundary encloses creation and both privilege operations, and binds the username."
+    },
+    "u8": {
+      "effect": "local",
+      "evidence_source_unit": "u8",
+      "evidence_text": "Create a directory at the /home/ directory for the given username.",
+      "operations": [
+        "op_make_user_dir",
+        "op_create_directory",
+        "op_raise_privilege",
+        "op_lower_privilege"
+      ],
+      "reason": "The specified user-directory creation is the aggregate task, both privilege-order endpoints refer to it, and existing-directory handling refers to this directory."
+    },
+    "u9": {
+      "effect": "local",
+      "evidence_source_unit": "u9",
+      "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),",
+      "operations": [
+        "op_make_user_dir",
+        "op_raise_privilege",
+        "op_create_directory"
+      ],
+      "reason": "The aggregate workflow must increase privilege before creation; both relation endpoints are affected."
+    }
+  },
+  "unresolved_notes": [
+    "The concrete mechanisms used inside raisePrivileges and lowerPrivileges are unspecified by the supplied helper placeholders.",
+    "The source does not prescribe a particular response value or exception-handling technique for an already existing directory.",
+    "No unconditional privilege-cleanup-on-every-exception guarantee is added beyond the source order requirement.",
+    "The username parameter is an established aggregate input, but the source does not determine its specific input role, require it to name or locate the directory, or establish that creation directly consumes that value. The user-directory association is retained without prescribing a basename, path derivation, or intermediate operation."
+  ],
+  "delete_record_ids": []
+}

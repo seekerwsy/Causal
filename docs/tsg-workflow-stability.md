@@ -10,8 +10,9 @@ This document describes development within representation, not formal qualificat
 ```text
 actual system/user input
   -> source records with participants, requirement composition, guards, scope and owned relations
+  -> deterministic preview compilation
   -> one ordinary source review and at most one local patch
-  -> deterministic TSG compilation
+  -> deterministic compilation of the completed records
   -> separate candidate applicability/expression assessment
 ```
 
@@ -98,6 +99,12 @@ agent workflow executes, but reliable semantic repair is not established.
    definitions and exact scope/guard interpretation used during extraction/compilation.
    Extraction, review, patch and readback share `source_records.record_semantics`,
    including the distinction between direct targets and owned relation operands.
+   Review receives the already compiled `effective_unit_impacts` and a canonical
+   operation-ID dictionary alongside the raw records. Its completeness judgment
+   concerns this actual effective table: a dependency already supplied by the
+   compiler is not a missing graph dependency. The computed lower bound is not
+   source truth; unsupported or still-missing impacts remain reviewable. No extra
+   compilation, reviewer or model round is introduced by passing this view.
    The program first decodes actual bindings with `structural_readback`. Guards and
    targets come exclusively from their fields, with empty guards shown as unconditional.
    Correct definition text cannot supply missing structure. Readback is retained in
@@ -145,6 +152,12 @@ agent workflow executes, but reliable semantic repair is not established.
    Source dependencies and edit checks include both operands. Removing a target
    owner may remove its relations; other owners and independent ordinary relations
    remain non-target invariants. This preserves semantics, not proof of editability.
+   The two-task complete repair round now tests actual whole-policy deletion:
+   both edits remain blocked. A policy can introduce its action or result, while
+   the current editor protects all operation/object anchors and its selector needs
+   those same anchors in both arms. Owned order fixes do not solve this ownership
+   and applicability boundary. Do not retain a deleted action as mandatory neutral
+   context, reinterpret the factor as order-only, or waive overlap checks to pass.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.

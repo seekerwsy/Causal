@@ -1,0 +1,114 @@
+{
+  "records": {
+    "obj_os": {
+      "status": "supported",
+      "reason": "u1 supplies the os module. The record states availability only and does not require any operation to use that module.",
+      "rejected_claims": []
+    },
+    "obj_username": {
+      "status": "supported",
+      "reason": "u6 explicitly names the username parameter of makeNewUserDir, and u8 ties the requested directory to that given username. The exact variable identity is retained.",
+      "rejected_claims": []
+    },
+    "obj_home": {
+      "status": "supported",
+      "reason": "u8 explicitly identifies the /home/ directory as the location of the requested creation. The record denotes that directory facility itself, without inventing a separate path value.",
+      "rejected_claims": []
+    },
+    "obj_user_directory": {
+      "status": "supported",
+      "reason": "u8 requests the whole user directory, and u9-u11 refer back to that same directory. Its definition neither invents a return value nor changes the already-existing-directory case.",
+      "rejected_claims": []
+    },
+    "op_make_user_dir": {
+      "status": "supported",
+      "reason": "The named aggregate function and its username input are explicit in u6; u8 identifies the directory to be created by the given username. No outward return object, gating precondition, non-gating context, or independent order is stated. The existing-directory condition governs exception handling rather than invocation of the whole function.",
+      "rejected_claims": []
+    },
+    "op_create_directory": {
+      "status": "supported",
+      "reason": "u8 directly requires creation of the user directory within /home/ for the given username. The username identifies the requested user directory, /home/ is the destination, and the whole directory is the creation result. No source-compatible reading permits disregarding which user's directory is requested. No os input or separate filepath result is inferred. Ordering remains in the requirements, and the existing-directory branch does not gate the entire creation operation.",
+      "rejected_claims": []
+    },
+    "op_raise_privilege": {
+      "status": "supported",
+      "reason": "u9 explicitly requires increasing privilege using raisePrivileges(), whose no-argument interface is supplied by u2. No data input or separately exposed result is required, and the before-creation order is correctly left to its owning requirement rather than duplicated as independent operation context.",
+      "rejected_claims": []
+    },
+    "op_lower_privilege": {
+      "status": "supported",
+      "reason": "u10 explicitly requires lowering privilege using lowerPrivileges(), whose no-argument interface is supplied by u4. Empty input, result, execution-condition and scope-condition lists introduce no unstated behavior. The after-creation relation belongs to the requirement; the source does not add unconditional cleanup on every exceptional exit.",
+      "rejected_claims": []
+    },
+    "req_create_directory": {
+      "status": "supported",
+      "reason": "The complete creation obligation from u8 targets the named enclosing makeNewUserDir function, preserving the username and /home/ destination. Its force is imperative, and the separate existing-directory exception rule is not a precondition for invoking the function or an instruction to omit creation.",
+      "rejected_claims": []
+    },
+    "req_raise_before_create": {
+      "status": "supported",
+      "reason": "u9 prescribes the named privilege increase and its order before directory creation. op_raise_privilege is the appropriate direct target; creation is retained as an owned-relation endpoint, with the source unit cited by the owner. No guard or stronger cleanup requirement is added.",
+      "rejected_claims": []
+    },
+    "req_lower_after_create": {
+      "status": "unsupported",
+      "reason": "operations.0 incorrectly makes op_create_directory independently receive the entire predicate 'Lower the privilege using lowerPrivileges() after creating the user directory.' u10 requires the lowering action to follow creation; it does not require the creation action itself to lower privilege. Keep op_lower_privilege as the direct target and preserve op_create_directory as the source endpoint of the already-correct owned precedes relation. The obligation, full predicate, absence of an added guard, and relation direction are otherwise supported.",
+      "rejected_claims": ["operations.0"]
+    },
+    "req_handle_exists": {
+      "status": "supported",
+      "reason": "u11 explicitly conditions exception handling on the requested directory already existing. The structured condition guards the whole handling predicate, which correctly targets makeNewUserDir. It does not gate the complete function, prescribe a particular handling technique, or invent a response value.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The os import and its module-wide availability are retained. The global impact description does not turn availability into required use by creation or either privilege helper. No additional task meaning is missing."
+    },
+    "u2": {
+      "complete": false,
+      "reason": "The exact raisePrivileges name and no-argument interface are covered. However, u2 is a cited support unit of req_raise_before_create, whose owned relation has op_create_directory as an endpoint. unit_impacts.u2 lists the aggregate function and privilege increase but omits that relation endpoint. Under the supplied dependency semantics, the declared influence is incomplete; retain the interface meaning and include its relevant owned-relation endpoint dependency without making creation a direct target of the increase predicate."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "The helper's pass is a supplied placeholder and provides no additional privilege mechanism, data flow, output or task obligation. Its no_runtime_effect assessment preserves the source's unspecified implementation detail."
+    },
+    "u4": {
+      "complete": false,
+      "reason": "The exact lowerPrivileges name and no-argument interface are covered. However, u4 is a cited support unit of req_lower_after_create, whose owned relation includes op_create_directory. unit_impacts.u4 omits this endpoint while listing the aggregate function and privilege decrease. The relevant owned-relation dependency must be retained, separately from correcting the unsupported direct-target membership in req_lower_after_create."
+    },
+    "u5": {
+      "complete": true,
+      "reason": "The second pass is the lowerPrivileges helper placeholder and adds no specified mechanism or separate task behavior. No unstated cleanup implementation is inferred, and no_runtime_effect is appropriate."
+    },
+    "u6": {
+      "complete": true,
+      "reason": "The exact function name makeNewUserDir and parameter name username are represented. The function boundary is retained for creation and exception handling, and its local impacts include the aggregate and all three enclosed runtime actions. No separate return contract or missing non-target behavior is stated here."
+    },
+    "u7": {
+      "complete": true,
+      "reason": "The opening docstring delimiter establishes presentation of the enclosed function specification and adds no independent runtime task fact. Its no_runtime_effect assessment is supported."
+    },
+    "u8": {
+      "complete": true,
+      "reason": "Creation of the user directory, its association with the given username, the /home/ destination and the whole-directory result are represented. The source unit's local impacts include the aggregate, creation and both privilege actions because their ordering refers to this creation. No unrelated module use or pathname-production claim is added."
+    },
+    "u9": {
+      "complete": true,
+      "reason": "The requirement retains the full privilege-increase predicate, the exact raisePrivileges() invocation and its before-creation owned relation. Its direct target and both relevant relation endpoints are covered by u9's impacts together with the aggregate function. No source guard is missing."
+    },
+    "u10": {
+      "complete": false,
+      "reason": "The exact lowerPrivileges() invocation and after-creation order are present, and unit_impacts.u10 correctly includes the aggregate and both relation endpoints. The representation nevertheless assigns the full lowering predicate to op_create_directory through req_lower_after_create.operations.0. That unsupported binding must be removed while preserving creation as an ordering endpoint and privilege lowering as the direct target. No additional unconditional exception-cleanup guarantee is stated by this unit."
+    },
+    "u11": {
+      "complete": true,
+      "reason": "The existing-directory branch and obligation to handle its exception are both preserved, with an explicit structured guard on the aggregate function's handling requirement. Its impacts appropriately cover the aggregate and directory creation. The source specifies neither a return value nor a particular handling technique nor mandatory privilege cleanup on every exception."
+    },
+    "u12": {
+      "complete": true,
+      "reason": "The closing docstring delimiter adds no separate runtime obligation, condition or data object. Its no_runtime_effect assessment is supported."
+    }
+  }
+}

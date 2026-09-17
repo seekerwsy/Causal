@@ -1,0 +1,504 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_os",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "os",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "obj_os",
+          "node_type": "data_object",
+          "definition": "The os module imported in the supplied Python scaffold."
+        }
+      }
+    },
+    {
+      "record_id": "obj_username",
+      "fact": {
+        "evidence_source_unit": "u6",
+        "evidence_text": "username",
+        "source_units": [
+          "u6",
+          "u8"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "obj_username",
+          "node_type": "data_object",
+          "definition": "The username parameter of makeNewUserDir, denoting the given username."
+        }
+      }
+    },
+    {
+      "record_id": "obj_home",
+      "fact": {
+        "evidence_source_unit": "u8",
+        "evidence_text": "the /home/ directory",
+        "source_units": [
+          "u8"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "obj_home",
+          "node_type": "data_object",
+          "definition": "The /home/ directory."
+        }
+      }
+    },
+    {
+      "record_id": "obj_user_directory",
+      "fact": {
+        "evidence_source_unit": "u8",
+        "evidence_text": "a directory",
+        "source_units": [
+          "u8",
+          "u9",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "obj_user_directory",
+          "node_type": "data_object",
+          "definition": "The directory for the given username."
+        }
+      }
+    },
+    {
+      "record_id": "obj_exists_exception",
+      "fact": {
+        "evidence_source_unit": "u10",
+        "evidence_text": "the exception",
+        "source_units": [
+          "u8",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "obj_exists_exception",
+          "node_type": "data_object",
+          "definition": "The exception associated with the directory already existing."
+        }
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_make",
+      "fact": {
+        "evidence_source_unit": "u6",
+        "evidence_text": "def makeNewUserDir(username):",
+        "source_units": [
+          "u6",
+          "u8",
+          "u9",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "op_make",
+          "node_type": "task_operation",
+          "definition": "The source-named makeNewUserDir(username) function."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "identifier_input",
+          "evidence_source_unit": "u6",
+          "evidence_text": "makeNewUserDir(username)"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_raise",
+      "fact": {
+        "evidence_source_unit": "u9",
+        "evidence_text": "increase the privilege using raisePrivileges()",
+        "source_units": [
+          "u2",
+          "u9"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "op_raise",
+          "node_type": "task_operation",
+          "definition": "Increase the privilege by invoking the supplied no-argument raisePrivileges() helper."
+        }
+      },
+      "inputs": [],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_lower",
+      "fact": {
+        "evidence_source_unit": "u4",
+        "evidence_text": "def lowerPrivileges():",
+        "source_units": [
+          "u4",
+          "u5"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "op_lower",
+          "node_type": "task_operation",
+          "definition": "The declared no-argument lowerPrivileges() helper; the source does not require invoking it."
+        }
+      },
+      "inputs": [],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_create",
+      "fact": {
+        "evidence_source_unit": "u8",
+        "evidence_text": "Create a directory",
+        "source_units": [
+          "u6",
+          "u8"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "op_create",
+          "node_type": "task_operation",
+          "definition": "Create the directory for the given username under /home/."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "identifier_input",
+          "evidence_source_unit": "u8",
+          "evidence_text": "for the given username"
+        },
+        {
+          "subject": "obj_home",
+          "role": "destination",
+          "evidence_source_unit": "u8",
+          "evidence_text": "at the /home/ directory"
+        }
+      ],
+      "results": [
+        {
+          "subject": "obj_user_directory",
+          "evidence_source_unit": "u8",
+          "evidence_text": "Create a directory"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_handle",
+      "fact": {
+        "evidence_source_unit": "u10",
+        "evidence_text": "Handle the exception",
+        "source_units": [
+          "u6",
+          "u8",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "op_handle",
+          "node_type": "task_operation",
+          "definition": "Handle the exception associated with an already-existing directory."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_exists_exception",
+          "role": "value_input",
+          "evidence_source_unit": "u10",
+          "evidence_text": "Handle the exception"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_create",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_create"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [],
+      "fact": {
+        "evidence_source_unit": "u8",
+        "evidence_text": "Create a directory at the /home/ directory for the given username.",
+        "source_units": [
+          "u6",
+          "u8"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_create",
+          "node_type": "task_requirement",
+          "definition": "Create the given username's directory under /home/."
+        }
+      }
+    },
+    {
+      "record_id": "req_raise_before_create",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_raise"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [
+        {
+          "source": "op_raise",
+          "edge_type": "precedes",
+          "target": "op_create",
+          "evidence_source_unit": "u9",
+          "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),"
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u9",
+        "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),",
+        "source_units": [
+          "u2",
+          "u6",
+          "u8",
+          "u9"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_raise_before_create",
+          "node_type": "task_requirement",
+          "definition": "Increase the privilege using raisePrivileges() before creating the directory."
+        }
+      }
+    },
+    {
+      "record_id": "req_handle_exists",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_handle"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u10",
+          "evidence_text": "if the directory already exists",
+          "source_units": [
+            "u8",
+            "u10"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "condition.directory_already_exists",
+            "node_type": "condition",
+            "definition": "The directory for the given username already exists."
+          }
+        }
+      ],
+      "relations": [],
+      "fact": {
+        "evidence_source_unit": "u10",
+        "evidence_text": "Handle the exception",
+        "source_units": [
+          "u6",
+          "u8",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_handle_exists",
+          "node_type": "task_requirement",
+          "definition": "Handle the exception associated with the already-existing directory."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "represented",
+      "reason": "The imported os module is retained as an available object without assigning any unstated operation use."
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The no-argument raisePrivileges helper is retained as the privilege-increase operation named in u9."
+    },
+    "u3": {
+      "status": "no_task_fact",
+      "reason": "The pass body is a supplied placeholder, not a requirement that raising privilege do nothing."
+    },
+    "u4": {
+      "status": "represented",
+      "reason": "The declared lowerPrivileges helper is retained, without inferring a required invocation from its name."
+    },
+    "u5": {
+      "status": "no_task_fact",
+      "reason": "The pass body is a helper placeholder with no additional required behavior."
+    },
+    "u6": {
+      "status": "represented",
+      "reason": "The aggregate function and its username parameter are retained with their specified interface."
+    },
+    "u7": {
+      "status": "no_task_fact",
+      "reason": "Opening docstring punctuation contains no separate task fact."
+    },
+    "u8": {
+      "status": "represented",
+      "reason": "The directory-creation operation, username input, /home/ destination, required directory result, and creation obligation are retained."
+    },
+    "u9": {
+      "status": "represented",
+      "reason": "The required privilege increase owns its before-creation relation; neither operation receives independent order context."
+    },
+    "u10": {
+      "status": "represented",
+      "reason": "Exception handling has the directory-already-exists guard on its requirement."
+    },
+    "u11": {
+      "status": "no_task_fact",
+      "reason": "Closing docstring punctuation contains no separate task fact."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "The import provides an available module; the source establishes no required runtime use by a named operation.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "import os"
+    },
+    "u2": {
+      "effect": "local",
+      "operations": [
+        "op_raise",
+        "op_make",
+        "op_create"
+      ],
+      "reason": "The helper interface is used by the privilege-raising requirement and its ordering relative to creation within makeNewUserDir.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "def raisePrivileges():"
+    },
+    "u3": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "The placeholder supplies no independently required runtime behavior.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "pass"
+    },
+    "u4": {
+      "effect": "local",
+      "operations": [
+        "op_lower"
+      ],
+      "reason": "This declaration specifies only the lowerPrivileges helper interface; no caller is required.",
+      "evidence_source_unit": "u4",
+      "evidence_text": "def lowerPrivileges():"
+    },
+    "u5": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "The placeholder supplies no independent behavior or call requirement.",
+      "evidence_source_unit": "u5",
+      "evidence_text": "pass"
+    },
+    "u6": {
+      "effect": "local",
+      "operations": [
+        "op_make",
+        "op_raise",
+        "op_create",
+        "op_handle"
+      ],
+      "reason": "The named enclosing function and username parameter establish the scope of the documented required workflow.",
+      "evidence_source_unit": "u6",
+      "evidence_text": "def makeNewUserDir(username):"
+    },
+    "u7": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Docstring delimiter only.",
+      "evidence_source_unit": "u7",
+      "evidence_text": "'''"
+    },
+    "u8": {
+      "effect": "local",
+      "operations": [
+        "op_make",
+        "op_create",
+        "op_raise",
+        "op_handle"
+      ],
+      "reason": "The directory and username establish the creation target, the directory referenced by the raising order, and the already-exists condition of exception handling.",
+      "evidence_source_unit": "u8",
+      "evidence_text": "Create a directory at the /home/ directory for the given username."
+    },
+    "u9": {
+      "effect": "local",
+      "operations": [
+        "op_make",
+        "op_raise",
+        "op_create"
+      ],
+      "reason": "The privilege requirement affects the enclosing function and both endpoints of its required order.",
+      "evidence_source_unit": "u9",
+      "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),"
+    },
+    "u10": {
+      "effect": "local",
+      "operations": [
+        "op_make",
+        "op_create",
+        "op_handle"
+      ],
+      "reason": "Already-existing-directory exception handling affects the enclosing function and the creation failure behavior.",
+      "evidence_source_unit": "u10",
+      "evidence_text": "Handle the exception if the directory already exists."
+    },
+    "u11": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "Docstring delimiter only.",
+      "evidence_source_unit": "u11",
+      "evidence_text": "'''"
+    }
+  },
+  "unresolved_notes": []
+}

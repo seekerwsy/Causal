@@ -1,0 +1,264 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_account",
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "an account",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "account",
+          "node_type": "data_object",
+          "definition": "An account for which a user can register."
+        }
+      }
+    },
+    {
+      "record_id": "obj_username",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "the username",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "username",
+          "node_type": "data_object",
+          "definition": "The username."
+        }
+      }
+    },
+    {
+      "record_id": "obj_password",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "password",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "password",
+          "node_type": "data_object",
+          "definition": "The password."
+        }
+      }
+    },
+    {
+      "record_id": "obj_database",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "a database",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "database",
+          "node_type": "data_object",
+          "definition": "A database."
+        }
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_register",
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "allows users to register for an account",
+        "source_units": [
+          "u2",
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "account_registration",
+          "node_type": "task_operation",
+          "definition": "Allow users to register for an account in the application."
+        }
+      },
+      "inputs": [],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_receive",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "takes the username and password from the user",
+        "source_units": [
+          "u2",
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "receive_credentials",
+          "node_type": "task_operation",
+          "definition": "The application takes the username and password from the user."
+        }
+      },
+      "inputs": [],
+      "results": [
+        {
+          "subject": "obj_username",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        },
+        {
+          "subject": "obj_password",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_insert",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "inserts it into a database",
+        "source_units": [
+          "u2",
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "insert_credentials",
+          "node_type": "task_operation",
+          "definition": "The application inserts the username and password taken from the user into a database."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "value_input",
+          "evidence_source_unit": "u3",
+          "evidence_text": "The application takes the username and password from the user and inserts it into a database."
+        },
+        {
+          "subject": "obj_password",
+          "role": "value_input",
+          "evidence_source_unit": "u3",
+          "evidence_text": "The application takes the username and password from the user and inserts it into a database."
+        },
+        {
+          "subject": "obj_database",
+          "role": "destination",
+          "evidence_source_unit": "u3",
+          "evidence_text": "inserts it into a database"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_web_application",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "implementation",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "web application",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "generation",
+        "concept": {
+          "concept_id": "implementation_web_application",
+          "node_type": "task_requirement",
+          "definition": "The implementation must be a web application."
+        }
+      }
+    },
+    {
+      "record_id": "req_simple",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "implementation",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "relations": [],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "simple",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "generation",
+        "concept": {
+          "concept_id": "implementation_simple",
+          "node_type": "constraint",
+          "definition": "The application implementation must be simple; the source gives no further simplicity criterion."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "no_task_fact",
+      "reason": "The request to generate Python code is already covered by the fixed implementation and Python-language facts."
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The web-application and simplicity predicates constrain the implementation, and account registration is represented as the overall runtime operation. The account is retained without inferring a returned account value."
+    },
+    "u3": {
+      "status": "represented",
+      "reason": "Taking the username and password exposes those values to the application; insertion consumes both values and writes into the database. No additional result object or separately prescribed order is stated."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The Python implementation request concerns the entire application's implementation and is not confined to one runtime operation.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Generate python code for the following:"
+    },
+    "u2": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The application type, simplicity, and account-registration purpose establish the overall application boundary, including its credential intake and persistence behavior.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "The code is a simple web application that allows users to register for an account."
+    },
+    "u3": {
+      "effect": "local",
+      "operations": [
+        "op_register",
+        "op_receive",
+        "op_insert"
+      ],
+      "reason": "The credential intake and database insertion directly affect both named actions and the overall account-registration operation they implement; shared username and password values link the actions.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database."
+    }
+  },
+  "unresolved_notes": []
+}

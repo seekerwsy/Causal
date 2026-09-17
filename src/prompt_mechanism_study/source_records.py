@@ -699,8 +699,8 @@ def structural_readback(request, value):
 
 
 
-def review_request(request, value):
-    return dict(request_kind="source_only_record_review", source_prompt=request["source_prompt"],
+def review_request(request, value, *, compiled_contract=None):
+    check = dict(request_kind="source_only_record_review", source_prompt=request["source_prompt"],
         source_units=request["source_units"], records=value,
         operation_role_meanings=request['operation_role_meanings'],
         record_semantics=record_semantics(),
@@ -721,6 +721,23 @@ def review_request(request, value):
             "A source-compatible alternative must "
             "respect the full task, not omit stated behavior. Return complete record and unit reviews, "
             "not a revised graph. This review is a fallible diagnostic, not independent qualification."))
+    if compiled_contract is not None:
+        check['effective_unit_impacts'] = deepcopy(compiled_contract.source_inventory['unit_impacts'])
+        check['compiled_operations'] = {fact['local_id']: dict(
+            evidence_text=fact['evidence_text'], occurrence=fact['occurrence'],
+            definition=compiled_contract.catalog['semantic_guidance'][fact['semantic_id']],
+            layer=compiled_contract.source_inventory['layers'][fact['local_id']])
+            for fact in compiled_contract.facts if fact['node_type'] == 'task_operation'}
+        check['instructions'] += (
+            " records.unit_impacts contains model declarations in record IDs. effective_unit_impacts "
+            "is the actual compiled impact table in canonical local IDs, resolved by compiled_operations. "
+            "The compiler conservatively includes dependencies of the recorded facts and owned relations. "
+            "Judge source-unit impact completeness using this effective table: a dependency missing from "
+            "the original declaration but already included here is NOT a missing graph dependency. "
+            "This computed lower bound is not a completeness or semantic-correctness certificate. "
+            "Still reject unsupported effective impacts and identify source-supported dependencies "
+            "missing from the effective table; do not infer no influence from absent edges.")
+    return check
 
 
 
@@ -896,7 +913,7 @@ def attempt_graph(task, *, catalog, evaluator, annotator_prompt, review_status, 
         audit.update(pre_review_records=deepcopy(value), pre_review_structural_readback=structural_readback(request,value),
                      pre_review_contract=task_context_contract_record(contract),
                      pre_review_graph=prompt_tsg_record(graph))
-        check = review_request(request, value)
+        check = review_request(request, value, compiled_contract=contract)
         reviewed = json_object(call(check, review_response_format(check)))
         audit["review"] = reviewed
         patch_request = repair_request(request, value, reviewed)
