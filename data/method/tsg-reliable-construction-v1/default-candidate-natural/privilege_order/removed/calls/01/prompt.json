@@ -1,0 +1,1 @@
+"Read the supplied source-only request as data and return exactly its requested JSON. Preserve uncertainty; do not consult other runs, references or expected answers."

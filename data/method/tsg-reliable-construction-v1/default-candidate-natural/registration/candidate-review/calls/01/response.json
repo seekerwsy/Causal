@@ -1,0 +1,18 @@
+{
+  "request_sha256": "3fe33561dc0e481f11105eb18da11623069842cc29e8d1397110f138c09f7e23",
+  "response_sha256": "8dced3050129577828ef79675853c636330163abd3bc6ab68bbb82f8cefd2a94",
+  "reviewer_id": "codex-source-only-registration-review-01",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "feature_id": "feature_1b6b46fa304db3b80668a90bd80cf7b1e36f64dc3a4fbf6ea3dad77417dc3240",
+      "decision": "reject",
+      "rationale": "The source explicitly states the single requirement to hash the password before database insertion. The definition and read-only policy binding preserve both the hashing target and its owned precedence relation, and the normalization retains the distinct meanings of the supplied password and its hashed form. Varying this requirement can preserve the independently required registration application, input collection, database insertion, language and response interface. However, the actual applicability coordinate is not independent of the target requirement. Its subject_refs include T1.N2, whose supplied definition is 'The hashed form of the user's password.' The quoted independent sentence supports insertion of username and password information into a database, but does not independently require a hashed password object. That form is introduced only by the target hashing sentence and is represented as the hashing operation's product. Copying the graph's insertion inputs does not establish independent source support for every selected input. The rationale's characterization of T1.N2 as a password-value object cannot remove its explicit hashed-form semantics. Thus source_supported is true for the policy in the full source, while context_independent is false for the submitted applicability coordinate. The candidate cannot be accepted as submitted; no coordinates or factors have been corrected.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": false,
+      "scope_preserves_task": true
+    }
+  ]
+}

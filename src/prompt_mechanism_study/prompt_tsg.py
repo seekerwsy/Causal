@@ -270,6 +270,8 @@ def requirement_matches_policy(graph, requirement, scope, selector):
         if select_feature_scope(graph, selector) != scope or binding is None:
             return False
         connected = binding["operations"] | {key for a, _, b in binding["relations"] for key in (a, b)}
+        if selector["scope_kind"] == "objects":
+            connected |= {key for key, node in nodes.items() if node.semantic_id == "task.root"}
         if scope.operation_node_id not in connected:
             return False
         scope = select_feature_scope(graph, {key: value for key, value in selector.items()
@@ -502,7 +504,8 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
                 background = selector["applicability_scope"]
                 fields = {"operation_semantic_id", "subject_semantic_ids", "execution_condition_semantic_ids"}
                 if (not isinstance(background, dict) or set(background) != fields
-                    or semantics.get(background["operation_semantic_id"]) != "task_operation"):
+                    or (semantics.get(background["operation_semantic_id"]) != "task_operation"
+                        and not background["operation_semantic_id"] == selector["operation_semantic_id"] == "task.root")):
                     raise PromptTSGError("candidate applicability needs a declared source operation coordinate")
                 for name, kind in (("subject_semantic_ids", "data_object"),
                                    ("execution_condition_semantic_ids", "condition")):
@@ -1165,7 +1168,7 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
     nodes = {n.node_id: n for n in graph.nodes}
     background = selector.get("applicability_scope")
     if background:
-        selector = dict(background, scope_kind="targets",
+        selector = dict(background, scope_kind=selector.get("scope_kind") if background["operation_semantic_id"] == "task.root" else "targets",
                         condition_semantic_ids=background["execution_condition_semantic_ids"])
     elif select_policy_relation_endpoints(graph, selector) is None:
         return None

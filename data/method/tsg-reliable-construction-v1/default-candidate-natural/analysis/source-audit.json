@@ -1,0 +1,39 @@
+{
+  "kind": "Author source audit of retained exposed development evidence; not an independent reference",
+  "cases": [
+    {
+      "base_task": "privilege_order",
+      "candidate": "Actual background operation is independently required directory creation with username and /home/ inputs; original lowerPrivileges target and creation-before-lowering relation remain fixed.",
+      "source_change": "Only the lowering clause is removed; lowerPrivileges helper declaration remains but does not require invocation.",
+      "graph_check": "Both graphs retain the same non-target semantic IDs, creation inputs/result, elevation-before-creation policy, and existing-directory exception guard. Original additionally contains the lowering invocation and its owned requirement/order.",
+      "scope_check": "Lowering is present in original and absent after deletion; elevation is present in both, at the same independently supported background.",
+      "citation_differences": [
+        [
+          "/home/",
+          "the /home/ directory"
+        ],
+        [
+          "os",
+          "import os"
+        ],
+        [
+          "Create a directory at the /home/ directory for the given username.",
+          "a directory at the /home/ directory for the given username"
+        ],
+        [
+          "Handle the exception",
+          "Handle the exception if the directory already exists."
+        ]
+      ],
+      "initial_gate_failures": "Experimental adapter duplicated the automatically owned target requirement and its constraint edge in supplemental declarations; raw verification coordinates used tuples. After adapter-only correction, both renderers rejected non-target quote-length differences.",
+      "final_replay": "Same prompts, graphs and judgments pass both directions after citation-continuity revision. This preserves source evidence location while keeping all other gates, not a proof of meaning from overlap."
+    },
+    {
+      "base_task": "registration",
+      "candidate": "Returned background uses insertion rather than hashing, but subject list includes the hashed password object.",
+      "source_check": "The independent registration/insertion sentence does not establish the hashed form; that result is supported by the target policy sentence.",
+      "disposition": "Reviewer correctly rejects exact submitted tuple. No manual coordinate correction, graph extraction, edit or semantic retry."
+    }
+  ],
+  "research_boundary": "No counts here establish population reliability, model ranking, Discovery support or a security effect."
+}

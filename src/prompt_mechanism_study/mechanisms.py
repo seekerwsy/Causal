@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -581,13 +582,27 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
         raise MechanismRegistryError(
             "neutral rewrite needs a one-to-one map of all non-target source nodes"
         )
+    unchanged_blocks = None
     for key in preserved:
         before, after = old[key], new[node_map[key]]
+        same_evidence = (prompt[before.evidence_start : before.evidence_end]
+                         == target_prompt[after.evidence_start : after.evidence_end])
+        if not same_evidence:
+            if unchanged_blocks is None:
+                unchanged_blocks = SequenceMatcher(None, prompt, target_prompt, autojunk=False).get_matching_blocks()
+            # Citation granularity may differ only within the same unchanged
+            # occurrence. This does not replace the source's semantic review.
+            same_evidence = any(
+                start <= before.evidence_start < before.evidence_end <= start + size
+                and dest <= after.evidence_start < after.evidence_end <= dest + size
+                and max(before.evidence_start - start, after.evidence_start - dest)
+                    < min(before.evidence_end - start, after.evidence_end - dest)
+                for start, dest, size in unchanged_blocks
+            )
         if (
             before.node_type != after.node_type
             or before.semantic_id != after.semantic_id
-            or prompt[before.evidence_start : before.evidence_end]
-            != target_prompt[after.evidence_start : after.evidence_end]
+            or not same_evidence
         ):
             raise MechanismRegistryError("neutral rewrite changed non-target source evidence")
     old_root = next(node.node_id for node in graph.nodes if node.semantic_id == "task.root")

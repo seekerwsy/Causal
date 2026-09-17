@@ -1,0 +1,28 @@
+{
+  "request_sha256": "de103a0a000dc8ff787a41a83afb0ec6d20d8741db7827acbfe2e2bcfe19ac06",
+  "response_sha256": "65b9dc60c6312ac77e0cc8bc7e147ad1ab07be6a8ee66229e96a2b91f5aced75",
+  "reviewer_id": "codex_source_only_default_privilege_order_call_01",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "feature_id": "feature_9be58e06da3982f22c873d0ee1de4184cf400615f9820559947d2b733100bd90",
+      "decision": "accept",
+      "rationale": "The source explicitly says to increase privilege using raisePrivileges() before creating the directory. The submitted factor preserves the direct elevation target and its owned elevation-before-creation relation as one complete privilege requirement. Its actual applicability operation is the directory-creation operation, with username and /home/ as subjects; the quoted sentence 'Create a directory at the /home/ directory for the given username.' independently establishes exactly that coordinate even without the elevation instruction. The normalized operation and subject identities preserve these distinct roles, and no execution condition has been imported from the separate already-existing-directory exception requirement. Editing this privilege requirement can retain directory creation for the supplied username at the specified location, lowerPrivileges() after creation, the interfaces, exception handling, and output constraints. This acceptance concerns the expressed policy and independently supported task background; it does not establish that elevation is technically necessary, beneficial, or present in generated code.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": true,
+      "scope_preserves_task": true
+    },
+    {
+      "feature_id": "feature_e0272935d8255f8e7d1fbaa5d3adc3edd402e392fd314614dec38e3868e558f7",
+      "decision": "accept",
+      "rationale": "The source explicitly requires lowering privilege using lowerPrivileges() after directory creation. The submitted factor retains the direct lowering target and the owned creation-before-lowering relation, which together express one complete requirement rather than independent interventions. The actual applicability coordinate selects directory creation with username and /home/ as subjects. Its quoted independent sentence 'Create a directory at the /home/ directory for the given username.' supports that operation and both subjects without relying on the lowering clause. Normalization preserves creation as the applicability operation and lowering as the policy target, and the empty execution-condition list does not conflate the separate exception-handling condition with either operation. The selected scope permits the lowering requirement to be edited while retaining creation, the elevation-before-creation requirement, interfaces, exception handling, and output constraints. The factor does not add an unconditional cleanup or every-exception guarantee absent from the source, and no generated-code outcome is inferred.",
+      "source_supported": true,
+      "single_requirement": true,
+      "normalization_valid": true,
+      "context_independent": true,
+      "scope_preserves_task": true
+    }
+  ]
+}

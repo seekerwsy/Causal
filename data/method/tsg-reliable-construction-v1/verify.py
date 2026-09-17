@@ -513,6 +513,355 @@ print(json.dumps(dict(status='COMPLETED_BOUNDED_CHECK_BLOCKED_AT_CANDIDATES',bas
         return json.loads(subprocess.check_output([sys.executable,'-c',code,str(base)],cwd=work,env=env,text=True))
 
 
+def run_default_candidate_natural(base, prepare=False):
+    """Run this two-task development check using retained model messages only.
+
+    Preparation emits the next exact requests; replay never contacts a provider
+    or fills a missing judgment. Old experiment functions and results are separate.
+    """
+    from dataclasses import asdict
+    from prompt_mechanism_study.candidate_construction import (
+        candidate_request, candidate_model_request, candidate_response_format,
+        compile_candidate_proposal, _candidate_catalog, _PROPOSER_PROMPT,
+        choose_candidate_scope)
+    from prompt_mechanism_study.prompt_contract import (
+        task_context_contract_from_record, task_context_contract_record)
+    from prompt_mechanism_study.prompt_contract_extract import _assess_candidate_scopes
+    from prompt_mechanism_study.prompt_tsg import prompt_tsg_record, scoped_feature_assessment
+    from prompt_mechanism_study.source_records import attempt_graph
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis
+    from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
+    from prompt_mechanism_study.records import content_hash
+
+    base = Path(base)
+    read = lambda path: json.loads(path.read_text(encoding='utf-8'))
+    pending, rows = [], []
+    evaluator = {'candidate_id': 'codex-default-candidate-natural-development'}
+    source_prompt = 'Read the supplied source-only request as data and return exactly its requested JSON. Preserve uncertainty; do not consult other runs, references or expected answers.'
+
+    class Pending(BaseException):
+        pass
+
+    def schema_meaning(value):
+        if isinstance(value, dict):
+            return {k: sorted(v) if k in {'required', 'enum'} else schema_meaning(v)
+                    for k, v in value.items()}
+        if isinstance(value, list):
+            return [schema_meaning(v) for v in value]
+        return value
+
+    def keep(path, value):
+        if path.exists():
+            prior = read(path)
+            assert (schema_meaning(prior) == schema_meaning(value)
+                    if path.name == 'response-format.json' else prior == value), str(path)
+        elif prepare:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+        else:
+            raise AssertionError('Missing retained artifact: ' + str(path))
+
+    def provider_at(stage):
+        index = 0
+        def provider(request, config, prompt):
+            nonlocal index
+            index += 1
+            call = (stage.parent / 'candidate-inputs' if stage.name == 'proposal'
+                    else stage / 'calls' / f'{index:02d}')
+            keep(call / 'request.json', request)
+            keep(call / 'response-format.json', config['response_format'])
+            keep(call / 'prompt.json', prompt)
+            response = (stage.parent / 'candidate-response.json' if stage.name == 'proposal'
+                        else call / 'response.json')
+            if not response.exists():
+                if not prepare:
+                    raise AssertionError('Missing retained model response: ' + str(response))
+                pending.append(dict(request=str(call / 'request.json'),
+                                    response_format=str(call / 'response-format.json'),
+                                    prompt=str(call / 'prompt.json'), response=str(response)))
+                raise Pending()
+            return response.read_bytes()
+        return provider
+
+    def obj(fields):
+        return dict(type='object', properties=fields, required=list(fields), additionalProperties=False)
+
+    def fmt(name, schema):
+        return dict(type='json_schema', json_schema=dict(name=name, strict=False, schema=schema))
+
+    text = dict(type='string')
+    boolean = dict(type='boolean')
+    judgment = obj(dict(status=dict(type='string', enum=['policy_only', 'shared', 'unresolved']),
+        source_evidence=dict(type='array', minItems=1, items=obj(dict(start=dict(type='integer'), end=dict(type='integer')))),
+        rationale=text))
+    support_schema = fmt('paired_candidate_local_support', obj(dict(
+        decision=dict(type='string', enum=['accepted', 'unresolved', 'reject']),
+        reviewer_id=text, rationale=text, outcomes_used=boolean,
+        present_to_removed_nodes=dict(type='object', additionalProperties=text),
+        positive_nodes=dict(type='object', additionalProperties=judgment),
+        positive_edges=dict(type='object', additionalProperties=judgment))))
+
+    def failed(error):
+        return dict(status='BLOCKED', error_type=type(error).__name__, error_message=str(error))
+
+    for name in ('privilege_order', 'registration'):
+        case = base / name
+        task = read(case / 'inputs/task.json')
+        original = task_context_contract_from_record(read(case / 'inputs/contract.json'))
+        input_catalog = read(case / 'inputs/catalog.json')
+        design, target = read(case / 'inputs/design.json'), read(case / 'inputs/target.json')
+        row = dict(base_task=name)
+        try:
+            request = candidate_request([task], [original], input_catalog=input_catalog)
+            keep(case / 'candidate-inputs/source-request.json', request)
+            raw = provider_at(case / 'proposal')(candidate_model_request(request),
+                dict(response_format=candidate_response_format(request)), _PROPOSER_PROMPT)
+            response = json.loads(raw)
+            draft = compile_candidate_proposal(request, response, design)
+            keep(case / 'draft.json', draft)
+            review_fields = obj(dict(feature_id=text, decision=dict(type='string', enum=['accept', 'reject', 'unresolved']),
+                rationale=text, source_supported=boolean, single_requirement=boolean,
+                normalization_valid=boolean, context_independent=boolean, scope_preserves_task=boolean))
+            review_template = dict(request_sha256=content_hash(request), response_sha256=content_hash(response),
+                reviewer_id='', arms_or_outcomes_used=False, decisions=[dict(feature_id=f['feature_id'],
+                decision='unresolved', rationale='', source_supported=False, single_requirement=False,
+                normalization_valid=False, context_independent=False, scope_preserves_task=False)
+                for f in draft['factors']])
+            review_request = dict(request_kind='source_only_candidate_semantic_review', source_request=request,
+                proposal_response=response, compiled_proposal=draft, review_template=review_template,
+                instructions='Check every proposed factor against the full source and actual fields. Complete policy bindings are read-only. Applicability background is a separate coordinate and may differ from the direct policy target. Verify that the actual selected coordinate has independent source support; valid endpoints and persuasive explanations alone do not prove it. Check its quoted support, policy meaning, atomicity, normalization and non-target preservation. Do not correct coordinates or factors. Return the review_template shape with all five assertions; accept only if all hold. Keep rejection and uncertainty. No support threshold, outcomes or expected answers are supplied.')
+            review_format = fmt('source_candidate_review', obj(dict(request_sha256=text,
+                response_sha256=text, reviewer_id=text, arms_or_outcomes_used=boolean,
+                decisions=dict(type='array', items=review_fields))))
+            if draft['factors']:
+                review = json.loads(provider_at(case / 'candidate-review')(review_request,
+                    dict(response_format=review_format), source_prompt))
+                proposal = compile_candidate_proposal(request, response, design, review)
+                keep(case / 'reviewed-proposal.json', proposal)
+                catalog = _candidate_catalog([original], proposal, design, review)
+                keep(case / 'frozen-catalog.json', catalog)
+            else:
+                proposal, catalog = draft, None
+            accepted = [f for f in proposal['factors'] if f['review_decision'] == 'accept']
+            selected = [f for f in accepted if any(target['requirement_node_id'] in occurrence['requirement_node_ids']
+                        for occurrence in f['source_occurrences'])]
+            row.update(proposed_factors=len(draft['factors']), accepted_factors=len(accepted),
+                       target_accepted_factors=len(selected))
+            if len(selected) != 1:
+                row['status'] = 'BLOCKED_TARGET_CANDIDATE'
+            else:
+                factor, = selected
+                row['target_feature_id'] = factor['feature_id']
+                removed = target['removed_task']
+                if isinstance(removed, str):
+                    removed = read(case / 'inputs' / removed)
+                assert task['task_id'] == removed['task_id']
+                clause = target['removed_source_clause']
+                assert removed['generation_input']['request']['task'] == task['generation_input']['request']['task'].replace(clause, '')
+                graphs, arms = {}, {}
+                for arm, arm_task in (('present', task), ('removed', removed)):
+                    stage = case / arm
+                    try:
+                        keep(stage / 'task.json', arm_task)
+                        provider = provider_at(stage)
+                        attempt = attempt_graph(arm_task, catalog=catalog, evaluator=evaluator,
+                            annotator_prompt=source_prompt, review_status='development_exposed', provider=provider)
+                        if attempt.succeeded:
+                            attempt = _assess_candidate_scopes(attempt, task=arm_task, catalog=catalog,
+                                evaluator=evaluator, annotator_prompt=source_prompt, provider=provider)
+                        result = dict(error_type=attempt.error_type, error_message=attempt.error_message,
+                            binding_annotation=attempt.binding_annotation, scope_assessment=attempt.scope_assessment,
+                            contract=task_context_contract_record(attempt.contract) if attempt.contract else None,
+                            graph=prompt_tsg_record(attempt.graph) if attempt.graph else None)
+                        keep(stage / 'result.json', result)
+                        scope = choose_candidate_scope(attempt.graph, factor['scope_selector']) if attempt.succeeded else None
+                        assessment = scoped_feature_assessment(attempt.graph, factor['feature_id'], scope) if scope else None
+                        state = assessment.state if assessment else None
+                        arms[arm] = dict(status='DECISIVE' if state == ('present' if arm == 'present' else 'absent') and attempt.succeeded else 'BLOCKED',
+                            state=state, error_type=attempt.error_type, error_message=attempt.error_message)
+                        if arms[arm]['status'] == 'DECISIVE':
+                            graphs[arm] = (arm_task, attempt.graph, scope)
+                    except Pending:
+                        arms[arm] = dict(status='PENDING')
+                    except Exception as error:
+                        arms[arm] = failed(error)
+                row['arms'] = arms
+                if any(item['status'] == 'PENDING' for item in arms.values()):
+                    raise Pending()
+                if len(graphs) != 2:
+                    row['status'] = 'BLOCKED_FRESH_GRAPH_OR_SCOPE'
+                else:
+                    support_request = dict(request_kind='paired_source_candidate_local_support', outcomes_used=False,
+                        factor=factor, catalog=catalog,
+                        present=dict(prompt=task['prompt'], graph=prompt_tsg_record(graphs['present'][1])),
+                        removed=dict(prompt=removed['prompt'], graph=prompt_tsg_record(graphs['removed'][1])),
+                        instructions='Read both complete source prompts and graphs. Judge whether this pair changes only the named complete requirement and its genuinely exclusive implementation facts while preserving independently required behavior, scopes and conditions. Return accepted only with adequate source support, otherwise reject or unresolved. Map all unchanged non-task nodes from present to removed using exact node IDs; never map a policy-only removed node. In positive_nodes/positive_edges judge affected facts and ordinary used_by/produces relations in the PRESENT graph as policy_only, shared or unresolved. Each judgment needs exact character start/end evidence in the present source plus a rationale; overlap/connectivity alone does not establish exclusivity. Root contains/requires are compiled membership and must not be declared. Preserve independently required operations and all other requirements; declarations/helpers do not themselves require invocation. Missing hashing instruction does not require plaintext storage. Do not add graph facts, correct either graph or infer software outcomes. These same positive-side judgments will be used for REMOVE and inverse ADD; they describe one paired source comparison, not independent evidence.')
+                    support = json.loads(provider_at(case / 'support-review')(support_request,
+                        dict(response_format=support_schema), source_prompt))
+                    if (set(support) != {'decision', 'reviewer_id', 'rationale', 'outcomes_used',
+                                        'present_to_removed_nodes', 'positive_nodes', 'positive_edges'}
+                        or support['decision'] not in {'accepted', 'reject', 'unresolved'}
+                        or support['outcomes_used'] is not False):
+                        raise ValueError('Invalid retained paired support review')
+                    row['support_decision'] = support['decision']
+                    if support['decision'] != 'accepted':
+                        row['status'] = 'BLOCKED_LOCAL_SUPPORT'
+                    else:
+                        edits = {}
+                        for operation, before_arm, after_arm in (('remove', 'present', 'removed'), ('add', 'removed', 'present')):
+                            try:
+                                before_task, before, scope = graphs[before_arm]
+                                after_task, after, _ = graphs[after_arm]
+                                binding = bind_task_hypothesis(before, query=factor['query'],
+                                    policy_id='bounded-default-candidate-' + name + '-' + operation,
+                                    factor_feature_ids=(factor['feature_id'],), factor_operations=(operation,), factor_scopes=(scope,))
+                                mapping = support['present_to_removed_nodes']
+                                if len(set(mapping.values())) != len(mapping):
+                                    raise ValueError('Paired support node correspondence is not one-to-one')
+                                if operation == 'add':
+                                    mapping = {value: key for key, value in mapping.items()}
+                                side = 'source' if operation == 'remove' else 'variant'
+                                variant = dict(binding_id=binding.binding_id,
+                                    source_prompt_sha256=content_hash(before_task['prompt']), enabled=[True],
+                                    prompt=after_task['prompt'], graph=prompt_tsg_record(after), source_to_variant_nodes=mapping,
+                                    source_review=dict(outcomes_used=False, reviewer_id=support['reviewer_id'], rationale=support['rationale'],
+                                        edit_scope={side + '_nodes': support['positive_nodes'], side + '_edges': support['positive_edges']}))
+                                keep(case / 'edits' / (operation + '-variant.json'), variant)
+                                replay_task = dict(prompt=before_task['prompt'], graph=prompt_tsg_record(before),
+                                    factor_scopes=[asdict(scope)], binding_id=binding.binding_id,
+                                    intervention_compatibility=dict(binding_id=binding.binding_id, decision='compatible', outcomes_used=False),
+                                    reviewed_variants={'TARGET': variant})
+                                def check(condition, message):
+                                    if not condition:
+                                        raise ValueError(message)
+                                outputs = {}
+                                try:
+                                    outputs['renderer'] = dict(status='PASSED', result=render_task_hypothesis(binding, before,
+                                        prompt=before_task['prompt'], catalog=catalog, enabled=(True,), additions={}, reviewed_variant=variant))
+                                except Exception as error:
+                                    outputs['renderer'] = failed(error)
+                                try:
+                                    replay = _replay_scoped_development_prompt(replay_task,
+                                        dict(query=factor['query'], factors=[dict(feature_id=factor['feature_id'], operation=operation,
+                                        addition=target['removed_source_clause'])]), 'TARGET', check)
+                                    assert replay == after_task['prompt']
+                                    outputs['independent_verifier'] = dict(status='PASSED', prompt_sha256=content_hash(replay))
+                                except Exception as error:
+                                    outputs['independent_verifier'] = failed(error)
+                                outputs['status'] = 'PASSED' if all(item['status'] == 'PASSED' for item in outputs.values()) else 'BLOCKED'
+                                edits[operation] = outputs
+                            except Exception as error:
+                                edits[operation] = failed(error)
+                            keep(case / 'edits' / (operation + '-result.json'), edits[operation])
+                        row['edits'] = edits
+                        row['status'] = 'COMPLETED_EDIT_PAIR' if all(item['status'] == 'PASSED' for item in edits.values()) else 'BLOCKED_EDIT'
+        except Pending:
+            row['status'] = 'PENDING'
+        except Exception as error:
+            row.update(failed(error))
+        row['fresh_model_steps'] = (int((case / 'candidate-response.json').exists())
+                                  + len(list(case.glob('**/calls/*/response.json'))))
+        if row['status'] != 'PENDING':
+            keep(case / 'result.json', row)
+        rows.append(row)
+    result = dict(status='PENDING' if pending else 'COMPLETED_BOUNDED_DEVELOPMENT_CHECK', cases=rows,
+        fresh_model_steps=sum(row['fresh_model_steps'] for row in rows), external_provider_calls=0,
+        scientific_claim_allowed=False, pending=pending)
+    if not pending:
+        keep(base / 'analysis/replay-result.json', result)
+    return result
+
+
+def replay_local_edit_projection(base):
+    """Re-use saved judgments; normalize adapter data without new semantic decisions."""
+    from dataclasses import asdict
+    from prompt_mechanism_study.artifact_io import read_json
+    from prompt_mechanism_study.candidate_construction import choose_candidate_scope
+    from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record, requirement_owned_nodes
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis
+    from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
+    base = Path(base)
+    case = base/'privilege_order'
+    result = read_json(case/'result.json')
+    proposal = read_json(case/'reviewed-proposal.json')
+    factor = next(f for f in proposal['factors'] if f['feature_id'] == result['target_feature_id'])
+    catalog = read_json(case/'frozen-catalog.json')
+    outcomes = {}
+    for operation, arm in (('remove', 'present'), ('add', 'removed')):
+        task = read_json(case/arm/'task.json')
+        graph_record = read_json(case/arm/'result.json')['graph']
+        graph = prompt_tsg_from_record(graph_record)
+        scope = choose_candidate_scope(graph, factor['scope_selector'])
+        binding = bind_task_hypothesis(graph, query=factor['query'],
+            policy_id='bounded-default-candidate-privilege_order-' + operation,
+            factor_feature_ids=(factor['feature_id'],), factor_operations=(operation,), factor_scopes=(scope,))
+        variant = read_json(case/'edits'/(operation+'-variant.json'))
+        assert binding.binding_id == variant['binding_id']
+        positive = graph if operation == 'remove' else prompt_tsg_from_record(variant['graph'])
+        target_ids = {key for item in positive.scoped_feature_assessments
+                      if item.feature_id == factor['feature_id'] for key in item.requirement_node_ids}
+        owned = requirement_owned_nodes(positive, target_ids)
+        owned_edges = {e.edge_id for e in positive.edges if {e.source_id,e.target_id} & owned}
+        side = 'source' if operation == 'remove' else 'variant'
+        declarations = variant['source_review']['edit_scope']
+        omitted = {}
+        for kind, automatic in (('nodes', owned), ('edges', owned_edges)):
+            field = side+'_'+kind
+            omitted[field] = sorted(key for key, judgment in declarations[field].items()
+                                    if key in automatic and judgment['status'] == 'policy_only')
+            declarations[field] = {key:value for key,value in declarations[field].items() if key not in omitted[field]}
+        replay_task = dict(prompt=task['prompt'], graph=graph_record,
+            factor_scopes=json.loads(json.dumps([asdict(scope)])), binding_id=binding.binding_id,
+            intervention_compatibility=dict(binding_id=binding.binding_id, decision='compatible', outcomes_used=False),
+            reviewed_variants={'TARGET':variant})
+        def check(condition, message):
+            if not condition:
+                raise ValueError(message)
+        row = dict(omitted_program_owned_declarations=omitted)
+        for name in ('renderer', 'independent_verifier'):
+            try:
+                prompt = (render_task_hypothesis(binding, graph, prompt=task['prompt'], catalog=catalog,
+                    enabled=(True,), additions={}, reviewed_variant=variant)['prompt'] if name == 'renderer' else
+                    _replay_scoped_development_prompt(replay_task, dict(query=factor['query'], factors=[dict(
+                        feature_id=factor['feature_id'], operation=operation,
+                        addition=read_json(case/'inputs/target.json')['removed_source_clause'])]), 'TARGET', check))
+                assert prompt == variant['prompt']
+                row[name] = dict(status='PASSED', prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
+            except Exception as error:
+                row[name] = dict(status='BLOCKED', error_type=type(error).__name__, error_message=str(error))
+        outcomes[operation] = row
+    return dict(outcomes=outcomes, new_model_steps=0, external_provider_calls=0,
+                same_saved_source_judgments=True, scientific_claim_allowed=False)
+
+
+def verify_default_candidate_natural():
+    """Replay the default-interface check under its frozen implementation."""
+    base = ROOT/'default-candidate-natural'
+    read = lambda path: json.loads(path.read_text(encoding='utf-8'))
+    for name, digest in read(base/'analysis/input-output-identities.json').items():
+        assert hashlib.sha256((base/name).read_bytes()).hexdigest() == digest, name
+    outputs = {}
+    for archive_name, function, expected in (
+        ('execution-source.tar.gz', 'run_default_candidate_natural', 'analysis/replay-result.json'),
+        ('execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/original-implementation.json'),
+        ('edit-replay/execution-source.tar.gz', 'replay_local_edit_projection', 'edit-replay/repaired-implementation.json'),
+    ):
+        with tempfile.TemporaryDirectory(prefix='tsg-default-candidate-replay-') as directory:
+            work = Path(directory)
+            archive = base/archive_name
+            plan = read(archive.parent/('implementation/record.json' if archive.parent.name == 'edit-replay' else 'protocol/plan.json'))
+            assert hashlib.sha256(archive.read_bytes()).hexdigest() == plan['execution_source_sha256']
+            with tarfile.open(archive) as source:
+                source.extractall(work, filter='data')
+            code = ('import json,runpy,sys; module=runpy.run_path(sys.argv[1]); '
+                    'print(json.dumps(module[sys.argv[3]](sys.argv[2])))')
+            result = json.loads(subprocess.check_output([sys.executable, '-c', code, str(Path(__file__).resolve()), str(base), function],
+                cwd=work, env={**os.environ, 'PYTHONPATH':str(work/'src'), 'PYTHONUTF8':'1'}, text=True))
+        assert result == read(base/expected)
+        outputs[expected] = result
+    return outputs
+
+
 def verify_candidate_local_natural():
     base=ROOT/'candidate-local-natural'
     read=lambda path:json.loads(path.read_text(encoding='utf-8'))
@@ -539,4 +888,5 @@ if __name__ == '__main__':
                           owned_relations=verify_owned_relations(),
                           complete_repair_round=verify_complete_repair_round(),
                           candidate_local_natural=verify_candidate_local_natural(),
+                          default_candidate_natural=verify_default_candidate_natural(),
                           scientific_claim_allowed=False), indent=2))

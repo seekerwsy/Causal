@@ -51,7 +51,8 @@ requirements for a security-policy experiment that preserves required functional
 requirements. There are no outcomes, expected effects, preselected factors or quotas.
 Each requirement node contains its own complete_bindings beside its definition and citation.
 Give one decision for that exact node_ref; the program restores ALL of its complete bindings.
-NEVER reconstruct scopes, add targets, remove conditions, repair graphs or invent references.
+Those complete policy bindings are READ-ONLY: never reconstruct them, add direct targets,
+remove policy conditions, repair graphs or invent references.
 A listed binding certifies only structural consistency, NOT correct extraction, one editable
 requirement, security relevance or applicability. Check every selected binding against the source.
 Node types (including safety_requirement) and atom labels are not eligibility certificates.
@@ -75,15 +76,34 @@ Applicability needs source support; neither policy presence nor an empty quantif
 Requirement-only guards stay inside the policy, never become task-selection gates. Preserve
 all owned policy_relations: the order belongs to that requirement,
 not to an independent task context. Relation endpoints are operands, not extra direct targets.
+Separately select an applicability background for EACH listed binding_ref. This is the task
+coordinate at which to compare whether the complete policy is expressed; it is NOT the policy's
+direct target. Selecting another owned-order endpoint as background does not change the original
+target, predicate, policy conditions or order. The program retains that policy binding unchanged.
+Use an existing source operation (or the original task.root coordinate) that the source still
+requires independently of this policy. It may equal the direct target or be an owned-order
+endpoint. Copy its source-bound input refs and ALL its execution-condition refs; do not copy
+policy-only guards into this background. A valid endpoint or declaration alone does not prove
+an independently required action. Cite the exact source text that supports the selected background
+without relying on the target policy, and explain why that text requires this actual coordinate.
+Check the chosen operation_ref itself: a rationale naming a different operation cannot justify it.
+Do not infer an implementation or missing software protection. If any necessary background is
+unresolved, mark this requirement unresolved; do not silently reuse the policy-only action.
 Describe requirements without predicting code security. Missing prompt text is not missing software protection.
-Return only {decisions: {node_ref: {status, label, definition, rationale}, ...}}. The schema names
+Return only {decisions: {node_ref: {status, label, definition, rationale, applicability_bindings}, ...}}. The schema names
 every required decision key. Use exactly those keys, once each, including non-actionable units.
 status is include, not_actionable or unresolved. For include, label and definition normalize only
 THIS node's complete meaning; rationale explains its one editable predicate and preserved behavior.
+applicability_bindings maps each listed binding_ref to {operation_ref, subject_refs,
+execution_condition_refs, independent_source_evidence: [{evidence_text, occurrence}], rationale}.
+Every included binding needs a non-null selection and nonempty supporting citations, including
+when background and direct target coincide. occurrence is the one-based source occurrence.
 For other statuses, label and definition must be empty strings and rationale explains the decision.
+Their applicability_bindings still lists every binding_ref, each with a null value.
 A node with no complete_bindings cannot be included. Do not return a separate exclusions list,
-binding references, occurrence list, scope fields or baskets of nodes. The same node_ref identifies
-the source and its decision; there is no second index. The compiler groups individually selected
+occurrence list, revised policy scope fields or baskets of nodes. The same node_ref identifies
+the source and its decision; binding_ref only identifies the unchanged binding's background choice.
+The compiler groups individually selected
 units only by normalized complete meaning and exact scope. Selecting none is valid. Inclusion
 remains subject to separate explicit semantic review; matching structure alone does not prove meaning.
 """
@@ -179,6 +199,7 @@ def _candidate_units(request):
                     continue
                 bindings[refs[key]].append(occurrence)
                 short_bindings[refs[key]].append(dict(
+                    binding_ref=f"{refs[key]}.B{len(bindings[refs[key]])}",
                     operation_ref=refs[operation], subject_refs=[refs[n] for n in scope["subject_node_ids"]],
                     execution_condition_refs=[refs[n] for n in sorted(execution)],
                     policy_condition_refs=[refs[n] for n in sorted(envelope["conditions"] - execution)],
@@ -206,27 +227,63 @@ def candidate_model_request(request: dict) -> dict:
     """Compact transport only: preserve all source meaning and exact stored request identity."""
     _, _, sources = _candidate_units(request)
     return dict(request_kind="decide_complete_source_requirements", source_request_sha256=content_hash(request),
-                sources=sources, arms_or_outcomes_used=False)
+                instructions=_PROPOSER_PROMPT, sources=sources, arms_or_outcomes_used=False)
 
 
 def _expand_unit_decisions(request, response):
-    """Restore program-derived coordinates, never accept model-authored binding fields."""
+    """Restore policy bindings; resolve separately submitted source-backed backgrounds."""
     _fields(response, {"decisions"}, "requirement decision response")
-    requirements, bindings, _ = _candidate_units(request)
+    requirements, bindings, short_sources = _candidate_units(request)
     _fields(response["decisions"], set(requirements), "complete requirement decisions")
+    source_nodes = {}
+    for source, short in zip(request["sources"], short_sources, strict=True):
+        source_nodes[source["task_id"]] = {item["node_ref"]: node["node_id"]
+            for node, item in zip(sorted(source["nodes"], key=lambda n: n["node_id"]), short["nodes"], strict=True)}
+    # Four-field decisions are retained only to replay frozen pre-background responses.
+    # The active request/schema always requires an explicit choice for every binding.
+    active = any(isinstance(row, dict) and "applicability_bindings" in row for row in response["decisions"].values())
     factors, dispositions = [], []
     for ref, row in response["decisions"].items():
-        _fields(row, {"status", "label", "definition", "rationale"}, "requirement decision")
+        _fields(row, {"status", "label", "definition", "rationale"}
+                | ({"applicability_bindings"} if active else set()), "requirement decision")
         if row["status"] not in {"include", "not_actionable", "unresolved"}:
             raise ValueError("requirement decision status is invalid")
         require_text(row["rationale"], "requirement decision rationale")
+        occurrences = bindings[ref]
+        if active:
+            expected = {f"{ref}.B{i}": occurrence for i, occurrence in enumerate(occurrences, 1)}
+            _fields(row["applicability_bindings"], set(expected), "applicability binding decisions")
+            occurrences = []
+            for binding_ref, occurrence in expected.items():
+                choice = row["applicability_bindings"][binding_ref]
+                if row["status"] != "include":
+                    if choice is not None:
+                        raise ValueError("excluded requirement cannot select an applicability binding")
+                    continue
+                _fields(choice, {"operation_ref", "subject_refs", "execution_condition_refs",
+                                 "independent_source_evidence", "rationale"}, "included applicability binding")
+                refs = source_nodes[occurrence["task_id"]]
+                def resolve(value):
+                    if not isinstance(value, str) or value not in refs:
+                        raise ValueError("applicability binding references an unknown source node")
+                    return refs[value]
+                for name in ("subject_refs", "execution_condition_refs"):
+                    if (not isinstance(choice[name], list) or any(not isinstance(value, str) for value in choice[name])
+                            or len(set(choice[name])) != len(choice[name])):
+                        raise ValueError("applicability binding refs must be unique source-node lists")
+                occurrences.append(dict(occurrence,
+                    applicability_scope=dict(operation_node_id=resolve(choice["operation_ref"]),
+                        subject_node_ids=sorted(resolve(value) for value in choice["subject_refs"]),
+                        condition_node_ids=sorted(resolve(value) for value in choice["execution_condition_refs"])),
+                    applicability_support=dict(source_evidence=choice["independent_source_evidence"],
+                                               rationale=choice["rationale"])))
         if row["status"] == "include":
             if not bindings[ref]:
                 raise ValueError("included requirement has no complete source binding")
             for key in ("label", "definition"):
                 require_text(row[key], key)
             factors.append(dict(label=row["label"], definition=row["definition"],
-                                atomicity_rationale=row["rationale"], occurrences=bindings[ref]))
+                                atomicity_rationale=row["rationale"], occurrences=occurrences))
         elif row["label"] != "" or row["definition"] != "":
             raise ValueError("excluded requirement must not supply a candidate label or definition")
         task, node = requirements[ref]
@@ -239,11 +296,17 @@ def candidate_response_format(request: dict) -> dict:
     text = {"type": "string"}
     def obj(properties):
         return dict(type="object", properties=properties, required=list(properties), additionalProperties=False)
-    requirements, _, _ = _candidate_units(request)
-    decision = obj(dict(status=dict(type="string", enum=["include", "not_actionable", "unresolved"]),
-                        label=text, definition=text, rationale=text))
+    requirements, bindings, _ = _candidate_units(request)
+    citation = obj(dict(evidence_text=text, occurrence=dict(type="integer", minimum=1)))
+    choice = obj(dict(operation_ref=text, subject_refs=dict(type="array", items=text),
+        execution_condition_refs=dict(type="array", items=text),
+        independent_source_evidence=dict(type="array", items=citation, minItems=1), rationale=text))
+    decisions = {ref: obj(dict(status=dict(type="string", enum=["include", "not_actionable", "unresolved"]),
+        label=text, definition=text, rationale=text,
+        applicability_bindings=obj({f"{ref}.B{i}": dict(anyOf=[choice, dict(type="null")])
+                                    for i in range(1, len(bindings[ref]) + 1)}))) for ref in requirements}
     return dict(type="json_schema", json_schema=dict(name="source_requirement_candidates", strict=True,
-        schema=obj(dict(decisions=obj({ref: decision for ref in requirements})))))
+        schema=obj(dict(decisions=obj(decisions)))))
 
 
 def _fields(row: Mapping, expected: set[str], name: str) -> None:
@@ -282,7 +345,8 @@ def _fixed_template_concepts():
 
 def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, dict]:
     _fields(occurrence, {"task_id", "requirement_node_ids", "scope"}
-            | ({"applicability_scope"} if "applicability_scope" in occurrence else set()), "factor occurrence")
+            | ({"applicability_scope"} if "applicability_scope" in occurrence else set())
+            | ({"applicability_support"} if "applicability_support" in occurrence else set()), "factor occurrence")
     nodes = {node["node_id"]: node for node in source["nodes"]}
     links = {(e["source_id"], e["edge_type"], e["target_id"]) for e in source["edges"]}
     requirements = occurrence["requirement_node_ids"]
@@ -356,16 +420,36 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         anchor = background.operation_node_id
         connected = {op, *(key for a, _, b in policy_relations for key in (a, b))}
         guards = {a for a, rel, b in links if rel == "conditions" and b == anchor}
-        if (anchor not in connected or anchor not in nodes or nodes[anchor]["node_type"] != "task_operation"
+        root_anchor = anchor == op and nodes.get(anchor, {}).get("concept_id") == "task.root"
+        if (anchor not in connected or anchor not in nodes
+                or not root_anchor and nodes[anchor]["node_type"] != "task_operation"
                 or background.subject_node_ids != tuple(sorted(set(background.subject_node_ids)))
                 or background.condition_node_ids != tuple(sorted(guards))
+                or root_anchor and (guards or set(background.subject_node_ids) != set(subjects))
                 or any(key not in nodes or nodes[key]["node_type"] != "data_object"
-                       or (key, "used_by", anchor) not in links for key in background.subject_node_ids)):
+                       or not root_anchor and (key, "used_by", anchor) not in links for key in background.subject_node_ids)):
             raise ValueError("applicability scope needs an exact source operation/input/execution binding connected to the policy")
         selector["applicability_scope"] = dict(operation_semantic_id=semantic(anchor),
             subject_semantic_ids=sorted(semantic(key) for key in background.subject_node_ids),
             execution_condition_semantic_ids=sorted(semantic(key) for key in guards))
         evidence["applicability_scope"] = canonical_value(background)
+    if "applicability_support" in occurrence:
+        if "applicability_scope" not in occurrence:
+            raise ValueError("applicability support requires an explicit background coordinate")
+        support = occurrence["applicability_support"]
+        _fields(support, {"source_evidence", "rationale"}, "applicability support")
+        require_text(support["rationale"], "independent applicability rationale")
+        if not isinstance(support["source_evidence"], list) or not support["source_evidence"]:
+            raise ValueError("independent applicability requires source evidence")
+        for citation in support["source_evidence"]:
+            _fields(citation, {"evidence_text", "occurrence"}, "independent applicability citation")
+            require_text(citation["evidence_text"], "independent applicability quotation")
+            if type(citation["occurrence"]) is not int or citation["occurrence"] < 1:
+                raise ValueError("independent applicability occurrence must be a positive integer")
+            _occurrence_span(source["source_prompt"], citation["evidence_text"], citation["occurrence"])
+        # Exact quotation proves source location only; the existing semantic reviewer
+        # still decides whether it supports this actual background without the policy.
+        evidence["applicability_support"] = canonical_value(support)
     return selector, evidence
 
 
@@ -382,7 +466,7 @@ def _query(selector: dict, feature_id: str) -> dict:
     # An explicit background excludes policy operands from task selection. Without
     # one, preserve the original source geometry rather than inventing an anchor.
     execution = set(coordinate.get('execution_condition_semantic_ids', conditions))
-    relations = sorted({(s, "used_by", op) for s in subjects if background or selector["scope_kind"] != "objects"}
+    relations = sorted({(s, "used_by", op) for s in subjects if op != "task.root" and (background or selector["scope_kind"] != "objects")}
                        | {(c, "conditions" if c in execution else "context_for", op) for c in conditions})
     identity = content_hash(dict(required_semantics=semantics, required_relations=relations))
     return dict(query_id="context_" + identity, realization_id=content_id("candidate_query_", (identity, feature_id)),
@@ -706,6 +790,15 @@ def build_candidate_catalog(
                 read_json_exact(request_bundle / "prompt.json"),
             )
         response = json_object(raw)
+        if evaluator_path is not None:
+            # New model calls must use the current interface. Legacy four-field
+            # parsing is available only when replaying a retained response.
+            _fields(response, {"decisions"}, "requirement decision response")
+            if not isinstance(response["decisions"], dict):
+                raise ValueError("complete requirement decisions must be an object")
+            for row in response["decisions"].values():
+                _fields(row, {"status", "label", "definition", "rationale", "applicability_bindings"},
+                        "current requirement decision")
         review = read_json_exact(review_path) if review_path is not None else None
         proposal = compile_candidate_proposal(request, response, design, review)
         catalog = _candidate_catalog(contracts, proposal, design, review)

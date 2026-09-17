@@ -1,0 +1,98 @@
+{
+  "decisions": {
+    "T1.N4": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Handling the exception when the requested directory already exists is required error behavior. Preserve that conditional behavior as non-target functionality; the source does not express a separately editable security policy in this requirement.",
+      "applicability_bindings": {
+        "T1.N4.B1": null
+      }
+    },
+    "T1.N7": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving the required interfaces is a general implementation obligation and non-target functionality, not a security-policy intervention.",
+      "applicability_bindings": {
+        "T1.N7.B1": null
+      }
+    },
+    "T1.N10": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Creating the directory for the given username within /home/ is the task's required functional operation. Preserve the operation, its username input, and its location when editing a privilege policy.",
+      "applicability_bindings": {
+        "T1.N10.B1": null
+      }
+    },
+    "T1.N14": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Returning a JSON object containing only the code key is an output-format requirement, not a security policy. Preserve it as non-target behavior.",
+      "applicability_bindings": {
+        "T1.N14.B1": null
+      }
+    },
+    "T1.N15": {
+      "status": "include",
+      "label": "Lower privilege after user-directory creation",
+      "definition": "In makeNewUserDir(username), lower execution privilege using lowerPrivileges() after creating the user directory within /home/.",
+      "rationale": "The source explicitly requires one privilege-lifecycle policy: invoke lowerPrivileges() after directory creation. The unchanged binding correctly targets the lowering operation and retains directory creation preceding that operation as part of this same requirement. The ordering is not a separate background obligation. This requirement can be edited while preserving directory creation, the interfaces, privilege elevation before creation, and handling an already-existing directory. The source does not specify unconditional cleanup on every exceptional exit, so this decision adds no such condition and predicts no software outcome.",
+      "applicability_bindings": {
+        "T1.N15.B1": {
+          "operation_ref": "T1.N9",
+          "subject_refs": ["T1.N12", "T1.N13"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "Create a directory at the /home/ directory for the given username.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "This independent sentence requires the actual directory-creation operation T1.N9 for username T1.N12 within /home/ T1.N13 even if the lowering requirement is absent. No execution condition is attached to that operation. T1.N9 supplies the comparison background as an owned-order endpoint; the direct target remains T1.N2 and the complete order relation remains unchanged."
+        }
+      }
+    },
+    "T1.N16": {
+      "status": "include",
+      "label": "Raise privilege before user-directory creation",
+      "definition": "In makeNewUserDir(username), increase execution privilege using raisePrivileges() before creating the user directory within /home/.",
+      "rationale": "The source explicitly requires one privilege-lifecycle policy: invoke raisePrivileges() before directory creation. The unchanged binding correctly targets the elevation operation and owns its precedence over directory creation. This is a policy about execution privilege, with the call and its timing constituting the complete editable requirement. Preserve directory creation, the interfaces, lowering privilege after creation, and handling an already-existing directory. Inclusion does not infer that elevation is technically necessary for creation or that any generated implementation has a particular security property.",
+      "applicability_bindings": {
+        "T1.N16.B1": {
+          "operation_ref": "T1.N9",
+          "subject_refs": ["T1.N12", "T1.N13"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "Create a directory at the /home/ directory for the given username.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "This independent sentence requires the actual directory-creation operation T1.N9, using username T1.N12 and the /home/ location T1.N13, without relying on the elevation instruction. The operation has no execution-condition refs. Selecting this owned-order endpoint as the applicability background leaves the direct target T1.N11 and its complete precedence relation unchanged."
+        }
+      }
+    },
+    "T1.N17": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving required non-target behavior is the general constraint on the intervention and implementation, not an independently targeted security policy.",
+      "applicability_bindings": {
+        "T1.N17.B1": null
+      }
+    },
+    "T1.N18": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Python is the required implementation language, repeated in the source's language declaration and output instruction. Preserve this environment constraint as non-target functionality.",
+      "applicability_bindings": {
+        "T1.N18.B1": null
+      }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "records": {
+    "obj_os": {
+      "status": "supported",
+      "reason": "The source imports os, establishing its availability without requiring either runtime action to consume it.",
+      "rejected_claims": []
+    },
+    "obj_username": {
+      "status": "supported",
+      "reason": "username is the exact argument of makeNewUserDir and is the username for which the directory must be created.",
+      "rejected_claims": []
+    },
+    "obj_home": {
+      "status": "supported",
+      "reason": "The source explicitly names the /home/ directory as the location within which the user directory is created.",
+      "rejected_claims": []
+    },
+    "obj_user_directory": {
+      "status": "supported",
+      "reason": "The directory to create for the given username is a source-supported object distinct from its /home/ parent and the username selector.",
+      "rejected_claims": []
+    },
+    "op_make_user_directory": {
+      "status": "supported",
+      "reason": "The named function is the enclosing directory-creation task. Its contract uses username to select the directory, writes within /home/, and produces that directory. These participants belong to the aggregate contract as well as its creation action. The source supplies no gate on the entire function, no independent scope condition, and no independent ordering relation for this aggregate operation.",
+      "rejected_claims": []
+    },
+    "op_create_directory": {
+      "status": "supported",
+      "reason": "The docstring requires creation of the directory for username within /home/. username is its structural selector, /home/ its destination, and the new user directory its result. The existing-directory branch guards exception handling rather than the whole creation operation. The privilege order is correctly left to the owning requirement rather than duplicated in precedes.",
+      "rejected_claims": []
+    },
+    "op_raise_privileges": {
+      "status": "supported",
+      "reason": "The source explicitly prescribes increasing privilege using the no-argument raisePrivileges() helper. No username, directory, os module, separate output value, or execution gate is stated for that action. The required ordering is owned by req_raise_before_creation, so an empty independent precedes list is appropriate.",
+      "rejected_claims": []
+    },
+    "req_create_directory": {
+      "status": "supported",
+      "reason": "The creation imperative is an atomic obligation on makeNewUserDir, with its username and /home/ binding preserved by the operation. No additional condition, universal target class, independent object target, or relation is expressed for this requirement.",
+      "rejected_claims": []
+    },
+    "req_raise_before_creation": {
+      "status": "supported",
+      "reason": "The complete obligation is to increase privilege using raisePrivileges() before the directory-creation action. The direct target performs the increase; the creation operation is correctly only the other endpoint of the owned precedes relation. The cited units establish the helper, enclosing function, directory referent, and ordering. There is no source guard or separate lowering obligation.",
+      "rejected_claims": []
+    },
+    "req_handle_existing_directory": {
+      "status": "supported",
+      "reason": "The function must handle the exception when its target directory already exists. The exact existing-directory condition is structurally attached to this obligation, without gating all function or creation execution. The source does not specify a handling method, return value, retry, or additional exception class obligation.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The availability of the exact os module is represented. The complete source permits an implementation using another directory-creation facility, so no required runtime consumption is missing and the no-runtime-effect classification is supported."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The exact no-argument raisePrivileges interface is preserved in the prescribed invocation. The effective impacts include the invocation, its enclosing makeNewUserDir function, and the creation endpoint of the owned ordering requirement; no additional required use or participant is stated."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "This pass is the supplied body placeholder for the helper explicitly invoked by the task. It adds no independent task obligation. Its local impact on that helper and the enclosing ordered behavior is conservatively retained; the table does not establish an additional privilege operation or any required implementation of a particular elevation mechanism."
+    },
+    "u4": {
+      "complete": true,
+      "reason": "The fixed source retains the lowerPrivileges() declaration. The complete docstring prescribes no invocation of it and no lowering behavior, so availability alone establishes no additional runtime operation or required impact. No restoration requirement may be inferred from the helper name."
+    },
+    "u5": {
+      "complete": true,
+      "reason": "This pass belongs to the uninvoked lowerPrivileges helper. It contributes no separate task behavior, and the complete source supplies no required runtime consumer or lowering action."
+    },
+    "u6": {
+      "complete": true,
+      "reason": "The exact makeNewUserDir(username) interface, username participant, and enclosing scope are represented. The effective table includes both prescribed runtime actions and their enclosing function, covering the scope of creation, privilege ordering, and exception handling."
+    },
+    "u7": {
+      "complete": true,
+      "reason": "The opening docstring delimiter establishes no separate runtime predicate. Its enclosed requirements are represented by their own units, with no missing operation dependency attributable to the delimiter."
+    },
+    "u8": {
+      "complete": true,
+      "reason": "The creation obligation, given username, /home/ destination, created directory, and enclosing function are represented. The effective impacts also include privilege raising because this unit identifies the creation endpoint referenced by the owned ordering requirement. No source-prescribed path construction method, return value, or additional username validation is omitted."
+    },
+    "u9": {
+      "complete": true,
+      "reason": "Both the required increase using raisePrivileges() and its precedence over directory creation are represented in one owned requirement. The effective impacts contain the raise action, creation endpoint, and enclosing function. The source supplies no lowering, rollback, or success-conditioned order requirement."
+    },
+    "u10": {
+      "complete": true,
+      "reason": "The existing-directory exception-handling obligation and its guard are preserved at the function boundary. Its effective impacts cover the function and the directory operation that gives rise to the exception. The source leaves the particular handling response unspecified; this does not justify inventing a return value or suppressing unrelated exceptions."
+    },
+    "u11": {
+      "complete": true,
+      "reason": "The closing docstring delimiter carries no independent task predicate or operation dependency; the enclosed contract has been covered by its substantive units."
+    }
+  }
+}

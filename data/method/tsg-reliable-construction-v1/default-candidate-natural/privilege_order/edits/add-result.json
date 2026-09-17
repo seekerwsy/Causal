@@ -1,0 +1,13 @@
+{
+  "independent_verifier": {
+    "error_message": "exact source-state gate",
+    "error_type": "ValueError",
+    "status": "BLOCKED"
+  },
+  "renderer": {
+    "error_message": "candidate edit scope cannot release shared or context facts",
+    "error_type": "MechanismRegistryError",
+    "status": "BLOCKED"
+  },
+  "status": "BLOCKED"
+}

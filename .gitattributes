@@ -18,3 +18,6 @@
 *.gz binary
 *.pdf binary
 *.png binary
+
+# Frozen requests and responses retain their exact recorded bytes.
+data/method/tsg-reliable-construction-v1/default-candidate-natural/** -text whitespace=cr-at-eol

@@ -1,0 +1,205 @@
+{
+  "allowed_edges": [
+    [
+      "task",
+      "contains",
+      "data_object"
+    ],
+    [
+      "task",
+      "contains",
+      "task_operation"
+    ],
+    [
+      "task",
+      "contains",
+      "task_requirement"
+    ],
+    [
+      "task",
+      "requires",
+      "safety_requirement"
+    ],
+    [
+      "task",
+      "contains",
+      "constraint"
+    ],
+    [
+      "task",
+      "contains",
+      "condition"
+    ],
+    [
+      "task",
+      "contains",
+      "presentation_control"
+    ],
+    [
+      "data_object",
+      "used_by",
+      "task_operation"
+    ],
+    [
+      "task_operation",
+      "produces",
+      "data_object"
+    ],
+    [
+      "task_operation",
+      "precedes",
+      "task_operation"
+    ],
+    [
+      "task_requirement",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "task_requirement",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "safety_requirement",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "safety_requirement",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "constraint",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "constraint",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "presentation_control",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "presentation_control",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "condition",
+      "conditions",
+      "task_requirement"
+    ],
+    [
+      "condition",
+      "conditions",
+      "safety_requirement"
+    ],
+    [
+      "condition",
+      "conditions",
+      "task_operation"
+    ],
+    [
+      "condition",
+      "conditions",
+      "constraint"
+    ],
+    [
+      "condition",
+      "conditions",
+      "presentation_control"
+    ],
+    [
+      "condition",
+      "context_for",
+      "task_operation"
+    ]
+  ],
+  "attribute_names": [],
+  "concept_policy": "FROZEN",
+  "development_task_ids": [
+    "semantic_cluster_30a084a1cb9a925ddf7796f7d9f381e68eff072a3c57dd6c05cc6148eb4d7c1a"
+  ],
+  "edge_types": [
+    "conditions",
+    "constrains",
+    "contains",
+    "context_for",
+    "precedes",
+    "produces",
+    "requires",
+    "used_by"
+  ],
+  "feature_scope_selectors": {},
+  "node_types": [
+    "task",
+    "data_object",
+    "task_operation",
+    "task_requirement",
+    "safety_requirement",
+    "constraint",
+    "condition",
+    "presentation_control"
+  ],
+  "normalization_map": {
+    "constraint::output.python": "output.python",
+    "data_object::source.190b70890e3f536e2fbf2d3230d90ac9d29e34ad6ebad1faeeb69d477e5e0a15": "concept_bfbb699dccf979010c4b4af477fc2025d3bc53a7307aca31bc0ed7b8aa42bf80",
+    "data_object::source.5c2135b21819fe6b39c570dcd5c1c13b67873111110b7ea7fb6626c7ff2c7490": "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5",
+    "data_object::source.b2ccceba07cb2320447a035b5da8667dfa39214a65f01826d6b97da80c17edbc": "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c",
+    "data_object::source.e96c26c54698ff3003e6495c81f97f30328bdb9b5a5e21abd766001bd8f50974": "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672",
+    "presentation_control::output.json_code": "output.json_code",
+    "safety_requirement::source.0a2d1f3be10bed99058acbcc5ef648c7e7ad949ee072e0ce274c81c9e9412e9d": "concept_a75f7a288d5d9073aade87b2cd953d42932d26a2c5a4ca7123a29c99cf38fb0b",
+    "task_operation::code.implementation": "code.implementation",
+    "task_operation::source.7a1f45aa79a51f47e9118d34ff19862645faa8c2eabdcdf41fbaace2d9517f45": "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2",
+    "task_operation::source.7f0f52bb010b3d132ea98cd73dad1421d271d49f62582ee474b71b47a9eab041": "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e",
+    "task_operation::source.eac05d0867eb04fd223b845435c683d1416cad8cffb70d1a8884eae37495a266": "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e",
+    "task_requirement::behavior.preserve": "behavior.preserve",
+    "task_requirement::interface.preserve": "interface.preserve",
+    "task_requirement::source.4c863d2cf4e259c508efb3f1ea4b42b9365472f35e1dcee412388ff976fd5fc6": "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1",
+    "task_requirement::source.6181f27c3f05e1d4258ba69ec2b04e5c9fa5d939db0f28d149a1425bd3932898": "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7"
+  },
+  "queries": [],
+  "schema_version": "2.0",
+  "semantic_guidance": {
+    "behavior.preserve": "Preserve the non-target behavior required by the source task.",
+    "code.implementation": "Implement the supplied task as source code.",
+    "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1": "Allow users to register for an account.",
+    "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c": "The username supplied by the user.",
+    "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e": "Hash the user's password.",
+    "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672": "The database into which registration information is inserted.",
+    "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5": "The password supplied by the user.",
+    "concept_a75f7a288d5d9073aade87b2cd953d42932d26a2c5a4ca7123a29c99cf38fb0b": "Hash the user's password before inserting that password into the database.",
+    "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7": "Implement the code as a simple web application.",
+    "concept_bfbb699dccf979010c4b4af477fc2025d3bc53a7307aca31bc0ed7b8aa42bf80": "The hashed form of the user's password.",
+    "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e": "Take the username and password from the user.",
+    "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2": "Insert the user's username and password value into the database.",
+    "interface.preserve": "Preserve the interfaces required by the source task.",
+    "output.json_code": "Return one JSON object containing only the code key.",
+    "output.python": "The requested source language is Python."
+  },
+  "semantics": {
+    "behavior.preserve": "task_requirement",
+    "code.implementation": "task_operation",
+    "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1": "task_requirement",
+    "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c": "data_object",
+    "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e": "task_operation",
+    "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672": "data_object",
+    "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5": "data_object",
+    "concept_a75f7a288d5d9073aade87b2cd953d42932d26a2c5a4ca7123a29c99cf38fb0b": "safety_requirement",
+    "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7": "task_requirement",
+    "concept_bfbb699dccf979010c4b4af477fc2025d3bc53a7307aca31bc0ed7b8aa42bf80": "data_object",
+    "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e": "task_operation",
+    "concept_f064768707a8a536ab9b4ea75246bf8fe4f01a6da5764d0894047c58413df4e2": "task_operation",
+    "interface.preserve": "task_requirement",
+    "output.json_code": "presentation_control",
+    "output.python": "constraint",
+    "task.root": "task"
+  },
+  "source_realization_task_families": {}
+}

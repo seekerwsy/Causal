@@ -1,0 +1,48 @@
+{
+  "outcomes": {
+    "remove": {
+      "omitted_program_owned_declarations": {
+        "source_nodes": [
+          "tsg_node_46cb415e337607ec5b29dfc2a56783ded7b2da31520fc7df3b526a9066b98aec"
+        ],
+        "source_edges": [
+          "tsg_edge_cf93451a193264e9e55c6b453a1d8b702889173f9281e47d4e73a2195eb43414"
+        ]
+      },
+      "renderer": {
+        "status": "BLOCKED",
+        "error_type": "MechanismRegistryError",
+        "error_message": "neutral rewrite changed non-target source evidence"
+      },
+      "independent_verifier": {
+        "status": "BLOCKED",
+        "error_type": "ValueError",
+        "error_message": "reviewed realization changes a non-target requirement"
+      }
+    },
+    "add": {
+      "omitted_program_owned_declarations": {
+        "variant_nodes": [
+          "tsg_node_46cb415e337607ec5b29dfc2a56783ded7b2da31520fc7df3b526a9066b98aec"
+        ],
+        "variant_edges": [
+          "tsg_edge_cf93451a193264e9e55c6b453a1d8b702889173f9281e47d4e73a2195eb43414"
+        ]
+      },
+      "renderer": {
+        "status": "BLOCKED",
+        "error_type": "MechanismRegistryError",
+        "error_message": "neutral rewrite changed non-target source evidence"
+      },
+      "independent_verifier": {
+        "status": "BLOCKED",
+        "error_type": "ValueError",
+        "error_message": "reviewed realization changes a non-target requirement"
+      }
+    }
+  },
+  "new_model_steps": 0,
+  "external_provider_calls": 0,
+  "same_saved_source_judgments": true,
+  "scientific_claim_allowed": false
+}

@@ -70,7 +70,15 @@ The first natural check of the new background interface stopped at candidate
 selection: one proposed background still named the policy action and was rejected;
 the other proposal remained unresolved. Three model steps ran, with no fresh
 construction or actual edit. Automatic delivery of the separate background remains
-unproved; the request's scope-preservation wording also needs clarification.
+unproved in that round. The default candidate interface now keeps policy bindings
+read-only and requires a separately cited applicability background. The
+[follow-up check](data/method/tsg-reliable-construction-v1/default-candidate-natural/README.md)
+accepted the privilege task and freshly reconstructed its original/deleted prompts.
+After correcting experimental adapter data and distinguishing quotation length from
+changed source content, the same saved judgments passed REMOVE and inverse ADD in
+both the editor and independent verifier. Registration remained rejected because its
+background included the policy-dependent hashed result. This is one exposed edit
+pair with a subsequent mechanical replay, not demonstrated automatic stability.
 
 Complete conditional, whole-task and universal requirements can now enter Atomic
 candidate construction at their original boundary. Policy-internal conditions

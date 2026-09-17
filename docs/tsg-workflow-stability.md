@@ -175,6 +175,14 @@ agent workflow executes, but reliable semantic repair is not established.
    unresolved for registration. No candidate passed, so its planned construction
    and edit steps did not run. The request's original-scope preservation wording
    may also contribute to the confusion; this result does not isolate model ability.
+   The default compact interface now makes the policy binding read-only and requires
+   an independently cited background per binding. The subsequent two-task check used
+   11 fresh Codex steps: privilege lowering passed candidate review and both fresh
+   graph/state assessments; registration's background wrongly included the hashed
+   result and was rejected. Experimental adapter corrections and a source-continuity
+   check for different citation lengths then let the same saved privilege pair pass
+   REMOVE/inverse ADD and independent replay. The original failures remain saved.
+   No model was resampled, and only this one exposed edit pair was demonstrated.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.
@@ -368,7 +376,7 @@ Each frozen development batch includes inputs, exact execution source, provider
 requests/responses and retained failures. The record trace permits exact mechanical
 replay including review and patch. Independent source references and assertion review
 remain necessary to judge the resulting semantics. The current Atomic default suite
-has 103 cases in 83 functions. One whole-policy projection/edit case adds eight
+has 105 cases in 85 functions. One whole-policy projection/edit case adds eight
 authored semantic contrasts; historical counts above retain their original meaning.
 See the [bounded projection check](experiments/2026-09-17-complete-policy-projection.md).
 These are implementation checks, not automatic-extraction accuracy or natural coverage.

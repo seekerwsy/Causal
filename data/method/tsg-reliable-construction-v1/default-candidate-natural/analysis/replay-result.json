@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "accepted_factors": 2,
+      "arms": {
+        "present": {
+          "error_message": null,
+          "error_type": null,
+          "state": "present",
+          "status": "DECISIVE"
+        },
+        "removed": {
+          "error_message": null,
+          "error_type": null,
+          "state": "absent",
+          "status": "DECISIVE"
+        }
+      },
+      "base_task": "privilege_order",
+      "edits": {
+        "add": {
+          "independent_verifier": {
+            "error_message": "exact source-state gate",
+            "error_type": "ValueError",
+            "status": "BLOCKED"
+          },
+          "renderer": {
+            "error_message": "candidate edit scope cannot release shared or context facts",
+            "error_type": "MechanismRegistryError",
+            "status": "BLOCKED"
+          },
+          "status": "BLOCKED"
+        },
+        "remove": {
+          "independent_verifier": {
+            "error_message": "exact source-state gate",
+            "error_type": "ValueError",
+            "status": "BLOCKED"
+          },
+          "renderer": {
+            "error_message": "candidate edit scope cannot release shared or context facts",
+            "error_type": "MechanismRegistryError",
+            "status": "BLOCKED"
+          },
+          "status": "BLOCKED"
+        }
+      },
+      "fresh_model_steps": 9,
+      "proposed_factors": 2,
+      "status": "BLOCKED_EDIT",
+      "support_decision": "accepted",
+      "target_accepted_factors": 1,
+      "target_feature_id": "feature_e0272935d8255f8e7d1fbaa5d3adc3edd402e392fd314614dec38e3868e558f7"
+    },
+    {
+      "accepted_factors": 0,
+      "base_task": "registration",
+      "fresh_model_steps": 2,
+      "proposed_factors": 1,
+      "status": "BLOCKED_TARGET_CANDIDATE",
+      "target_accepted_factors": 0
+    }
+  ],
+  "external_provider_calls": 0,
+  "fresh_model_steps": 11,
+  "pending": [],
+  "scientific_claim_allowed": false,
+  "status": "COMPLETED_BOUNDED_DEVELOPMENT_CHECK"
+}

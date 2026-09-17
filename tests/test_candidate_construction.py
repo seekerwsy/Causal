@@ -155,6 +155,25 @@ def _compact_response(request, response):
     return dict(decisions=decisions)
 
 
+def _explicit_background_response(request, response, evidence_text, *, operation_definition=None):
+    """Authored current-wire decisions; no source semantics are certified by this helper."""
+    compact = _compact_response(request, response)
+    for source in candidate_model_request(request)["sources"]:
+        override = next((n["node_ref"] for n in source["nodes"] if n["definition"] == operation_definition), None)
+        for node in source["nodes"]:
+            if "complete_bindings" not in node:
+                continue
+            decision = compact["decisions"][node["node_ref"]]
+            decision["applicability_bindings"] = {binding["binding_ref"]: (
+                dict(operation_ref=override or binding["operation_ref"],
+                     subject_refs=[] if override else binding["subject_refs"],
+                     execution_condition_refs=[] if override else binding["execution_condition_refs"],
+                     independent_source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
+                     rationale="Authored reference: the cited non-target task requires this actual background without the policy.")
+                if decision["status"] == "include" else None) for binding in node["complete_bindings"]}
+    return compact
+
+
 def _prepared_proposal():
     tasks, contracts = _development_sources()
     request = candidate_request(tasks, contracts)
@@ -335,7 +354,7 @@ def _write_candidate_request(tmp_path, *, include_template=False):
 def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extractor(tmp_path, monkeypatch):
     tasks, _, _, _, request_bundle = _write_candidate_request(tmp_path, include_template=True)
     request = read_json(request_bundle / "request.json")
-    response, design = _compact_response(request, _proposal(request)), _design()
+    response, design = _explicit_background_response(request, _proposal(request), "Run a SQL query"), _design()
     assert read_json(request_bundle / "model-request.json") == candidate_model_request(request)
     draft = compile_candidate_proposal(request, response, design)
     paths = [tmp_path / name for name in ("response.json", "design.json", "review.json")]
@@ -513,7 +532,14 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 definition=child["definition"], rationale="A member is not an independently asserted requirement.")
             with pytest.raises(ValueError, match="no complete source binding"):
                 compile_candidate_proposal(request, invalid, _design())
-        response = compact
+        if kind in {"task", "each", "objects"}:
+            # The current interface preserves task/object/quantified policies and
+            # keeps internal policy guards outside the comparison background.
+            response = _explicit_background_response(request, response,
+                evidence_text="Process the request and write the diagnostic log. Return status.")
+            draft = compile_candidate_proposal(request, response, _design())
+        else:
+            response = compact
         reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
         assert prompt_tsg_record(graph) == before_projection
         factor = reviewed["factors"][0]
@@ -574,6 +600,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 with pytest.raises(PromptTSGError, match="negative policy state"):
                     compile_task_context_contract(negative, prompt=present_task["prompt"], catalog=catalog)
             legacy = json.loads(json.dumps(catalog))
+            legacy["feature_scope_selectors"][feature].pop("applicability_scope", None)
             legacy["feature_scope_selectors"][feature].update(scope_kind="targets",
                 operation_semantic_id=catalog["normalization_map"]["task_operation::processing"])
             legacy_contract = replace(present, catalog=legacy, input_catalog_sha256=catalog_sha256(legacy))
@@ -692,10 +719,10 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
     from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
     from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
 
-    base = "Accept a password and insert the account into the database. Return status."
+    base = "Accept a password and insert the account into the database. Return status for the account."
     text = "Hash the password into a digest before insertion."
 
-    def source(present, catalog=None, feature=None):
+    def source(present, catalog=None, feature=None, account_evidence=None):
         task = dict(task_id="synthetic-candidate-local-policy", language="python",
                     prompt=base + (" " + text if present else ""))
         rows = [("insert", "task_operation", "insertion", "insert the account into the database"),
@@ -717,7 +744,9 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         response = dict(
             concepts=[] if catalog else [dict(concept_id=concept, node_type=kind, definition=quote)
                                          for _, kind, concept, quote in rows],
-            nodes=[dict(local_id=key, concept_id=identities[concept], evidence_text=quote, occurrence=1)
+            nodes=[dict(local_id=key, concept_id=identities[concept],
+                        evidence_text=account_evidence[0] if key == "account" and account_evidence else quote,
+                        occurrence=account_evidence[1] if key == "account" and account_evidence else 1)
                    for key, _, concept, quote in rows],
             edges=[dict(source_node_local_id=a, edge_type=kind, target_node_local_id=b,
                         evidence_text=quote, occurrence=1) for a, kind, b, quote in links],
@@ -751,20 +780,58 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
             status="included" if n["concept_id"] == "policy" else "not_actionable",
             rationale="Only the complete hashing policy is edited.")
             for n in request["sources"][0]["nodes"] if n["node_type"] in {"task_requirement", "safety_requirement"}])
+    full_response = response
+    response = _explicit_background_response(request, response, base,
+        operation_definition="insert the account into the database")
+    wire = candidate_model_request(request)
+    assert "READ-ONLY" in wire["instructions"] and "NOT the policy's" in wire["instructions"]
+    from prompt_mechanism_study.candidate_construction import candidate_response_format
+    schema = candidate_response_format(request)["json_schema"]["schema"]["properties"]["decisions"]["properties"]
+    assert all("applicability_bindings" in row["required"] for row in schema.values())
     draft = compile_candidate_proposal(request, response, _design())
+    occurrence = draft["factors"][0]["source_occurrences"][0]
+    assert occurrence["scope"] == full_response["factors"][0]["occurrences"][0]["scope"]
+    assert occurrence["applicability_scope"] == full_response["factors"][0]["occurrences"][0]["applicability_scope"]
+    assert occurrence["applicability_support"]["source_evidence"][0]["evidence_text"] == base
+    included = next(key for key, row in response["decisions"].items() if row["status"] == "include")
+    binding_ref = next(iter(response["decisions"][included]["applicability_bindings"]))
+    for mutation in ("null", "missing", "quotation", "policy_scope"):
+        invalid = json.loads(json.dumps(response))
+        row = invalid["decisions"][included]
+        if mutation == "null":
+            row["applicability_bindings"][binding_ref] = None
+        elif mutation == "missing":
+            row["applicability_bindings"].pop(binding_ref)
+        elif mutation == "quotation":
+            row["applicability_bindings"][binding_ref]["independent_source_evidence"][0]["evidence_text"] = "Invented source support."
+        else:
+            row["scope"] = full_response["factors"][0]["occurrences"][0]["applicability_scope"]
+        with pytest.raises(ValueError):
+            compile_candidate_proposal(request, invalid, _design())
+    # Matching valid geometry with a persuasive but mismatched rationale remains
+    # reviewable, not automatically accepted as independent source support.
+    wrong = json.loads(json.dumps(response))
+    policy_node = next(n for n in wire["sources"][0]["nodes"] if n["node_ref"] == included)
+    wrong["decisions"][included]["applicability_bindings"][binding_ref]["operation_ref"] = policy_node["complete_bindings"][0]["operation_ref"]
+    wrong_draft = compile_candidate_proposal(request, wrong, _design())
+    review = _review(request, wrong, wrong_draft)
+    review["decisions"][0].update(decision="reject", context_independent=False,
+        rationale="The selected hashing action is policy-only; the cited independent source requires insertion.")
+    rejected = compile_candidate_proposal(request, wrong, _design(), review)
+    assert rejected["policies"] == rejected["queries"] == []
     reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
     factor = reviewed["factors"][0]
     feature, selector = factor["feature_id"], factor["scope_selector"]
     catalog = _candidate_catalog([contract], reviewed, _design(), reviewed["review"])
     assert prompt_tsg_record(graph) == intact
     assert selector["operation_semantic_id"] != selector["applicability_scope"]["operation_semantic_id"]
-    disconnected = json.loads(json.dumps(response))
+    disconnected = json.loads(json.dumps(full_response))
     disconnected["factors"][0]["occurrences"][0]["applicability_scope"]["operation_node_id"] = nodes["returning"]["node_id"]
     with pytest.raises(ValueError, match="applicability scope"):
         compile_candidate_proposal(request, disconnected, _design())
 
-    def assessed(present):
-        task, contract, graph = source(present, catalog, feature)
+    def assessed(present, account_evidence=None):
+        task, contract, graph = source(present, catalog, feature, account_evidence)
         request = fixed_scope_request(contract, prompt=task["prompt"], catalog=catalog)
         assert len(request["scopes"]) == 1 and not request["withheld_scopes"]
         key, row = next(iter(request["scopes"].items()))
@@ -834,6 +901,25 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         assert render()["prompt"] == target_task["prompt"]
         assert independent() == target_task["prompt"]
         assert prompt_tsg_record(source_graph) == before
+        if operation == "add":
+            # Independent citations can narrow unchanged text, but cannot move
+            # to a repeated mention or span the added policy.
+            crossing = target_task["prompt"][target_task["prompt"].index("the account"):]
+            for quote, occurrence, accepted in (("account", 1, True), ("account", 2, False), (crossing, 1, False)):
+                _, _, citation_graph, _ = assessed(True, (quote, occurrence))
+                changed = json.loads(json.dumps(variant))
+                changed["graph"] = prompt_tsg_record(citation_graph)
+                account = catalog["normalization_map"]["data_object::account"]
+                changed["source_to_variant_nodes"][source_ids[account]] = next(
+                    n.node_id for n in citation_graph.nodes if n.semantic_id == account)
+                if accepted:
+                    assert render(changed)["prompt"] == target_task["prompt"]
+                    assert independent(changed) == target_task["prompt"]
+                else:
+                    with pytest.raises(MechanismRegistryError, match="non-target source evidence"):
+                        render(changed)
+                    with pytest.raises(ValueError, match="non-target requirement"):
+                        independent(changed)
         extra_state = json.loads(json.dumps(variant))
         extra_state["graph"]["scoped_feature_assessments"].append(
             dict(extra_state["graph"]["scoped_feature_assessments"][0]))

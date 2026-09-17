@@ -1,0 +1,426 @@
+{
+  "decision": "accepted",
+  "reviewer_id": "paired-source-local-support-privilege-order-01",
+  "rationale": "The complete prompts differ only by the sentence requiring lowerPrivileges after directory creation. The PRESENT graph represents that requirement, its exclusively required runtime lowering operation, and the owned creation-before-lowering relation; these are absent in REMOVED. The retained lowerPrivileges helper declaration does not itself require invocation. Directory creation, its username and /home/ scope, the created directory, raising privileges before creation, existing-directory exception handling and its condition, the os import, and output/interface/non-target instructions are preserved. Sixteen unchanged non-task nodes are mapped, including source-equivalent nodes with different evidence spans. All ordinary used_by/produces relations are independently supported and shared. Root membership is not declared. This judgment concerns one source comparison only; it neither asserts generated-code behavior nor adds unconditional exceptional-exit cleanup.",
+  "outcomes_used": false,
+  "present_to_removed_nodes": {
+    "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f": "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f",
+    "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629": "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629",
+    "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e": "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e",
+    "tsg_node_4d82782a104ac5ac66dddb98ca69b7515606286ac120984a90e37f09614c1e1c": "tsg_node_4d82782a104ac5ac66dddb98ca69b7515606286ac120984a90e37f09614c1e1c",
+    "tsg_node_56f2d8fc906adbb44bc2677f437335ebf61d84861040212cb9c3884e09a0b868": "tsg_node_56f2d8fc906adbb44bc2677f437335ebf61d84861040212cb9c3884e09a0b868",
+    "tsg_node_5b403aca7c31c35a9fce87a49ca0b73fbf24f87fe2d9ece3b07a224b7732827b": "tsg_node_5b403aca7c31c35a9fce87a49ca0b73fbf24f87fe2d9ece3b07a224b7732827b",
+    "tsg_node_a68ad8808c21cac71790c034a01ecf8e9c80a62f39323cd22fda017ec7dc0b2e": "tsg_node_a68ad8808c21cac71790c034a01ecf8e9c80a62f39323cd22fda017ec7dc0b2e",
+    "tsg_node_ad16f3bf603a0a22ef727c9979ccaa576c0567367e1bc3faee5542de0b0e550c": "tsg_node_ad16f3bf603a0a22ef727c9979ccaa576c0567367e1bc3faee5542de0b0e550c",
+    "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f": "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f",
+    "tsg_node_c2ce8a63e0d13204b9d39c82163c4d4c66fc87b271f4153542d776ed352376d9": "tsg_node_c2ce8a63e0d13204b9d39c82163c4d4c66fc87b271f4153542d776ed352376d9",
+    "tsg_node_e3b8b8c0613fdaeac354c163fb9cda261a3635a4fe8bb47c257db9b9a8a780e5": "tsg_node_e3b8b8c0613fdaeac354c163fb9cda261a3635a4fe8bb47c257db9b9a8a780e5",
+    "tsg_node_702307b6749a008b3cd711643dbe2b41bfc2c2d1f2330465bc6f6a252c9c475c": "tsg_node_8ce0df77822a1d3333f6302461a69a0ea6a527caa634257a3814f606ed8c294d",
+    "tsg_node_779721e60d5d27cb922835f7e52d752488a215753604d9e4c0fdd9d6fe98fdd9": "tsg_node_27b330df50f7dc942c8ab5d7203fc2edd9e292378038cc507cf02e68227b670b",
+    "tsg_node_9cf235f9e42036ee288b921a0d36a57cb79a8af6c1a6f9558b0a800a4cbb2d75": "tsg_node_682bff077308f860f528308b988ebf177cdf196c1a02f091af00c4b7b782167a",
+    "tsg_node_ab1a45aa56a59e3de0a8070edbe368e81c1ee2faad8f9e9ea41bc19cddf0d2d0": "tsg_node_b462b4c52558257f0a4a4f9323d76539826b1c843579a3b16a902ebbb0f03e53",
+    "tsg_node_ab3f2f4b5f5feae8fdcb8647e7a3634d9e4402dd6d9d50fb069d6b97ced771d2": "tsg_node_f48ad2cec071d1545db52d5a0164a181a6de5b58403612b381e00292568b3d14"
+  },
+  "positive_nodes": {
+    "tsg_node_0e22d652ece214da44eac89db197a1b5f68233076396ab0599359e4638f05168": {
+      "status": "policy_only",
+      "source_evidence": [
+        {
+          "start": 578,
+          "end": 656
+        },
+        {
+          "start": 349,
+          "end": 380
+        }
+      ],
+      "rationale": "The runtime invocation of lowerPrivileges is required only by the deleted lowering clause. The retained helper declaration specifies an available interface, not a requirement to invoke it; directory creation and exception handling independently require no lowering invocation."
+    },
+    "tsg_node_40b490c01851d994430c85fa382d784fbcd3ef968c491497ec66e5f4ddda6d0f": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The username input identifies whose directory must be created and remains necessary under the independently preserved directory-creation instruction."
+    },
+    "tsg_node_46cb415e337607ec5b29dfc2a56783ded7b2da31520fc7df3b526a9066b98aec": {
+      "status": "policy_only",
+      "source_evidence": [
+        {
+          "start": 578,
+          "end": 656
+        }
+      ],
+      "rationale": "This entire clause is the named complete requirement: lower privileges using the specified helper after directory creation. Its owned creation-before-lowering relation belongs to the same policy. The pair deletes that clause only; it does not delete directory creation or impose exceptional-exit cleanup."
+    },
+    "tsg_node_4b2cb88bf5c9483cf3d25ade4a1e4bc3a262947adbfa56a6e883d045f27f3629": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 16,
+          "end": 82
+        }
+      ],
+      "rationale": "The instruction to implement the supplied task remains independently present in both prompts."
+    },
+    "tsg_node_4ce2f1c6c4f62bc2037ee88673f49768384288cf516fa13845f896781412763e": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        },
+        {
+          "start": 661,
+          "end": 714
+        }
+      ],
+      "rationale": "The makeNewUserDir function remains required to create the requested directory and handle an existing-directory exception independently of lowering privileges."
+    },
+    "tsg_node_4d82782a104ac5ac66dddb98ca69b7515606286ac120984a90e37f09614c1e1c": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 83,
+          "end": 136
+        },
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 349,
+          "end": 380
+        }
+      ],
+      "rationale": "Required interface preservation is unchanged, including the supplied function signatures. Preserving the lowerPrivileges declaration does not itself require a call."
+    },
+    "tsg_node_56f2d8fc906adbb44bc2677f437335ebf61d84861040212cb9c3884e09a0b868": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 496,
+          "end": 573
+        }
+      ],
+      "rationale": "The separate policy to raise privileges before creation remains verbatim in the removed prompt and retains its own ordering."
+    },
+    "tsg_node_5b403aca7c31c35a9fce87a49ca0b73fbf24f87fe2d9ece3b07a224b7732827b": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 496,
+          "end": 573
+        }
+      ],
+      "rationale": "Invoking raisePrivileges is independently required by the retained before-creation clause, not solely by the lowering policy."
+    },
+    "tsg_node_702307b6749a008b3cd711643dbe2b41bfc2c2d1f2330465bc6f6a252c9c475c": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The requested user directory is the independently specified output of creation. Both graph nodes refer to this same directory despite different evidence-span boundaries."
+    },
+    "tsg_node_779721e60d5d27cb922835f7e52d752488a215753604d9e4c0fdd9d6fe98fdd9": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 661,
+          "end": 714
+        }
+      ],
+      "rationale": "The directory-already-exists condition still governs exception handling. Its later character position in the present prompt does not change its scope."
+    },
+    "tsg_node_9cf235f9e42036ee288b921a0d36a57cb79a8af6c1a6f9558b0a800a4cbb2d75": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 304,
+          "end": 313
+        }
+      ],
+      "rationale": "Both prompts retain the same os import. The graph evidence spans os versus import os but identifies the same supplied module."
+    },
+    "tsg_node_a68ad8808c21cac71790c034a01ecf8e9c80a62f39323cd22fda017ec7dc0b2e": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The requirement to create the directory for the username within /home/ is stated independently and remains verbatim."
+    },
+    "tsg_node_ab1a45aa56a59e3de0a8070edbe368e81c1ee2faad8f9e9ea41bc19cddf0d2d0": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 661,
+          "end": 714
+        }
+      ],
+      "rationale": "The exception-handling requirement is independently retained with its existing-directory condition. Different node evidence-span lengths do not change that obligation."
+    },
+    "tsg_node_ab3f2f4b5f5feae8fdcb8647e7a3634d9e4402dd6d9d50fb069d6b97ced771d2": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The /home/ directory remains the independently required creation location; both evidence spans identify that same location."
+    },
+    "tsg_node_ad16f3bf603a0a22ef727c9979ccaa576c0567367e1bc3faee5542de0b0e550c": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 137,
+          "end": 230
+        }
+      ],
+      "rationale": "The JSON-only code output instruction is identical across the pair."
+    },
+    "tsg_node_b1e4f142c0bd0a3bba18bb433c8896270a92251894bf3b31b432cde057b5a64f": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The directory-creation operation is independently required by the first docstring sentence. Being an endpoint of the removed policy ordering does not make creation exclusive to that policy."
+    },
+    "tsg_node_c2ce8a63e0d13204b9d39c82163c4d4c66fc87b271f4153542d776ed352376d9": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 83,
+          "end": 136
+        }
+      ],
+      "rationale": "Preservation of non-target behavior remains independently required in the identical system instruction."
+    },
+    "tsg_node_e3b8b8c0613fdaeac354c163fb9cda261a3635a4fe8bb47c257db9b9a8a780e5": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 137,
+          "end": 230
+        }
+      ],
+      "rationale": "The requested source language remains Python in both prompts."
+    }
+  },
+  "positive_edges": {
+    "tsg_edge_0215f1eb11c3916af2518b5d26c0130e25fa4281227b5caba8a9e1ec7af0f0b3": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The retained docstring requires makeNewUserDir to create the directory, independently constraining the aggregate function."
+    },
+    "tsg_edge_03f6403420e97a29b70cd791d65f6354ca2ca8add9934c69c7607d519d017700": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 16,
+          "end": 82
+        },
+        {
+          "start": 83,
+          "end": 136
+        }
+      ],
+      "rationale": "The unchanged preservation instruction continues to constrain implementation of non-target behavior."
+    },
+    "tsg_edge_293411f171c46eeba533a7c3aebb9912ced19c08131f7527cbf3a875e2abea7a": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 496,
+          "end": 573
+        }
+      ],
+      "rationale": "The retained raising requirement continues to constrain invocation of raisePrivileges before creation."
+    },
+    "tsg_edge_3084f2b01fbb8d20df179ba8b5b00c8568e84b7b79f95509a4093fea233e6260": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 661,
+          "end": 714
+        }
+      ],
+      "rationale": "The explicit if clause still conditions exception handling on the directory already existing; lowering is not the subject of this condition."
+    },
+    "tsg_edge_312e8aea692fd1d47bd85956aee2c7ed1bd326c60fe53ca2a6cf3de465c091e1": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The independently required creation operation produces the user directory named in the same sentence; this relation remains in both graphs under the directory-node correspondence."
+    },
+    "tsg_edge_4076c235d78b90a35918d3fe9fec9ee4cdd02e03e4ce6a90b85ec788ad87769e": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The instruction to create the directory for the given username independently binds the username input to the creation operation."
+    },
+    "tsg_edge_5f8d17436794b67e832ccd33010fa9caefcee02ad816431e6d79a109a6afb410": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 661,
+          "end": 714
+        }
+      ],
+      "rationale": "The retained docstring independently constrains makeNewUserDir to handle the specified exception."
+    },
+    "tsg_edge_7f86e7bb239c848bd3dbaa917b2da3e810290e85f021fe671bfe25b8a4d7bd65": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The aggregate function must use /home/ as the specified creation location, independently of privilege lowering."
+    },
+    "tsg_edge_8ad0b12b675926c85a59872b661051c7da3c602c1033ebbd0d7c75eeee3970b4": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 16,
+          "end": 82
+        },
+        {
+          "start": 137,
+          "end": 230
+        }
+      ],
+      "rationale": "The unchanged Python source requirement continues to constrain implementation."
+    },
+    "tsg_edge_9e94f1ad088d14881a0672913beb097f1d76b927b42f455f18ab582ded6ae36a": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The independently specified aggregate function produces the requested user directory through its creation task; lowering is not needed to support this source relation."
+    },
+    "tsg_edge_c74f25e302de1a4ddff4621de00e4fc5779802a81b0ebf0010075518c397654c": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The independently retained creation sentence explicitly binds the /home/ location to directory creation."
+    },
+    "tsg_edge_cf93451a193264e9e55c6b453a1d8b702889173f9281e47d4e73a2195eb43414": {
+      "status": "policy_only",
+      "source_evidence": [
+        {
+          "start": 578,
+          "end": 656
+        },
+        {
+          "start": 349,
+          "end": 380
+        }
+      ],
+      "rationale": "The deleted lowering requirement is the only instruction constraining a runtime call to lowerPrivileges. Keeping its helper declaration does not independently support that invocation requirement."
+    },
+    "tsg_edge_e45cc4804651f99b78081dd33eaae9743c2fd8cd2b8fc0b86aee68483d554d32": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 16,
+          "end": 82
+        },
+        {
+          "start": 83,
+          "end": 136
+        }
+      ],
+      "rationale": "The unchanged required-interface preservation instruction continues to constrain code implementation."
+    },
+    "tsg_edge_fc7a7026b915e06a2897072f9ac506512536fd1b0d0865bb509c5e3d647cd30e": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 16,
+          "end": 82
+        },
+        {
+          "start": 137,
+          "end": 230
+        }
+      ],
+      "rationale": "The identical JSON code presentation instruction continues to constrain the implementation response."
+    },
+    "tsg_edge_fe2eff73372bd7fa73e008bcf282622496f393ffdc28863276e6557466cf6192": {
+      "status": "shared",
+      "source_evidence": [
+        {
+          "start": 383,
+          "end": 412
+        },
+        {
+          "start": 425,
+          "end": 491
+        }
+      ],
+      "rationale": "The aggregate makeNewUserDir function accepts username and must create the directory for that username; this input relationship remains independently required."
+    }
+  }
+}

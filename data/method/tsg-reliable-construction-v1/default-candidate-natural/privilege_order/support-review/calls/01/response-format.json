@@ -1,0 +1,135 @@
+{
+  "json_schema": {
+    "name": "paired_candidate_local_support",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "accepted",
+            "unresolved",
+            "reject"
+          ],
+          "type": "string"
+        },
+        "outcomes_used": {
+          "type": "boolean"
+        },
+        "positive_edges": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "rationale": {
+                "type": "string"
+              },
+              "source_evidence": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "end": {
+                      "type": "integer"
+                    },
+                    "start": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "policy_only",
+                  "shared",
+                  "unresolved"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "source_evidence",
+              "rationale"
+            ],
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "positive_nodes": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "rationale": {
+                "type": "string"
+              },
+              "source_evidence": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "end": {
+                      "type": "integer"
+                    },
+                    "start": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "policy_only",
+                  "shared",
+                  "unresolved"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "source_evidence",
+              "rationale"
+            ],
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "present_to_removed_nodes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reviewer_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "reviewer_id",
+        "rationale",
+        "outcomes_used",
+        "present_to_removed_nodes",
+        "positive_nodes",
+        "positive_edges"
+      ],
+      "type": "object"
+    },
+    "strict": false
+  },
+  "type": "json_schema"
+}

@@ -1,0 +1,17 @@
+{
+  "states": {
+    "s1": {
+      "expression": "explicitly_required",
+      "requirements": ["fact.10"],
+      "applicability": "applicable",
+      "applicability_rationale": "The independent task sentence requires makeNewUserDir(username) to create a directory within /home/, establishing the background creation operation fact.6. The supplied username (fact.2) selects the requested user directory and is its identifier_input; /home/ (fact.3) is the stated destination for that creation. These roles and the operation are supported by the creation sentence independently of the privilege-order requirement. The source supplies the no-argument raisePrivileges() interface, so calling that helper before this creation is meaningful and feasible without changing the interface, destination, requested directory, or existing-directory exception obligation. The fixed policy directly targets the raising operation fact.7 and orders it before fact.6; it does not impose a string measurement domain or additional caller-origin condition on username. This assesses the source requirement and its scope, not whether the helper stub or future generated code actually raises privileges."
+    },
+    "s2": {
+      "expression": "explicitly_required",
+      "requirements": ["fact.11"],
+      "applicability": "applicable",
+      "applicability_rationale": "The source independently requires directory creation within /home/ in makeNewUserDir(username), resolving fact.6 as the background operation. The given username (fact.2) identifies the directory to create, and /home/ (fact.3) is its destination; both subject roles follow from the creation sentence without relying on the lowering requirement. The source supplies the no-argument lowerPrivileges() interface, making a call after that creation meaningful and feasible while preserving the requested directory creation and existing-directory exception handling. The fixed policy directly targets lowering fact.8 and preserves the stated direction fact.6 before fact.8. Its definition does not require unconditional cleanup on every exceptional exit, so no such stronger obligation is inferred from the exception sentence. The helper placeholder does not invalidate the expressed call-and-order requirement or establish the protection of future code."
+    }
+  },
+  "unresolved_notes": []
+}

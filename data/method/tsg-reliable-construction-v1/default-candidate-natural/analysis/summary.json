@@ -1,0 +1,30 @@
+{
+  "status": "PARTIAL_DEVELOPMENT_SUCCESS",
+  "base_tasks": 2,
+  "predeclared_target_candidates_accepted": 1,
+  "fresh_model_steps": 11,
+  "external_provider_calls": 0,
+  "external_provider_cost_cny": 0,
+  "fresh_graphs": 2,
+  "ordinary_graph_reviews": 2,
+  "mechanical_extraction_repairs": 0,
+  "semantic_patches": 0,
+  "scope_assessments": 2,
+  "paired_support_reviews": 1,
+  "initial_edit_attempts_accepted": 0,
+  "saved_pair_edits_after_mechanical_revision": 2,
+  "independent_natural_edit_pairs": 1,
+  "new_model_steps_after_revision": 0,
+  "registration_status": "BLOCKED_POLICY_DEPENDENT_BACKGROUND_SUBJECT",
+  "scientific_claim_allowed": false,
+  "automatic_stability_established": false,
+  "final_reviewer_suite_cases": 105,
+  "final_reviewer_suite_passed": 105,
+  "limitations": [
+    "Two already exposed base tasks; only one saved pair reaches actual rendering after mechanical corrections.",
+    "Inverse ADD reuses the REMOVE source pair, not an additional task.",
+    "Registration retains its genuine candidate rejection; no fresh construction was attempted.",
+    "Codex contexts supplied model judgments; exact snapshot and seed unavailable.",
+    "No new sampling under the final citation rule; no protected inputs or code/security/functionality outcomes."
+  ]
+}

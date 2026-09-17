@@ -54,12 +54,13 @@ intervention names are not model inputs. Missing graphs remain listed.
 Every requirement carries its definition, source quotation and program-derived
 `complete_bindings` together. The response schema requires exactly one decision
 under that same requirement reference: `include`, `not_actionable` or `unresolved`,
-with a rationale. An included unit supplies only its normalized label and complete
-definition. Other decisions leave those two fields empty. There is no second binding
-index, separate exclusion inventory, or model-selected basket of source nodes.
+with a rationale. An included unit supplies its normalized label and complete
+definition, plus a separately cited comparison background for each program-named
+binding. Other decisions leave the label and definition empty and background choices
+null. The background reference never changes the original policy binding.
 
 The program restores all complete boundary/input/condition bindings of each included
-requirement; the model cannot invent, choose or rewrite those coordinates. A unit
+requirement; the model cannot invent, choose or rewrite those policy coordinates. A unit
 without a complete binding cannot be included. Task-wide policies retain the task
 root; universal policies retain their original task/function boundary and target
 class, never a hand-picked instance. Conditions, negations, quantifiers and thresholds
@@ -138,16 +139,21 @@ operation operands. These relations belong to the requirement; operands are not
 extra direct targets. Scope selection requires unique independent endpoints,
 not an already expressed order. Positive evidence must match the complete relation
 envelope. Different OR/NOT member envelopes remain represented but unprojected.
-An explicitly supplied full occurrence may add `applicability_scope`, using the
-same local operation/subject/condition coordinate fields as `scope`. The existing
-candidate compiler freezes this separate background without replacing the policy
-signature. The operation must be a source-bound direct target or owned-order
-operand, with exact input and execution-condition coordinates; this structural
-connection is necessary, not proof of independent support. Existing factor review
-must establish independence. No coordinate is chosen automatically. The compact
-proposer remains unchanged and does not yet propose these separate backgrounds.
-This is an optional input to the same candidate compiler and review, not another
-construction path. The background is part of the factor identity before freezing.
+The default compact response selects an `applicability_bindings` entry for each
+read-only complete binding. Each entry names existing operation, subject and execution
+condition references, with exact `independent_source_evidence` quotations and a
+rationale. The compiler restores the original policy signature and translates only
+this separate choice into `applicability_scope`. Included decisions must supply the
+choice explicitly, including when the background coincides with the policy target.
+The background must be an existing direct target or owned-order operand; an original
+task-root boundary is retained for whole-task or object-only policies. Input and
+execution-condition coordinates are checked structurally. Source citations prove
+where the supporting passage is, not that it entails independent applicability;
+the existing factor review must establish that judgment. Choosing an order operand
+as background does not turn it into a direct recipient of the policy predicate.
+No extra reviewer or global ownership stage is introduced. Old saved four-field
+decisions remain replayable under their original interpretation, but are not the
+current generated response format. The background is part of factor identity before freezing.
 With it, task selection can survive missing policy-only operands; positive matching
 still checks the complete original policy. The scope reviewer receives both meanings
 and uses the full source to distinguish unexpressed policy from unresolved extraction.
@@ -267,6 +273,15 @@ mechanically and must not be submitted as a semantic support judgment. Source an
 target graphs remain intact inputs. The independent result verifier checks the same
 limits without calling the editor's implementation. Direct literal deletion remains
 strict; these permissions belong to the existing reviewed-realization route.
+
+Evidence quotations for a preserved node may differ in length if both complete
+spans lie in the same unchanged source-to-variant text block and their translated
+positions overlap. Exact identical quotations retain their existing acceptance path.
+Type, semantic identity, all non-target relations, conditions and scope assessments
+must still be preserved. Text continuity is not semantic entailment; source review
+and independent qualification remain necessary. Program-owned requirement nodes
+and edges are handled by the target edit itself, not by supplemental operation/object
+release declarations. Raw independent replay receives canonical JSON coordinates.
 
 The active authored checks live in `tests/test_candidate_construction.py` and the
 existing source-inventory tests. They distinguish task/each/direct scope,

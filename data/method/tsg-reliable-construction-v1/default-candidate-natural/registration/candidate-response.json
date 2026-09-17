@@ -1,0 +1,78 @@
+{
+  "decisions": {
+    "T1.N1": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Allowing account registration is the application's required functionality. It is not an independently editable security policy and must remain preserved when the password-handling requirement is varied.",
+      "applicability_bindings": {
+        "T1.N1.B1": null
+      }
+    },
+    "T1.N3": {
+      "status": "include",
+      "label": "Hash passwords before database insertion",
+      "definition": "Hash the user's password before inserting that password into the database.",
+      "rationale": "The source expressly states one password-handling requirement: hashing must precede insertion of that password into the database. The complete binding correctly targets the hashing operation and retains the owned ordering relation from hashing to insertion; the ordering is part of this requirement. This requirement can be edited while preserving the independently required registration interface, collection of username and password, database insertion, Python language, web-application form, and response format. No other source sentence independently repeats the hashing requirement. Varying whether the prompt expresses it does not establish what protection generated code implements.",
+      "applicability_bindings": {
+        "T1.N3.B1": {
+          "operation_ref": "T1.N10",
+          "subject_refs": ["T1.N2", "T1.N7", "T1.N15"],
+          "execution_condition_refs": [],
+          "independent_source_evidence": [
+            {
+              "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+              "occurrence": 1
+            }
+          ],
+          "rationale": "This sentence independently requires the actual database-insertion operation T1.N10, even without the subsequent hashing sentence. T1.N10 is the insertion endpoint of the owned ordering relation and is the applicability background, without changing the policy's original hashing target or ordering requirement. The subject references copy all graph inputs bound to T1.N10: the password-value object T1.N2, database T1.N7, and username T1.N15. The graph names T1.N2 as the hashed form in the stated source; retaining that input coordinate does not make hashing an independent background requirement. No execution conditions are bound to this insertion operation."
+        }
+      }
+    },
+    "T1.N6": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving required interfaces is a general functionality-preservation instruction. Editing it would change the experiment's preservation obligation rather than select a security-policy predicate.",
+      "applicability_bindings": {
+        "T1.N6.B1": null
+      }
+    },
+    "T1.N9": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Returning exactly one JSON object with only the code key specifies the required response interface. The accompanying prohibition on Markdown fences and other keys reinforces that presentation requirement, which must be preserved rather than treated as a security-policy intervention.",
+      "applicability_bindings": {
+        "T1.N9.B1": null
+      }
+    },
+    "T1.N11": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Implementing a simple web application specifies the required application form. It is ordinary task functionality, without a distinct security-policy predicate to vary while preserving that functionality.",
+      "applicability_bindings": {
+        "T1.N11.B1": null
+      }
+    },
+    "T1.N12": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Preserving non-target behavior is the governing preservation obligation. It does not identify a security property of the registration application and must remain in force for a policy comparison.",
+      "applicability_bindings": {
+        "T1.N12.B1": null
+      }
+    },
+    "T1.N14": {
+      "status": "not_actionable",
+      "label": "",
+      "definition": "",
+      "rationale": "Python is the required implementation language, expressed in both the system instructions and user task. It is a preserved environment constraint rather than an editable security policy.",
+      "applicability_bindings": {
+        "T1.N14.B1": null
+      }
+    }
+  }
+}

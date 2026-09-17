@@ -1,0 +1,44 @@
+{
+  "outcomes": {
+    "remove": {
+      "omitted_program_owned_declarations": {
+        "source_nodes": [
+          "tsg_node_46cb415e337607ec5b29dfc2a56783ded7b2da31520fc7df3b526a9066b98aec"
+        ],
+        "source_edges": [
+          "tsg_edge_cf93451a193264e9e55c6b453a1d8b702889173f9281e47d4e73a2195eb43414"
+        ]
+      },
+      "renderer": {
+        "status": "PASSED",
+        "prompt_sha256": "d01ed4ffc6a3fee88cfcf0500bd6b220e1d12b09bb63068a0c37fcbff9de3c2f"
+      },
+      "independent_verifier": {
+        "status": "PASSED",
+        "prompt_sha256": "d01ed4ffc6a3fee88cfcf0500bd6b220e1d12b09bb63068a0c37fcbff9de3c2f"
+      }
+    },
+    "add": {
+      "omitted_program_owned_declarations": {
+        "variant_nodes": [
+          "tsg_node_46cb415e337607ec5b29dfc2a56783ded7b2da31520fc7df3b526a9066b98aec"
+        ],
+        "variant_edges": [
+          "tsg_edge_cf93451a193264e9e55c6b453a1d8b702889173f9281e47d4e73a2195eb43414"
+        ]
+      },
+      "renderer": {
+        "status": "PASSED",
+        "prompt_sha256": "964639d8eb48d6e88f11451e55f94babbb6b4f5fa3f45634db09069af6180f65"
+      },
+      "independent_verifier": {
+        "status": "PASSED",
+        "prompt_sha256": "964639d8eb48d6e88f11451e55f94babbb6b4f5fa3f45634db09069af6180f65"
+      }
+    }
+  },
+  "new_model_steps": 0,
+  "external_provider_calls": 0,
+  "same_saved_source_judgments": true,
+  "scientific_claim_allowed": false
+}

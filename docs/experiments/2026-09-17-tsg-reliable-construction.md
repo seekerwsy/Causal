@@ -490,3 +490,36 @@ rejections. The new effective-impact review view is tested in the current suite;
 old model requests retain their original implementation and interpretation.
 The natural candidate-local run also replays its two proposal decisions and single
 candidate review. Its planned later stages have no responses to replay.
+
+## Default candidate interface and saved natural edit replay
+
+The next [bounded check](../../data/method/tsg-reliable-construction-v1/default-candidate-natural/README.md)
+uses the actual compact proposer with immutable complete-policy bindings and a
+separate, cited applicability choice. Eleven fresh Codex steps ran, with zero
+external API calls. Privilege lowering passed candidate review, fresh original and
+deleted-source construction, ordinary review and scope assessment. Its independent
+directory background survived; lowering was present/absent and elevation remained
+present. Registration was rejected because its selected insertion background still
+contained the policy-dependent hashed-password object. Its downstream stages did
+not run.
+
+The privilege paired support review accepted the source comparison, but the first
+edit attempt exposed two experimental adapter errors: already-owned target nodes
+were resubmitted as supplemental release declarations, and noncanonical tuple
+coordinates were passed to the raw-record verifier. Correcting only that projection
+and serialization exposed the next gate: different evidence quotation lengths on
+unchanged non-target text. The preserved initial result is not reported as a pass.
+
+A separately specified replay kept all model judgments, graphs and prompts fixed.
+The editor and independent verifier now permit different quotation lengths only
+when both full spans lie in one unchanged source-to-variant block and translated
+positions overlap. All semantic-ID/type, relation, condition and scope checks remain.
+Both REMOVE and inverse ADD then passed in the saved privilege pair. The model was
+not resampled, and the registration rejection was not bypassed. This is one exposed
+pair and a subsequent mechanical correction, not a fresh end-to-end stability result
+or independent qualification. Citation continuity does not prove semantic entailment.
+
+The original failure, corrected-adapter rejection and repaired replay are separately
+retained and independently reproducible under their source archives. The existing
+105-case suite passed in a clean source export after the changes; no cases or
+reviewer roles were added. Paper content and the Atomic-only boundary remain intact.

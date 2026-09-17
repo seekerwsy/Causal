@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
+from difflib import SequenceMatcher
 import hashlib
 from pathlib import Path
 import ast
@@ -577,6 +578,7 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
         }
         kept = _verify_reviewed_edit_projection(
             graph, variant, source, policy, scopes, flags, target_requirements, check)
+        unchanged = None
         for key, before in nodes.items():
             if key not in kept:
                 continue
@@ -585,13 +587,25 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
                 "reviewed realization drops a non-target node",
             )
             after = rewritten[mapped[key]]
+            citation_preserved = (
+                source[before["evidence_start"] : before["evidence_end"]]
+                == variant["prompt"][after["evidence_start"] : after["evidence_end"]]
+            )
+            if not citation_preserved:
+                if unchanged is None:
+                    unchanged = SequenceMatcher(a=source, b=variant["prompt"], autojunk=False).get_matching_blocks()
+                for block in unchanged:
+                    offset = block.b - block.a
+                    if (block.a <= before["evidence_start"] < before["evidence_end"] <= block.a + block.size
+                        and block.b <= after["evidence_start"] < after["evidence_end"] <= block.b + block.size
+                        and before["evidence_start"] + offset < after["evidence_end"]
+                        and after["evidence_start"] < before["evidence_end"] + offset):
+                        citation_preserved = True
+                        break
             check(
                 before["semantic_id"] == after["semantic_id"]
                 and before["node_type"] == after["node_type"]
-                and (
-                    source[before["evidence_start"] : before["evidence_end"]]
-                    == variant["prompt"][after["evidence_start"] : after["evidence_end"]]
-                ),
+                and citation_preserved,
                 "reviewed realization changes a non-target requirement",
             )
         scope_map = {**mapped,
