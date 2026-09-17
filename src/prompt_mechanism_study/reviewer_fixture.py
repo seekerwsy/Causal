@@ -12,7 +12,6 @@ from pathlib import Path
 from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.prioritization import (
     AtomicCandidateUniverseManifest,
-    AtomicFCIBootstrapEvidence,
     AtomicShadowPlan,
     ConfirmationDispatchManifest,
     DiscoveryObservation,
@@ -40,7 +39,6 @@ class ReviewerSmokeFixture:
     atomic_universe: AtomicCandidateUniverseManifest
     atomic_observations: tuple[DiscoveryObservation, ...]
     atomic_plan: AtomicShadowPlan
-    atomic_fci_evidence: AtomicFCIBootstrapEvidence
     security_profile_id: str
     source_task_prompt: str
     functional_requirement: str

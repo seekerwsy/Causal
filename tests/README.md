@@ -21,7 +21,10 @@ python -m pytest -q
 ```
 
 The suite already includes a seven-stage offline smoke and independent saved-result
-verification. To inspect a standalone smoke package, use:
+verification. Its Discovery stage now computes ten real FCI bootstrap draws over
+synthetic task units instead of consuming preset adjacency flags. The existing
+failure test checks that a backend failure stays non-evaluable. No new test
+function was added for this change. To inspect a standalone smoke package, use:
 
 ```text
 prompt-mechanism-study study smoke NEW_OUTPUT_DIRECTORY
@@ -68,7 +71,15 @@ with non-target scope preservation. It covers policy-only guards, task-wide and
 universal boundaries, one complete alternative and before/after predicates.
 Existing source-binding tests now distinguish policy guards from task context.
 
-## Verification, 2026-09-16
+## Verification, 2026-09-18
+
+All 105 cases passed once in 36.45 seconds from a clean staged-source export
+using the supported Python 3.12.13 environment. This includes actual FCI execution
+in the existing smoke and retention of backend failures. The
+[downstream report](../docs/experiments/2026-09-18-discovery-path-check.md) identifies
+the separately retained CLI run, independent verification and natural-support audit.
+
+## Historical verification, 2026-09-16
 
 All 101 cases passed in 28.49 seconds in the isolated Python 3.12.13 environment,
 with zero provider calls. This includes the Atomic seven-stage smoke, 40 generated

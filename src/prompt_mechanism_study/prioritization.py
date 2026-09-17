@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1181,6 +1182,117 @@ def freeze_atomic_candidate_universe(
     )
 
 
+def run_atomic_fci_bootstrap(
+    universe: AtomicCandidateUniverseManifest,
+    observations: Sequence[DiscoveryObservation],
+    plan: AtomicShadowPlan,
+    *,
+    fold_freeze: AtomicFoldFreeze,
+    bootstrap_draws: int,
+    bootstrap_seed: int,
+    alpha: float,
+    depth: int,
+    max_path_length: int,
+    categorical_covariates: tuple[str, ...],
+) -> tuple[AtomicFCIBootstrapEvidence, dict]:
+    """Compute adjacency evidence, retaining matrices, PAGs and failed draws.
+
+    This categorical development producer does not qualify FCI or activate a
+    formal study. Groups share a model, analysis scope, outcome and task family.
+    Missing states never become zero or silently shrink the RD population.
+    """
+    if type(bootstrap_draws) is not int or bootstrap_draws < 1 or type(bootstrap_seed) is not int:
+        raise ValueError("FCI requires a positive draw count and an integer seed")
+    if not 0 < alpha < 1 or depth < -1 or max_path_length < -1:
+        raise ValueError("invalid FCI search parameters")
+    if categorical_covariates != plan.covariate_names:
+        raise ValueError("categorical FCI must explicitly declare every covariate; no implicit binning")
+    if fold_freeze != freeze_atomic_candidate_folds(
+        universe, atomic_preoutcome_observations(observations), plan
+    ):
+        raise ValueError("FCI needs the exact outcome-blind fold freeze")
+
+    rows = _reference_observations(observations, plan.model_id)
+    policies = {p.policy_key: p for p in universe.policy_keys}
+    families = dict(universe.candidate_family_ids)
+    eligible = {m.candidate_id for m in fold_freeze.manifests}
+    groups = defaultdict(list)
+    for candidate in universe.supported_policy_keys:
+        policy = policies[candidate]
+        groups[(families[candidate], policy.analysis_scope.analysis_scope_id,
+                policy.outcome_id)].append(candidate)
+    results = {candidate: [None] * bootstrap_draws for candidate in universe.supported_policy_keys}
+    trace = dict(
+        status="UNQUALIFIED_DEVELOPMENT_FCI", scientific_claim_allowed=False,
+        backend="causal-learn", backend_version=_causal_learn_version(),
+        universe_id=universe.universe_id, discovery_data_sha256=discovery_data_sha256(observations),
+        fold_freeze_sha256=content_hash(fold_freeze),
+        parameters=dict(bootstrap_draws=bootstrap_draws, bootstrap_seed=bootstrap_seed,
+            alpha=alpha, depth=depth, max_path_length=max_path_length,
+            categorical_covariates=categorical_covariates, independence_test="gsq"),
+        groups=[],
+    )
+    for key, candidates in sorted(groups.items()):
+        group_rows = tuple(row for row in rows if row.family_id == key[0]
+                           and any(c in dict(row.candidate_states) for c in candidates))
+        features = sorted({policies[c].factor.actionable_feature_id for c in candidates})
+        feature_candidates = {f: [c for c in candidates if policies[c].factor.actionable_feature_id == f]
+                              for f in features}
+        variable_order = tuple([f"factor:{f}" for f in features]
+                               + [f"covariate:{c}" for c in categorical_covariates] + ["outcome"])
+        forbidden = tuple(("outcome", name) for name in variable_order[:-1])
+        record = dict(family_id=key[0], analysis_scope_id=key[1], outcome_id=key[2],
+                      candidate_ids=candidates, variable_order=variable_order,
+                      forbidden_directions=forbidden,
+                      task_unit_ids=[row.task_unit_id for row in group_rows],
+                      matrix=[], blocked_reason=None, draws=[])
+        trace["groups"].append(record)
+        if not set(candidates) <= eligible:
+            record["blocked_reason"] = "preoutcome_support_or_folds_failed"
+        elif not group_rows or any(not set(candidates) <= dict(row.candidate_states).keys()
+                                   for row in group_rows):
+            record["blocked_reason"] = "joint_states_missing_cannot_change_candidate_population"
+        elif any(len({dict(row.candidate_states)[c] for c in cs}) != 1
+                 for row in group_rows for cs in feature_candidates.values()):
+            record["blocked_reason"] = "same_factor_has_inconsistent_natural_states"
+        if record["blocked_reason"]:
+            continue
+        covariates = _encode_fci_covariates(group_rows, categorical_covariates)
+        matrix = tuple(tuple(dict(row.candidate_states)[feature_candidates[f][0]] for f in features)
+                       + covariates[i] + (row.outcome,) for i, row in enumerate(group_rows))
+        record["matrix"] = matrix
+        rng = random.Random(int(content_hash((bootstrap_seed, key)), 16))
+        for draw in range(bootstrap_draws):
+            indices = [rng.randrange(len(matrix)) for _ in matrix]
+            sample = tuple(matrix[i] for i in indices)
+            item = dict(draw=draw, sampled_row_indices=indices, edges=None,
+                        adjacent_factor_ids=None, error=None, backend_called=False)
+            record["draws"].append(item)
+            if any(len({row[col] for row in sample}) < 2 for col in range(len(variable_order))):
+                item["error"] = "constant_variable_in_bootstrap_draw"
+                continue
+            try:
+                item["backend_called"] = True
+                adjacent, edges = _run_causal_learn_pag(
+                    sample, alpha=alpha, depth=depth, max_path_length=max_path_length,
+                    outcome_index=len(variable_order)-1, variable_order=variable_order,
+                    forbidden_directions=forbidden,
+                )
+                item["edges"] = edges
+                item["adjacent_factor_ids"] = [features[i] for i in sorted(adjacent) if i < len(features)]
+                for candidate in candidates:
+                    results[candidate][draw] = policies[candidate].factor.actionable_feature_id in item["adjacent_factor_ids"]
+            except Exception as error:
+                # A failed numerical backend is unknown, never a negative edge.
+                item["error"] = f"{type(error).__name__}: {error}"
+    evidence = AtomicFCIBootstrapEvidence(
+        universe.universe_id,
+        tuple((candidate, tuple(results[candidate])) for candidate in universe.supported_policy_keys),
+        content_hash(trace),
+    )
+    return evidence, trace
+
+
 def run_atomic_shadow_qualification(
     universe: AtomicCandidateUniverseManifest,
     observations: Sequence[DiscoveryObservation],
@@ -1943,4 +2055,5 @@ __all__ = [
     "freeze_fixed_slot_ledger",
     "freeze_shared_confirmation_union",
     "run_atomic_shadow_qualification",
+    "run_atomic_fci_bootstrap",
 ]

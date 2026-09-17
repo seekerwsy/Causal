@@ -367,7 +367,7 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
         )
 
 
-def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
+def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable(monkeypatch) -> None:
     universe, rows, plan, evidence, positive_id, _negative_id = _atomic_shadow_fixture()
     insufficient = replace(
         evidence,
@@ -401,6 +401,21 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
     assert gate.status is AtomicFCIGateStatus.NON_EVALUABLE
     assert not any(slot.candidate_id == positive_id for slot in result.full.slots)
     assert any(slot.candidate_id == positive_id for slot in result.rd_only.slots)
+
+    calls = []
+    def failed_backend(matrix, **kwargs):
+        calls.append(matrix)
+        raise RuntimeError("Backend unavailable in this failure control")
+    monkeypatch.setattr(prioritization, "_run_causal_learn_pag", failed_backend)
+    computed, trace = prioritization.run_atomic_fci_bootstrap(
+        universe, rows, plan,
+        fold_freeze=freeze_atomic_candidate_folds(universe, atomic_preoutcome_observations(rows), plan),
+        bootstrap_draws=2, bootstrap_seed=2026091801, alpha=0.05,
+        depth=-1, max_path_length=-1, categorical_covariates=plan.covariate_names,
+    )
+    assert len(calls) == 4
+    assert all(draws == (None, None) for _, draws in computed.candidate_draws)
+    assert all("Backend unavailable" in draw["error"] for group in trace["groups"] for draw in group["draws"])
 
 
 def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:

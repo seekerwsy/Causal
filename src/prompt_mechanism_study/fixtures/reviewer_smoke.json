@@ -1,25 +1,4 @@
 {
-  "atomic_fci_evidence": {
-    "candidate_draws": [
-      [
-        "atomic_policy_key_328f6edd36eb97515585a700a8f0e46e797aef299f3a3ad34dcf6e04be90850c",
-        [
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true
-        ]
-      ]
-    ],
-    "evidence_sha256": "c2a5e91d9169ea7f1d19494345fa8ba772993135f59037beef76763619204dc5",
-    "universe_id": "atomic_candidate_universe_93253d397778e7c3ecdfa50b5f691ef6cba8e4e9e09a854eb6f03b7a8d7d863c"
-  },
   "atomic_observations": [
     {
       "candidate_states": [

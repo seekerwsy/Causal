@@ -9,6 +9,7 @@ from prompt_mechanism_study.prioritization import (
     freeze_atomic_candidate_folds,
     atomic_preoutcome_observations,
     run_atomic_shadow_qualification,
+    run_atomic_fci_bootstrap,
 )
 from prompt_mechanism_study.verification import (
     load_and_verify_target_result_bundle,
@@ -87,6 +88,18 @@ def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
     assert receipt["measurement_count"] == 40
     assert receipt["outcome_count"] == 40
     assert receipt["provider_calls_made"] == 0
+    fci = receipt["fci_execution"]
+    assert fci["backend"] == "causal-learn"
+    assert fci["scientific_claim_allowed"] is False
+    assert len(fci["groups"]) == 1
+    assert len(fci["groups"][0]["task_unit_ids"]) == 24
+    draws = fci["groups"][0]["draws"]
+    assert len(draws) == 10 and all(draw["backend_called"] for draw in draws)
+    assert all(draw["error"] is None and draw["adjacent_factor_ids"] for draw in draws)
+    # The fixture's known relationship is recovered by the actual backend, not preset flags.
+    from prompt_mechanism_study.records import content_hash
+    assert receipt["fci_evidence"]["evidence_sha256"] == content_hash(fci)
+    assert all(receipt["fci_evidence"]["candidate_draws"][0][1])
     assert receipt["evidence_level"] == "tested"
     assert receipt["package_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert receipt["scientific_claim_allowed"] is False
@@ -114,6 +127,12 @@ def test_target_selectors_require_exact_preoutcome_fold_replay() -> None:
     assert all((not hasattr(item, "outcome") for item in atomic_preoutcome))
     atomic_folds = freeze_atomic_candidate_folds(
         inputs.atomic_universe, atomic_preoutcome, inputs.atomic_plan
+    )
+    fci_evidence, _ = run_atomic_fci_bootstrap(
+        inputs.atomic_universe, inputs.atomic_observations, inputs.atomic_plan,
+        fold_freeze=atomic_folds, bootstrap_draws=1, bootstrap_seed=2026091801,
+        alpha=0.05, depth=-1, max_path_length=-1,
+        categorical_covariates=inputs.atomic_plan.covariate_names,
     )
     outcome_changed_atomic = tuple(
         (replace(item, outcome=1 - item.outcome) for item in inputs.atomic_observations)
@@ -160,7 +179,7 @@ def test_target_selectors_require_exact_preoutcome_fold_replay() -> None:
             inputs.atomic_universe,
             inputs.atomic_observations,
             inputs.atomic_plan,
-            inputs.atomic_fci_evidence,
+            fci_evidence,
             fold_freeze=tampered_atomic,
         )
 

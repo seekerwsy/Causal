@@ -22,8 +22,14 @@ standalone commands only when a saved package is useful. The smoke calls
 `target_workflow.run_target_reviewer_smoke`, writes all seven stages, and makes
 zero provider calls. Its synthetic inputs and offline responses come from
 `fixtures/reviewer_smoke.json`. It executes parsing, local security measurement
-and functional-response validation, but does not establish evaluator accuracy,
-FCI qualification, natural support or formal statistical power.
+and functional-response validation. Prioritization now executes causal-learn FCI
+on 24 synthetic task units with ten task-unit bootstrap draws; adjacency is no
+longer supplied by the fixture. The CLI JSON retains the input matrix, sampled
+rows, PAG endpoints, failures and gate decisions. Save that output alongside the
+result package when inspecting Discovery. The independent result verifier replays
+the downstream freezes and ITT, not FCI itself. This run does not establish
+automatic TSG accuracy, evaluator accuracy, FCI qualification, natural support
+or formal statistical power.
 
 `study development OUTPUT --development-plan PLAN` executes an explicitly
 bounded, authorized Atomic development plan. `study verify-development SAVED_RUN`

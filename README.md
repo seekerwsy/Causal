@@ -49,58 +49,39 @@ Secure-code yield, Oracle coverage, functionality and joint success remain separ
 
 ## Current research bottleneck
 
-Automatic TSG extraction can preserve a plausible description while misbinding
-its condition or target. The current path preserves complete policy bindings and
-reviews a separate applicability background. Candidate proposals account for the
-operation, every input and every execution guard with cited retain/omit decisions;
-the existing reviewer judges the independence and sufficiency of the whole tuple.
-Construction still uses one ordinary source review and at most one local semantic
-patch. Component accounting adds no reviewer or scientific stage.
+The priority is now a complete development run through causal discovery and the
+subsequent experiment, rather than another standalone TSG repetition gate. TSG
+still needs correct requirement/target/condition bindings for each admitted
+comparison; unrelated local uncertainty does not reject an entire task. The
+[TSG workflow](docs/tsg-workflow-stability.md) and
+[candidate guide](docs/tsg-candidate-construction.md) define that boundary.
 
-The [fresh two-task check](docs/experiments/2026-09-17-tsg-reliable-construction.md#fresh-complete-background-check)
-accepted both target candidates and compiled four initial graphs without mechanical
-repair. Privilege lowering passed fresh REMOVE, inverse ADD and independent
-verification while preserving elevation. Registration stopped after its present-arm
-review disputed username insertion and the local patch repeated the rejected claim;
-its removed-arm scope was absent, but no paired support or edit ran. The frozen
-both-task gate therefore blocked the conditional follow-up. These 17 fresh Codex
-steps used zero external API calls. The successful directions remain one exposed
-task's edit pair, not general construction stability or a causal/security result.
+The [downstream check](docs/experiments/2026-09-18-discovery-path-check.md) found
+that the seven-stage smoke previously consumed preset FCI adjacency flags. It now
+runs causal-learn on its synthetic observations and retains bootstrap matrices,
+PAGs and failures before Full/RD-only selection, assignment, measurement and ITT.
+This is actual algorithm execution with fixture data, not natural-data Discovery
+or evidence that FCI improves discovery. The paid development entry still starts
+from supplied policies and does not perform Discovery.
 
-The subsequent [representation/repair revision](data/method/tsg-reliable-construction-v1/structural-repair-boundary/README.md)
-separates operation predicates from concrete bindings and makes explicit withdrawal
-preserve uncertainty while closing dangling dependencies. Authored controls on the
-saved registration records now produce a compilable unknown graph, or preserve the
-hashing order while retracting the uncertain username binding under a newly frozen
-normalized predicate. Both saved privilege graphs retain their structure. No fresh
-model improvement was established by those authored controls.
+A source-only audit of one existing 12-task exposed development plan found only
+unexpressed focal requirements (SQL: 3, command: 8, path: 1). Those historical
+annotations are not requalified by this audit. This pool cannot supply natural
+0/1 support for the three factors; intervention arms and repeated extraction
+cannot repair that population gap. The next scientific step is a fixed,
+outcome-blind natural development population and its candidate support, followed
+by baseline measurement, actual Discovery and independent held-out development
+edits where support permits. Any D0 preparation retains the protocol's independent
+natural-source and outcome/selector-blind boundaries.
 
-The [non-thinking DeepSeek Flash check](data/method/tsg-reliable-construction-v1/predicate-binding-api/README.md)
-compiled both final graphs but missed predicate/binding defects in both source reviews.
-A [thinking-mode comparison](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
-used identical tasks, instructions and source code with larger delivery limits.
-Both initial graphs compiled; the existing review and local patch corrected four
-operation facts while preserving requirements, order and conditions. Registration's
-explicit web/account task requirement was restored. Username insertion and the
-meaning of supplied `pass` bodies remain disputed, so the 2/2 narrow separation
-check is not whole-graph correctness or repeated stability. Each batch made six
-API calls; conservative costs were CNY0.178368 and CNY0.964020 respectively. Thinking
-and resource limits changed together; no isolated thinking effect is established.
-
-The same two tasks were then tested with
-[Qwen3.7-Max thinking on Bailian](data/method/tsg-reliable-construction-v1/predicate-binding-qwen-max-api/README.md).
-Both final graphs compiled, but neither met the same predicate/binding boundary.
-One local patch removed input links and preserved order/conditions, while leaving
-the concrete destination inside an operation definition. Registration's web
-constraint was again omitted. Six calls cost a conservative CNY1.756200. This
-comparison favors the tested DeepSeek configuration on the narrow check; it does
-not establish general model superiority or construction stability.
-
-The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
-the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)
-retains earlier failures and the [candidate guide](docs/tsg-candidate-construction.md)
-explains downstream use. Independent representation and measurement qualification,
-natural candidate support and a prospectively frozen formal study remain unfinished.
+Automatic TSG quality remains incomplete. The latest two-task
+[DeepSeek thinking check](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
+met a narrow predicate/binding check after repair; the same
+[Qwen3.7-Max check](data/method/tsg-reliable-construction-v1/predicate-binding-qwen-max-api/README.md)
+did not. Neither establishes whole-graph correctness or repeated stability.
+[Earlier checks](docs/experiments/2026-09-17-tsg-reliable-construction.md) retain
+the original failures. Independent representation and measurement qualification
+and a prospectively frozen formal study remain unfinished.
 
 ## Reproduction
 

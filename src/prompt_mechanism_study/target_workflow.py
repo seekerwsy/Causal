@@ -14,7 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 from dataclasses import asdict
 from collections import Counter
+from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 import json
 import random
 import sys
@@ -43,6 +45,7 @@ from prompt_mechanism_study.prioritization import (
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
     run_atomic_shadow_qualification,
+    run_atomic_fci_bootstrap,
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.representation import (
@@ -501,6 +504,9 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         atomic_preoutcome_observations(inputs.atomic_observations),
         inputs.atomic_plan,
     )
+    fci_parameters = dict(bootstrap_draws=10, bootstrap_seed=2026091801,
+                          alpha=0.05, depth=-1, max_path_length=-1,
+                          categorical_covariates=inputs.atomic_plan.covariate_names)
     discovery = freeze_target_discovery_design(
         schema_version=SCHEMA_VERSION,
         manifest=manifest,
@@ -524,13 +530,18 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
             "reviewer_smoke_candidate_folds_", (atomic_folds,)
         ),
         selector_contract=_artifact_reference(
-            "reviewer_smoke_selector_contracts_", (inputs.atomic_plan,)
+            "reviewer_smoke_selector_contracts_", (inputs.atomic_plan, fci_parameters)
         ),
         discovery_outcome_contract=_artifact_reference(
             "reviewer_smoke_discovery_outcome_", "oracle_evaluable_secure_code_yield"
         ),
     )
-    atomic_fci_evidence = inputs.atomic_fci_evidence
+    # The backend writes informational text even with verbose=False; keep CLI JSON valid.
+    with redirect_stdout(StringIO()):
+        atomic_fci_evidence, fci_trace = run_atomic_fci_bootstrap(
+            inputs.atomic_universe, inputs.atomic_observations, inputs.atomic_plan,
+            fold_freeze=atomic_folds, **fci_parameters,
+        )
     atomic = run_atomic_shadow_qualification(
         inputs.atomic_universe,
         inputs.atomic_observations,
@@ -700,6 +711,9 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         "protocol_id": PROTOCOL_ID,
         "stages": list(SMOKE_STAGES),
         "stage_count": len(SMOKE_STAGES),
+        "fci_execution": fci_trace,
+        "fci_evidence": asdict(atomic_fci_evidence),
+        "fci_gates": [asdict(gate) for gate in atomic.fci_gates],
         "data_role_firewall_validation_id": firewall["firewall_validation_id"],
         "discovery_design_freeze_id": discovery.discovery_design_freeze_id,
         "confirmation_freeze_id": confirmation.confirmation_freeze_id,

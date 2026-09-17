@@ -5,6 +5,18 @@ scientific stages remain representation, prioritization, hypothesis freeze,
 intervention/randomization, measurement, outcome assembly and inference/reporting.
 This document describes development within representation, not formal qualification.
 
+The current development priority is the complete downstream path, including actual
+FCI computation, rather than another standalone TSG repetition gate. A development
+candidate can advance when its complete requirement, applicability, direct targets,
+conditions and relevant non-target constraints have been checked, its source state
+is resolved, and the concrete ADD/REMOVE comparison is valid. Unrelated localized
+unknowns remain recorded without blocking that comparison; relevant uncertainty
+still blocks it. Neither a compiling graph nor model self-approval establishes
+these semantic conditions. Report admitted and rejected candidates together.
+This local development decision does not qualify an extractor or activate the
+draft protocol. Earlier frozen batch gates and their failures remain unchanged.
+See the [downstream execution check](experiments/2026-09-18-discovery-path-check.md).
+
 ## One active construction path
 
 ```text
