@@ -256,15 +256,18 @@ def render_task_hypothesis(
         return _render_reviewed_variant(binding, graph, prompt=prompt, catalog=catalog,
                                         enabled=enabled, variant=reviewed_variant, inactive_texts=inactive_texts or {})
     by_id = {node.node_id: node for node in graph.nodes}
+    object_features = {feature for feature, selector in catalog.get("feature_scope_selectors", {}).items()
+                       if selector["scope_kind"] == "objects"}
     scopes = []
-    for scope in factor_scopes:
+    for feature, scope in zip(binding.factor_feature_ids, factor_scopes, strict=True):
         validate_feature_scope(graph, scope)
         if not {scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids} <= set(binding.target_subgraph_node_ids):
             raise MechanismRegistryError("factor scope binding changed before rendering")
         quote = lambda key: json.dumps(prompt[by_id[key].evidence_start:by_id[key].evidence_end], ensure_ascii=False)
         text = ""
         if scope.subject_node_ids:
-            text += ("For the input described by " if len(scope.subject_node_ids) == 1 else "For the inputs described by ")
+            noun = "source object" if feature in object_features else "input"
+            text += f"For the {noun if len(scope.subject_node_ids) == 1 else noun + 's'} described by "
             text += ", ".join(quote(key) for key in scope.subject_node_ids) + ": "
         if scope.condition_node_ids:
             text += "Under the unchanged source conditions " + ", ".join(quote(key) for key in scope.condition_node_ids) + ": "
@@ -273,6 +276,7 @@ def render_task_hypothesis(
     for feature, edit, state, active, subject_scope, scope in zip(binding.factor_feature_ids, binding.factor_operations,
                                             binding.feature_states, enabled, scopes, factor_scopes, strict=True):
         operation = by_id[scope.operation_node_id]
+        object_policy = feature in object_features
         required = "absent" if edit == "add" else "present"
         if state != required:
             raise MechanismRegistryError(f"{edit} requires explicit {required} at the exact target scope; got {state}")
@@ -281,12 +285,12 @@ def render_task_hypothesis(
             if inactive_texts is not None and feature in inactive_texts:
                 text = inactive_texts[feature]
                 require_text(text, "frozen inactive factor text")
-                instructions.append((operation.node_id, subject_scope + text))
+                instructions.append((operation.node_id, object_policy, subject_scope + text))
             continue
         if edit == "add":
             text = additions.get(feature)
             require_text(text, "frozen addition text")
-            instructions.append((operation.node_id, subject_scope + text))
+            instructions.append((operation.node_id, object_policy, subject_scope + text))
         else:
             if binding.factor_scopes:
                 assessment = scoped_feature_assessment(graph, feature, scope)
@@ -323,12 +327,14 @@ def render_task_hypothesis(
     for start, end in sorted(set(removals), reverse=True):
         variant = variant[:start] + variant[end:]
     if instructions:
-        for operation_id in dict.fromkeys(key for key, _ in instructions):
+        for operation_id, object_policy in dict.fromkeys((key, objects) for key, objects, _ in instructions):
             operation = by_id[operation_id]
             operation_text = prompt[operation.evidence_start:operation.evidence_end]
-            variant += ("\n\nFor the runtime task as a whole:\n" if operation.node_type == "task" else
+            variant += ("\n\nFor the named source objects:\n" if object_policy else
+                        "\n\nFor the runtime task as a whole:\n" if operation.node_type == "task" else
                         "\n\nFor the operation described by " + json.dumps(operation_text, ensure_ascii=False) + ":\n")
-            variant += "\n".join("- " + text for key, text in instructions if key == operation_id)
+            variant += "\n".join("- " + text for key, objects, text in instructions
+                                 if (key, objects) == (operation_id, object_policy))
     result = {"binding_id": binding.binding_id, "task_id": binding.task_id, "policy_id": binding.policy_id,
             "source_tsg_id": binding.source_tsg_id, "target_operation_node_id": binding.target_operation_node_id,
             "enabled": list(enabled), "expected_feature_states": dict(expected), "prompt": variant,

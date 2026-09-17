@@ -374,16 +374,22 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
 
 
 def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
-                         catalog=None, feature=None, prompt=None):
+                         catalog=None, feature=None, prompt=None, object_uses=0,
+                         object_subjects=("buffer",)):
     """Authored structures isolate projection/editing, not automatic extraction quality."""
     from dataclasses import replace
     invariant = "The entire task must preserve the status format."
     base = "Process the request and write the diagnostic log. Return status. " + invariant
+    if kind == "objects":
+        base += " The input buffer and saved path are available."
     task = dict(task_id="synthetic-complete-policy", language="python",
                 prompt=prompt if prompt is not None else base + (" " + text if present else ""))
     rows = [("op", "task_operation", "processing", "Process the request and write the diagnostic log"),
             ("return", "task_operation", "returning", "Return status"),
             ("invariant", "task_requirement", "status_format", invariant)]
+    if kind == "objects":
+        rows.extend((("buffer", "data_object", "buffer", "input buffer"),
+                     ("path", "data_object", "path", "saved path")))
     if present:
         rows.append(("r", "safety_requirement", "policy", text))
         if guard:
@@ -403,6 +409,9 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
             structures.update(r=dict(kind="not", members=["both"]), both=dict(kind="and", members=["redact", "omit"]))
     targets = ["redact", "omit"] if choice else ["r"]
     links = ([(key, "constrains", "op") for key in targets] if present and kind == "targets" else [])
+    if kind == "objects":
+        links += [(key, "constrains", obj) for key in targets for obj in object_subjects] if present else []
+        links += [(obj, "used_by", op) for obj in object_subjects for op in ("op", "return")[:object_uses]]
     if present and guard:
         links.append(("g", "conditions", "r"))
     concepts = [dict(concept_id=concept, node_type=node_type, definition=quote)
@@ -421,13 +430,16 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
     contract = open_contract_from_response(supplied, task=task, catalog=supplied_catalog,
         annotator_id="authored-projection-reference", review_status="development_exposed")
     retained = {"invariant": dict(kind="task", boundaries=[], target_class=None)}
-    if present and kind != "targets":
+    if present and kind not in {"targets", "objects"}:
         retained["r"] = dict(kind="task" if kind == "task" else "each",
                              boundaries=["op"] if kind == "each_function" else [],
                              target_class=None if kind == "task" else "diagnostic log entries")
     inventory = dict(source_units={"u": dict(evidence_text=task["prompt"], occurrence=1)},
         coverage={"u": dict(status="represented", facts=[key for key, _, _, _ in rows], reason="Authored semantic contrast.")},
-        layers={key: "runtime" for key, _, _, _ in rows}, operation_roles=[],
+        layers={key: "runtime" for key, _, _, _ in rows},
+        operation_roles=[dict(operation=b, subject=a, role="value_input",
+                              evidence_text=task["prompt"], occurrence=1)
+                         for a, relation, b in links if relation == "used_by"],
         requirement_structures=structures, requirement_scopes=retained)
     contract = replace(contract, source_inventory=inventory)
     graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=supplied_catalog)
@@ -438,8 +450,8 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
     from dataclasses import replace
     from prompt_mechanism_study.candidate_construction import _candidate_catalog, choose_candidate_scope
     from prompt_mechanism_study.prompt_contract_extract import fixed_scope_request, apply_fixed_scope_response
-    from prompt_mechanism_study.prompt_tsg import requirement_owned_nodes, PromptTSGError
-    from prompt_mechanism_study.prompt_contract_qualification import open_graph_assertions
+    from prompt_mechanism_study.prompt_tsg import requirement_owned_nodes, PromptTSGError, catalog_sha256
+    from prompt_mechanism_study.prompt_contract_qualification import open_graph_assertions, evaluate_open_semantic_case
     from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
     cases = [
         ("conditional", "targets", "If processing fails, do not include access tokens in the diagnostic log.", True, False),
@@ -450,14 +462,24 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
         ("compound_prohibition", "targets", "Do not combine redaction and omission for access tokens in the diagnostic log.", False, "not"),
         ("before", "targets", "Redact access tokens before writing the diagnostic log.", False, False),
         ("after", "targets", "Redact access tokens after writing the diagnostic log.", False, False),
+        ("object_unused", "objects", "The input buffer must contain at most 256 KB.", False, False),
+        ("object_used", "objects", "The input buffer must contain at most 256 KB.", False, False),
+        ("object_shared", "objects", "The input buffer must contain at most 256 KB.", False, False),
+        ("object_guard", "objects", "If processing fails, the input buffer must contain no credentials.", True, False),
+        ("object_set", "objects", "Do not disclose the values of the input buffer or saved path.", False, False),
+        ("object_choice", "objects", "Use redaction or omission for credentials in the input buffer.", False, True),
     ]
     results, factors = [], {}
     for name, kind, text, guard, choice in cases:
-        task, contract, graph, selected = _whole_policy_source(kind, text, guard=guard, choice=choice)
+        options = dict(object_uses={"object_used": 1, "object_shared": 2}.get(name, 0),
+                       object_subjects=("buffer", "path") if name == "object_set" else ("buffer",))
+        task, contract, graph, selected = _whole_policy_source(kind, text, guard=guard, choice=choice, **options)
+        before_projection = prompt_tsg_record(graph)
         request = candidate_request([task], [contract])
         by_meaning = {n["concept_id"]: n for n in request["sources"][0]["nodes"]}
         scope = dict(operation_node_id=by_meaning["processing" if selected == "op" else "task.root"]["node_id"],
-                     subject_node_ids=[], condition_node_ids=[by_meaning["failure"]["node_id"]] if guard else [])
+                     subject_node_ids=sorted(by_meaning[key]["node_id"] for key in options["object_subjects"]) if kind == "objects" else [],
+                     condition_node_ids=[by_meaning["failure"]["node_id"]] if guard else [])
         response = dict(factors=[dict(label=name, definition=text,
             atomicity_rationale="One complete policy; conditions, boundary and alternatives are internal to this policy.",
             occurrences=[dict(task_id=task["task_id"], requirement_node_ids=[by_meaning["policy"]["node_id"]], scope=scope)])],
@@ -478,6 +500,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 compile_candidate_proposal(request, invalid, _design())
         response = compact
         reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
+        assert prompt_tsg_record(graph) == before_projection
         factor = reviewed["factors"][0]
         feature, selector = factor["feature_id"], factor["scope_selector"]
         factors[name] = feature
@@ -488,7 +511,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
 
         def assessed(present, prompt=None):
             fresh_task, fresh, fresh_graph, _ = _whole_policy_source(kind, text, present=present,
-                guard=guard, choice=choice, catalog=catalog, feature=feature, prompt=prompt)
+                guard=guard, choice=choice, catalog=catalog, feature=feature, prompt=prompt, **options)
             req = fixed_scope_request(fresh, prompt=fresh_task["prompt"], catalog=catalog)
             assert len(req["scopes"]) == 1 and not req["withheld_scopes"]
             key, row = next(iter(req["scopes"].items()))
@@ -510,6 +533,76 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
         # Policy-only guard/choice nodes disappear without altering task selection.
         assert choose_candidate_scope(absent_graph, selector) == absent_scope
         assert choose_candidate_scope(present_graph, selector) == present_scope
+        if kind == "objects":
+            assert selector["scope_kind"] == "objects" and factor["query"]["required_relations"] == []
+            assert next(n for n in present_graph.nodes if n.node_id == present_scope.operation_node_id).semantic_id == "task.root"
+            assert len(present_scope.subject_node_ids) == len(options["object_subjects"])
+            # Object incidence never multiplies/narrows the policy, including shared objects.
+            assert not any(e.source_id in present_graph.scoped_feature_assessments[0].requirement_node_ids
+                           and e.edge_type == "constrains" and e.target_id == present_scope.operation_node_id
+                           for e in present_graph.edges)
+        if name == "object_unused":
+            # Selection uses object identity only: a second matching object is
+            # ambiguous even though the original has the positive requirement.
+            subject = next(n for n in present_graph.nodes if n.node_id in present_scope.subject_node_ids)
+            other = next(n for n in present_graph.nodes if n.node_type == "data_object" and n != subject)
+            ambiguous = replace(present_graph, nodes=tuple(replace(n, semantic_id=subject.semantic_id)
+                                if n == other else n for n in present_graph.nodes))
+            assert choose_candidate_scope(ambiguous, selector) is None
+            impostor = replace(present, relations=present.relations + (dict(source="r", edge_type="constrains",
+                target="op", evidence_text=present_task["prompt"], occurrence=1),))
+            with pytest.raises(PromptTSGError, match="complete policy binding"):
+                compile_task_context_contract(impostor, prompt=present_task["prompt"], catalog=catalog)
+            for state in ("absent", "not_applicable"):
+                negative = replace(impostor, feature_states=tuple(dict(r, state=state, requirements=[])
+                                                                 for r in impostor.feature_states))
+                with pytest.raises(PromptTSGError, match="negative policy state"):
+                    compile_task_context_contract(negative, prompt=present_task["prompt"], catalog=catalog)
+            legacy = json.loads(json.dumps(catalog))
+            legacy["feature_scope_selectors"][feature].update(scope_kind="targets",
+                operation_semantic_id=catalog["normalization_map"]["task_operation::processing"])
+            legacy_contract = replace(present, catalog=legacy, input_catalog_sha256=catalog_sha256(legacy))
+            with pytest.raises(PromptTSGError, match="explicit object policy selector"):
+                compile_task_context_contract(legacy_contract, prompt=present_task["prompt"], catalog=legacy)
+            # Operation-local impact declarations cannot certify object-wide
+            # irrelevance. Explicit generation-only influence can still be ignored.
+            inventory = json.loads(json.dumps(present.source_inventory))
+            inventory["coverage"]["u"]["status"] = "unresolved"
+            inventory["unit_impacts"] = {"u": dict(effect="local", operations=["return"], complete=False,
+                reason="Authored unresolved source-impact contrast.")}
+            incomplete = replace(present, source_inventory=inventory)
+            withheld = fixed_scope_request(incomplete, prompt=present_task["prompt"], catalog=catalog)
+            assert not withheld["scopes"] and withheld["withheld_scopes"]
+            inventory["unit_impacts"]["u"].update(effect="no_runtime_effect", operations=[])
+            assert fixed_scope_request(incomplete, prompt=present_task["prompt"], catalog=catalog)["scopes"]
+            # Root anchoring does not bring an unrelated operation into this
+            # candidate's review; exact object/global requirements remain needed.
+            raw_graph, raw_contract = prompt_tsg_record(present_graph), task_context_contract_record(present)
+            ids = {n.semantic_id: n for n in present_graph.nodes}
+            selected_nodes = {"root": ids["task.root"], "object": subject}
+            state_key = "root/" + feature + "/subjects=object/conditions="
+            expected = dict(task_id=present.task_id, source_prompt_sha256=content_hash(present_task["prompt"]),
+                nodes=[dict(key=key, node_types=[n.node_type], semantic_ids=[n.semantic_id],
+                            evidence_text=present_task["prompt"][n.evidence_start:n.evidence_end], occurrence=1)
+                       for key, n in selected_nodes.items()],
+                feature_checks=[dict(target="root", subjects=["object"], conditions=[], feature_id=feature, state="present")],
+                critical_checks=[["feature_state", state_key]], non_target_checks=[],
+                scope_dependencies={state_key: [["feature_state", state_key]]})
+            assertions = open_graph_assertions(raw_graph, contract=raw_contract)
+            evidence = [dict(evidence_text=present_task["prompt"], occurrence=1)]
+            audit = dict(graph_sha256=content_hash(raw_graph), contract_sha256=content_hash(raw_contract),
+                source_prompt_sha256=content_hash(present_task["prompt"]), assertions={key: dict(status="SUPPORTED",
+                    rationale="Authored projection fixture.", source_evidence=evidence) for key in assertions})
+            for local, blocked in (("return", False), ("r", True), ("invariant", True)):
+                fact = next(f for f in present.facts if f["local_id"] == local)
+                key = next(k for k, a in assertions.items() if a["kind"] == "node"
+                           and a["statement"]["semantic_id"] == fact["semantic_id"])
+                audit["assertions"][key].update(status="UNSUPPORTED", impact=dict(effect="irrelevant", scopes=[],
+                    rationale="Attempted source-local waiver; structural dependencies override it.", source_evidence=evidence))
+                scored = evaluate_open_semantic_case(raw_graph, prompt=present_task["prompt"], expected=expected,
+                    assertion_review=audit, extraction_failed=False, contract=raw_contract)
+                assert scored["scope_quality"][0]["usable"] is not blocked
+                audit["assertions"][key]["status"] = "SUPPORTED"
         if kind in {"task", "each"}:
             assert next(n for n in present_graph.nodes if n.node_id == present_scope.operation_node_id).semantic_id == "task.root"
             assert not any(e.source_id in present_graph.scoped_feature_assessments[0].requirement_node_ids
@@ -530,6 +623,9 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
             rendered = render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
                 enabled=(True,), additions={feature: text})
             assert (text in rendered["prompt"]) is (operation == "add")
+            if kind == "objects" and operation == "add":
+                assert "For the named source objects:" in rendered["prompt"]
+                assert "For the runtime task as a whole:" not in rendered["prompt"]
             assert "Process the request and write the diagnostic log. Return status." in rendered["prompt"]
             _, _, target_graph, _ = assessed(not source_present, rendered["prompt"])
             targets = source_graph.scoped_feature_assessments[0].requirement_node_ids
@@ -553,5 +649,6 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                         enabled=(True,), additions={}, reviewed_variant=dict(variant, graph=prompt_tsg_record(corrupted)))
         results.append(dict(case=name, projection=True, add=True, remove=True))
     assert factors["before"] != factors["after"]
-    assert len(set(factors.values())) == len(cases)
+    assert factors["object_unused"] == factors["object_used"] == factors["object_shared"]
+    assert len(set(factors.values())) == len(cases) - 2
     record_property("authored_policy_checks", json.dumps(results))

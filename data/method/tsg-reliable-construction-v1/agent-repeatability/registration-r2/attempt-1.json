@@ -1,0 +1,326 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_username",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "username",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.username",
+          "node_type": "data_object",
+          "definition": "The username supplied by the user."
+        }
+      }
+    },
+    {
+      "record_id": "obj_password",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "password",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.password",
+          "node_type": "data_object",
+          "definition": "The password supplied by the user, before hashing."
+        }
+      }
+    },
+    {
+      "record_id": "obj_password_hash",
+      "fact": {
+        "evidence_source_unit": "u4",
+        "evidence_text": "password is hashed",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.password_hash",
+          "node_type": "data_object",
+          "definition": "The hashed form of the user-supplied password."
+        }
+      }
+    },
+    {
+      "record_id": "obj_database",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "a database",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.database",
+          "node_type": "data_object",
+          "definition": "The database into which registration data is inserted."
+        }
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_receive",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "takes the username and password from the user",
+        "source_units": [
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.receive",
+          "node_type": "task_operation",
+          "definition": "Receive the username and password from the user."
+        }
+      },
+      "inputs": [],
+      "results": [
+        {
+          "subject": "obj_username",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        },
+        {
+          "subject": "obj_password",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_hash",
+      "fact": {
+        "evidence_source_unit": "u4",
+        "evidence_text": "password is hashed",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.hash",
+          "node_type": "task_operation",
+          "definition": "Hash the password supplied by the user."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_password",
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed",
+          "role": "value_input"
+        }
+      ],
+      "results": [
+        {
+          "subject": "obj_password_hash",
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": [
+        {
+          "operation": "op_insert",
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed before it is inserted into the database."
+        }
+      ]
+    },
+    {
+      "record_id": "op_insert",
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "inserts it into a database",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.insert",
+          "node_type": "task_operation",
+          "definition": "Insert the username and hashed password into the database."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user and inserts it into a database",
+          "role": "value_input"
+        },
+        {
+          "subject": "obj_password_hash",
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed before it is inserted into the database.",
+          "role": "value_input"
+        },
+        {
+          "subject": "obj_database",
+          "evidence_source_unit": "u3",
+          "evidence_text": "inserts it into a database",
+          "role": "resource"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_webapp",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "implementation",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "a simple web application",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "generation",
+        "concept": {
+          "concept_id": "registration.web_application",
+          "node_type": "task_requirement",
+          "definition": "Implement the task as a simple web application."
+        }
+      }
+    },
+    {
+      "record_id": "req_registration",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "task",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "allows users to register for an account",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.allow_registration",
+          "node_type": "task_requirement",
+          "definition": "The application must allow users to register for an account."
+        }
+      }
+    },
+    {
+      "record_id": "req_hash_before_storage",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_insert"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u4",
+        "evidence_text": "The password is hashed before it is inserted into the database.",
+        "source_units": [
+          "u3",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "registration.hash_before_storage",
+          "node_type": "safety_requirement",
+          "definition": "The database insertion must store the password only after it has been hashed."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "no_task_fact",
+      "reason": "The supplied fixed implementation and Python-language facts cover this generation request."
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The generated simple web application form and overall account-registration capability are represented as separate requirements."
+    },
+    "u3": {
+      "status": "represented",
+      "reason": "The username, user password and database are retained, with reception and insertion operations; the subsequent sentence resolves the stored password as its hashed form."
+    },
+    "u4": {
+      "status": "represented",
+      "reason": "Password hashing, its required resulting value, its consumption by database insertion, the explicit before relation and the hashing-before-storage obligation are represented."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The Python implementation-language request applies to the generated application as a whole, including its runtime operations.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Generate python code for the following:"
+    },
+    "u2": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The application form and account-registration capability are overall application contracts.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "The code is a simple web application that allows users to register for an account."
+    },
+    "u3": {
+      "effect": "local",
+      "operations": [
+        "op_receive",
+        "op_hash",
+        "op_insert"
+      ],
+      "reason": "This clause specifies reception and insertion and identifies the user password that the following clause requires hashing.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database."
+    },
+    "u4": {
+      "effect": "local",
+      "operations": [
+        "op_hash",
+        "op_insert"
+      ],
+      "reason": "The password transformation, its resulting stored value and its explicit order concern hashing and insertion.",
+      "evidence_source_unit": "u4",
+      "evidence_text": "The password is hashed before it is inserted into the database."
+    }
+  },
+  "unresolved_notes": []
+}

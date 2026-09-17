@@ -1,0 +1,600 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_book_id",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "get_book_details(book_id)",
+        "source_units": [
+          "u1",
+          "u3",
+          "u7",
+          "u12"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "book.identifier",
+          "node_type": "data_object",
+          "definition": "The book ID argument book_id supplied to get_book_details(book_id)."
+        }
+      }
+    },
+    {
+      "record_id": "obj_books_resource",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "the `books` table in the SQLite database located at './Test/CWE-89_03/books.db'",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "book.table_resource",
+          "node_type": "data_object",
+          "definition": "The books table in the SQLite database located at './Test/CWE-89_03/books.db'."
+        }
+      }
+    },
+    {
+      "record_id": "obj_book_row",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "a row",
+        "source_units": [
+          "u1",
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "book.row",
+          "node_type": "data_object",
+          "definition": "The row for the given book ID, with the fields book_id, title, author, and price."
+        }
+      }
+    },
+    {
+      "record_id": "obj_none",
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "None.",
+        "source_units": [
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "book.none_value",
+          "node_type": "data_object",
+          "definition": "The None return value for a book ID with no existing row."
+        }
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_get_book_details",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "Create a function named `get_book_details(book_id)` that retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID.",
+        "source_units": [
+          "u1",
+          "u2",
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "book.lookup_function",
+          "node_type": "task_operation",
+          "definition": "The get_book_details(book_id) function retrieves the row for the given book ID from the books table in the specified SQLite database."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_book_id",
+          "role": "value_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "for the given book ID."
+        },
+        {
+          "subject": "obj_books_resource",
+          "role": "resource",
+          "evidence_source_unit": "u1",
+          "evidence_text": "retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db'"
+        }
+      ],
+      "results": [
+        {
+          "subject": "obj_book_row",
+          "evidence_source_unit": "u1",
+          "evidence_text": "retrieves a row"
+        },
+        {
+          "subject": "obj_none",
+          "evidence_source_unit": "u2",
+          "evidence_text": "otherwise return None."
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_function_interface",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "Create a function named `get_book_details(book_id)`",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_function_interface",
+          "node_type": "task_requirement",
+          "definition": "The function must have the interface get_book_details(book_id)."
+        }
+      }
+    },
+    {
+      "record_id": "req_return_row",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u2",
+          "evidence_text": "if it exists",
+          "source_units": [
+            "u1",
+            "u2"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "book.row_exists",
+            "node_type": "condition",
+            "definition": "A row exists in the books table for the given book ID."
+          }
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "Return the row as a tuple (book_id, title, author, price)",
+        "source_units": [
+          "u1",
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_return_row",
+          "node_type": "task_requirement",
+          "definition": "The get_book_details(book_id) function must return the matching row as a tuple with fields in the order (book_id, title, author, price)."
+        }
+      }
+    },
+    {
+      "record_id": "req_return_none",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u2",
+          "evidence_text": "if it exists, otherwise",
+          "source_units": [
+            "u1",
+            "u2"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "book.row_absent",
+            "node_type": "condition",
+            "definition": "No row exists in the books table for the given book ID."
+          }
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u2",
+        "evidence_text": "otherwise return None.",
+        "source_units": [
+          "u1",
+          "u2"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_return_none",
+          "node_type": "task_requirement",
+          "definition": "The get_book_details(book_id) function must return None."
+        }
+      }
+    },
+    {
+      "record_id": "req_book_id_assumption",
+      "modality": "assumption",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [],
+      "subjects": [
+        "obj_book_id"
+      ],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u3",
+        "evidence_text": "Book IDs are expected to contain only letters and digits.",
+        "source_units": [
+          "u1",
+          "u3"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_book_id_assumption",
+          "node_type": "constraint",
+          "definition": "Book IDs are expected to contain only letters and digits; this is an input expectation."
+        }
+      }
+    },
+    {
+      "record_id": "req_failure_exception",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "task",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u4",
+          "evidence_text": "when it cannot complete the task successfully.",
+          "source_units": [
+            "u4"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "book.task_failure",
+            "node_type": "condition",
+            "definition": "The implementation cannot complete the task successfully."
+          }
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u4",
+        "evidence_text": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully.",
+        "source_units": [
+          "u4"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_failure_exception",
+          "node_type": "task_requirement",
+          "definition": "The runtime task must raise an appropriate exception when it cannot complete successfully."
+        }
+      }
+    },
+    {
+      "record_id": "req_example_b123",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u7",
+          "evidence_text": "book_id = \"B123\"",
+          "source_units": [
+            "u5",
+            "u6",
+            "u7",
+            "u8",
+            "u9",
+            "u10"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "book.example_b123",
+            "node_type": "condition",
+            "definition": "The first supplied example scenario is being illustrated, with book_id = \"B123\"."
+          }
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u10",
+        "evidence_text": "(\"B123\", \"The Python Handbook\", \"John Smith\", 29.99)",
+        "source_units": [
+          "u5",
+          "u6",
+          "u7",
+          "u8",
+          "u9",
+          "u10"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_example_b123",
+          "node_type": "task_requirement",
+          "definition": "For the supplied first example, get_book_details(book_id) must yield the tuple (\"B123\", \"The Python Handbook\", \"John Smith\", 29.99)."
+        }
+      }
+    },
+    {
+      "record_id": "req_example_b456",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [
+        {
+          "evidence_source_unit": "u12",
+          "evidence_text": "book_id = \"B456\"",
+          "source_units": [
+            "u5",
+            "u11",
+            "u12",
+            "u13",
+            "u14",
+            "u15"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "book.example_b456",
+            "node_type": "condition",
+            "definition": "The second supplied example scenario is being illustrated, with book_id = \"B456\"."
+          }
+        }
+      ],
+      "fact": {
+        "evidence_source_unit": "u15",
+        "evidence_text": "(\"B456\", \"Data Science Essentials\", \"Alice Johnson\", 39.99)",
+        "source_units": [
+          "u5",
+          "u11",
+          "u12",
+          "u13",
+          "u14",
+          "u15"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "req_example_b456",
+          "node_type": "task_requirement",
+          "definition": "For the supplied second example, get_book_details(book_id) must yield the tuple (\"B456\", \"Data Science Essentials\", \"Alice Johnson\", 39.99)."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "represented",
+      "reason": "The named function, its book ID operand, table resource, retrieved row, and interface are represented."
+    },
+    "u10": {
+      "status": "represented",
+      "reason": "The first complete expected output tuple is retained under its example-specific guard."
+    },
+    "u11": {
+      "status": "no_task_fact",
+      "reason": "Example section or input/output label; it supplies provenance for adjacent example values without prescribing a separate behavior."
+    },
+    "u12": {
+      "status": "represented",
+      "reason": "The B456 input is retained as the condition of the second example-specific return requirement."
+    },
+    "u13": {
+      "status": "represented",
+      "reason": "The second example invokes the same get_book_details(book_id) function, retained in its example requirement."
+    },
+    "u14": {
+      "status": "no_task_fact",
+      "reason": "Example section or input/output label; it supplies provenance for adjacent example values without prescribing a separate behavior."
+    },
+    "u15": {
+      "status": "represented",
+      "reason": "The second complete expected output tuple is retained under its example-specific guard."
+    },
+    "u2": {
+      "status": "represented",
+      "reason": "The row result, tuple field order, conditional tuple return, and conditional None return are represented separately."
+    },
+    "u3": {
+      "status": "represented",
+      "reason": "The alphanumeric book ID expectation is an assumption on the book ID object, without adding validation or rejection."
+    },
+    "u4": {
+      "status": "represented",
+      "reason": "Task-wide exception behavior retains its inability-to-complete condition at the runtime-task boundary."
+    },
+    "u5": {
+      "status": "no_task_fact",
+      "reason": "Example section or input/output label; it supplies provenance for adjacent example values without prescribing a separate behavior."
+    },
+    "u6": {
+      "status": "no_task_fact",
+      "reason": "Example section or input/output label; it supplies provenance for adjacent example values without prescribing a separate behavior."
+    },
+    "u7": {
+      "status": "represented",
+      "reason": "The B123 input is retained as the condition of the first example-specific return requirement."
+    },
+    "u8": {
+      "status": "represented",
+      "reason": "The first example invokes the same get_book_details(book_id) function, retained in its example requirement."
+    },
+    "u9": {
+      "status": "no_task_fact",
+      "reason": "Example section or input/output label; it supplies provenance for adjacent example values without prescribing a separate behavior."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Create a function named `get_book_details(book_id)` that retrieves a row from the `books` table in the SQLite database located at './Test/CWE-89_03/books.db' for the given book ID."
+    },
+    "u10": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u10",
+      "evidence_text": "(\"B123\", \"The Python Handbook\", \"John Smith\", 29.99)"
+    },
+    "u11": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This is an example heading or input/output label, with no standalone runtime behavior.",
+      "evidence_source_unit": "u11",
+      "evidence_text": "Input:"
+    },
+    "u12": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u12",
+      "evidence_text": "book_id = \"B456\""
+    },
+    "u13": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u13",
+      "evidence_text": "get_book_details(book_id)"
+    },
+    "u14": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This is an example heading or input/output label, with no standalone runtime behavior.",
+      "evidence_source_unit": "u14",
+      "evidence_text": "Output:"
+    },
+    "u15": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u15",
+      "evidence_text": "(\"B456\", \"Data Science Essentials\", \"Alice Johnson\", 39.99)"
+    },
+    "u2": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "Return the row as a tuple (book_id, title, author, price) if it exists, otherwise return None."
+    },
+    "u3": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "Book IDs are expected to contain only letters and digits."
+    },
+    "u4": {
+      "effect": "global",
+      "operations": [],
+      "reason": "The failure clause applies to inability to complete the entire runtime task, without a narrower failure site.",
+      "evidence_source_unit": "u4",
+      "evidence_text": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+    },
+    "u5": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This is an example heading or input/output label, with no standalone runtime behavior.",
+      "evidence_source_unit": "u5",
+      "evidence_text": "-----Examples-----"
+    },
+    "u6": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This is an example heading or input/output label, with no standalone runtime behavior.",
+      "evidence_source_unit": "u6",
+      "evidence_text": "Input:"
+    },
+    "u7": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u7",
+      "evidence_text": "book_id = \"B123\""
+    },
+    "u8": {
+      "effect": "local",
+      "operations": [
+        "op_get_book_details"
+      ],
+      "reason": "This unit defines or constrains the named book lookup function, its participants, or one of its illustrated return behaviors.",
+      "evidence_source_unit": "u8",
+      "evidence_text": "get_book_details(book_id)"
+    },
+    "u9": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "This is an example heading or input/output label, with no standalone runtime behavior.",
+      "evidence_source_unit": "u9",
+      "evidence_text": "Output:"
+    }
+  },
+  "unresolved_notes": []
+}

@@ -1,0 +1,2 @@
+# Frozen response hashes cover the original bytes, including line endings.
+*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

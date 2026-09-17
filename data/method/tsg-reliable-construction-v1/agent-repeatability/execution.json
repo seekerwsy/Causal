@@ -1,0 +1,11 @@
+{
+  "python": "3.12.13 (main, Mar  3 2026, 15:01:35) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "executable": "D:\\MyCode\\Causal\\.venv\\Scripts\\python.exe",
+  "implementation_archive": "execution-source.tar.gz",
+  "compiler_command": ".venv/Scripts/python.exe data/method/tsg-reliable-construction-v1/agent-repeatability/validate.py CASE ATTEMPT",
+  "constructor_dispatch": "fresh collaboration.spawn_agent with fork_turns=none and inherited model/settings",
+  "sampling_seed": "not exposed by Codex agent runtime",
+  "provider_calls": 0,
+  "scientific_claim_allowed": false
+}

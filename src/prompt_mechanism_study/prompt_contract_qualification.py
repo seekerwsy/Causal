@@ -822,12 +822,24 @@ def evaluate_open_semantic_case(graph: dict | None, *, prompt: str, expected: di
         operations = {n['node_id'] for n in (graph or {}).get('nodes', [])
                       if n['node_type']=='task_operation' and n['node_id'] in needed_nodes}
         roots = {n['node_id'] for n in (graph or {}).get('nodes', []) if n['node_type']=='task'}
-        if roots & needed_nodes:
+        coordinate = row.get('scope') or {}
+        object_coordinate = coordinate.get('operation_node_id') in roots and bool(coordinate.get('subject_node_ids'))
+        if object_coordinate:
+            selector = (contract or {}).get('catalog', {}).get('feature_scope_selectors', {}).get(row['feature_id'])
+            if not selector or selector.get('scope_kind') != 'objects':
+                raise PromptContractQualificationError('object scope review requires its exact frozen selector')
+        if roots & needed_nodes and not object_coordinate:
             operations.update(n['node_id'] for n in graph['nodes'] if n['node_type']=='task_operation')
         for requirement, _, boundaries, _ in (graph or {}).get('requirement_scopes', []):
             if set(boundaries) & (operations | roots):
                 needed_nodes.add(requirement)
         links = (graph or {}).get('edges', [])
+        if object_coordinate:
+            # The root merely anchors the coordinate. Follow actual object
+            # requirements, not every operation or every other root-anchored state.
+            objects = set(coordinate['subject_node_ids'])
+            needed_nodes.update(e['source_id'] for e in links
+                                if e['edge_type']=='constrains' and e['target_id'] in objects)
         needed_nodes |= {endpoint for e in links if e['edge_type']!='contains'
             and {e['source_id'],e['target_id']} & operations for endpoint in (e['source_id'],e['target_id'])}
         changed = True
@@ -844,7 +856,8 @@ def evaluate_open_semantic_case(graph: dict | None, *, prompt: str, expected: di
             if dependencies is None or impact is None or impact['effect'] in {'global','unresolved'}:
                 return True
             # A reviewer cannot waive a statement that names required coordinates.
-            return bool(assertion_nodes[assertion] & needed_nodes) or key in impact['scopes']
+            mentioned = assertion_nodes[assertion] - roots if object_coordinate else assertion_nodes[assertion]
+            return bool(mentioned & needed_nodes) or key in impact['scopes']
         bad = sorted(a for a in blocking_unsupported if relevant(a))
         uncertain = sorted(a for a in blocking_unresolved if relevant(a))
         correct = (not extraction_failed and assertion_review is not None and not uncertain and not bad

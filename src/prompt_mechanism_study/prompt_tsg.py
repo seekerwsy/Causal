@@ -224,10 +224,17 @@ def requirement_matches_policy(graph, requirement, scope, selector):
         structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
     kind = {key: kind for key, kind, _ in graph.requirement_structures}.get(requirement, "atom")
     execution = {a for a, rel, b in links if rel == "conditions" and b == scope.operation_node_id}
-    return (binding is not None and kind == selector["requirement_kind"]
-            and binding["kind"] == selector["scope_kind"]
+    if binding is None:
+        return False
+    boundary_matches = (binding["kind"] == selector["scope_kind"]
+                        and scope.operation_node_id in binding["operations"])
+    if selector["scope_kind"] == "objects":
+        boundary_matches = (binding["kind"] == "targets" and not binding["operations"]
+                            and bool(binding["subjects"])
+                            and nodes[scope.operation_node_id].semantic_id == "task.root")
+    return (kind == selector["requirement_kind"]
+            and boundary_matches
             and binding["target_class"] == selector["target_class"]
-            and scope.operation_node_id in binding["operations"]
             and binding["subjects"] == set(scope.subject_node_ids)
             and set(scope.condition_node_ids) == execution
             and sorted(nodes[key].semantic_id for key in binding["conditions"] - execution)
@@ -401,13 +408,15 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
                       "execution_condition_semantic_ids", "match_rule", "scope_kind", "target_class",
                       "policy_condition_semantic_ids", "requirement_kind"}
             if (not isinstance(selector, dict) or set(selector) != fields
-                or selector["scope_kind"] not in {"targets", "task", "each"}
+                or selector["scope_kind"] not in {"targets", "task", "each", "objects"}
                 or selector["requirement_kind"] not in {"atom", "or", "not"}
                 or selector["match_rule"] != "unique_source_geometry_match"
                 or semantics.get(selector["operation_semantic_id"]) not in {"task", "task_operation"}
-                or selector["scope_kind"] == "task" and selector["operation_semantic_id"] != "task.root"
+                or selector["scope_kind"] in {"task", "objects"} and selector["operation_semantic_id"] != "task.root"
                 or selector["scope_kind"] == "targets" and selector["operation_semantic_id"] == "task.root"
-                or selector["scope_kind"] != "targets" and selector["subject_semantic_ids"]
+                or selector["scope_kind"] not in {"targets", "objects"} and selector["subject_semantic_ids"]
+                or selector["scope_kind"] == "objects" and (not selector["subject_semantic_ids"]
+                    or selector["condition_semantic_ids"] or selector["execution_condition_semantic_ids"])
                 or (selector["scope_kind"] == "each") != isinstance(selector["target_class"], str)
                 or selector["scope_kind"] == "each" and not selector["target_class"].strip()
                 or selector["scope_kind"] != "each" and selector["target_class"] is not None):
@@ -863,6 +872,9 @@ def validate_prompt_tsg(
             validate_feature_scope(graph, item.scope)
             if node_by_id[item.scope.operation_node_id].node_type == "task" and not selector:
                 raise PromptTSGError("a whole-task feature scope needs a frozen policy selector")
+            if (node_by_id[item.scope.operation_node_id].node_type == "task" and item.scope.subject_node_ids
+                    and selector.get("scope_kind") != "objects"):
+                raise PromptTSGError("root with subjects requires an explicit object policy selector")
             domain = catalog.get("feature_scope_domains", {}).get(item.feature_id)
             if item.state != "unresolved" and (
                 domain == "subjects" and not item.scope.subject_node_ids
@@ -896,7 +908,9 @@ def validate_prompt_tsg(
                             node_types={k: n.node_type for k, n in node_by_id.items()},
                             structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
                         if (envelope is None or item.scope.operation_node_id in envelope["operations"]
-                            or roots[0].node_id in envelope["operations"]):
+                            or roots[0].node_id in envelope["operations"]
+                            or selector["scope_kind"] == "objects" and (
+                                set(item.scope.subject_node_ids) & envelope["subjects"] or not envelope["subjects"])):
                             raise PromptTSGError("negative policy state contradicts a source expression at this boundary")
                 continue
             if item.state in {"absent", "not_applicable"}:
@@ -1003,14 +1017,15 @@ def validate_feature_scope(graph: PromptTSG, scope: FeatureScope) -> None:
     links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
     if scope.operation_node_id not in nodes or nodes[scope.operation_node_id].node_type not in {"task_operation", "task"}:
         raise PromptTSGError("feature scope requires one operation or the whole task boundary")
-    if nodes[scope.operation_node_id].node_type == "task" and (scope.subject_node_ids or scope.condition_node_ids):
-        raise PromptTSGError("task boundary cannot masquerade as local input or execution bindings")
+    root_anchor = nodes[scope.operation_node_id].node_type == "task"
+    if root_anchor and scope.condition_node_ids:
+        raise PromptTSGError("root coordinate cannot carry operation execution conditions")
     for keys in (scope.subject_node_ids, scope.condition_node_ids):
         if keys != tuple(sorted(set(keys))):
             raise PromptTSGError("feature scope coordinates must be sorted and unique")
     for key in scope.subject_node_ids:
         if (key not in nodes or nodes[key].node_type != "data_object"
-            or (key, "used_by", scope.operation_node_id) not in links):
+            or not root_anchor and (key, "used_by", scope.operation_node_id) not in links):
             raise PromptTSGError("factor subject must be a source-bound input of this operation")
     for key in scope.condition_node_ids:
         requirements = {source for source, relation, target in links
@@ -1034,8 +1049,10 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
     for op in sorted(graph.nodes, key=lambda n: n.node_id):
         if op.node_type not in {"task_operation", "task"} or op.semantic_id != selector["operation_semantic_id"]:
             continue
-        inputs = sorted(a for a, rel, b in links if rel == "used_by" and b == op.node_id
-                        and nodes[a].node_type == "data_object")
+        inputs = (sorted(key for key, node in nodes.items() if node.node_type == "data_object")
+                  if selector.get("scope_kind") == "objects" else
+                  sorted(a for a, rel, b in links if rel == "used_by" and b == op.node_id
+                         and nodes[a].node_type == "data_object"))
         conditions = sorted(a for a, rel, b in links if rel == "conditions" and b == op.node_id
                             and nodes[a].node_type == "condition")
         # Exact condition set preserves conditional versus unconditional scopes.

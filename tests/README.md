@@ -1,6 +1,6 @@
 # Minimal scientific test suite
 
-The maintained suite has **102 representative cases in 82 test functions**.
+The maintained suite has **103 representative cases in 83 test functions**.
 `python -m pytest -q` runs all of them. There is no hidden extended suite or
 reviewer marker filter. This is the minimum maintained coverage for the current
 seven-stage method, not exhaustive coverage of every supported implementation.

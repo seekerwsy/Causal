@@ -62,6 +62,8 @@ Select one complete independently editable requirement per node decision. Preser
 conditions, quantification and scope. AND parents organize requirements; OR/NOT members are not
 independently asserted. A whole OR/NOT expression is usable only for ONE choice/prohibition with
 matching bindings. Whole-task and universal policies need not be split into simple local leaves.
+An objects binding constrains exactly its named objects. Its task.root operation_ref is only
+a coordinate anchor, not a whole-task obligation or a constraint on every use of those objects.
 A compound meaning mislabeled atom needs source correction, never splitting here. Independent
 requirements do not become one policy because they share a sentence or security purpose.
 Give equivalent complete requirements the same normalized definition, but judge each source node
@@ -157,7 +159,10 @@ def _candidate_units(request):
                 retained_scopes=source.get("retained_requirement_scopes", []))
             if envelope is None:
                 continue
-            for operation in sorted(envelope["operations"]):
+            object_bound = envelope["kind"] == "targets" and not envelope["operations"] and bool(envelope["subjects"])
+            operations = ({key for key, node in nodes.items() if node["concept_id"] == "task.root"}
+                          if object_bound else envelope["operations"])
+            for operation in sorted(operations):
                 execution = {a for a, relation, b in links if relation == "conditions" and b == operation}
                 scope = dict(operation_node_id=operation, subject_node_ids=sorted(envelope["subjects"]),
                              condition_node_ids=sorted(envelope["conditions"] | execution))
@@ -172,7 +177,7 @@ def _candidate_units(request):
                     operation_ref=refs[operation], subject_refs=[refs[n] for n in scope["subject_node_ids"]],
                     execution_condition_refs=[refs[n] for n in sorted(execution)],
                     policy_condition_refs=[refs[n] for n in sorted(envelope["conditions"] - execution)],
-                    scope_kind=envelope["kind"], target_class=envelope["target_class"]))
+                    scope_kind="objects" if object_bound else envelope["kind"], target_class=envelope["target_class"]))
         sources.append(dict(source_ref=task_ref, source_prompt=source["source_prompt"],
             nodes=[dict(node_ref=refs[key], **{k: v for k, v in node.items() if k not in {"node_id", "concept_id"}},
                         **({"complete_bindings": short_bindings[refs[key]]} if key in ids else {}))
@@ -279,10 +284,11 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         raise ValueError("factor needs existing source requirement evidence")
     scope = feature_scope_from_record(occurrence["scope"])
     op, subjects, conditions = scope.operation_node_id, scope.subject_node_ids, scope.condition_node_ids
+    object_coordinate = op in nodes and nodes[op]["concept_id"] == "task.root" and bool(subjects)
     if (op not in nodes or nodes[op]["node_type"] not in {"task_operation", "task"}
             or len(set(subjects)) != len(subjects) or len(set(conditions)) != len(conditions)
             or any(key not in nodes or nodes[key]["node_type"] != "data_object"
-                   or (key, "used_by", op) not in links for key in subjects)
+                   or not object_coordinate and (key, "used_by", op) not in links for key in subjects)
             or any(key not in nodes or nodes[key]["node_type"] != "condition" for key in conditions)):
         raise ValueError("factor scope must use source-bound operations, inputs and conditions")
     forms = {key: kind for key, kind, _ in source.get("requirement_structures", [])}
@@ -293,14 +299,18 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
             node_types={key: node["node_type"] for key, node in nodes.items()},
             structures=source.get("requirement_structures", []),
             retained_scopes=source.get("retained_requirement_scopes", []))
-        if envelope is None or op not in envelope["operations"]:
+        object_bound = (envelope is not None and envelope["kind"] == "targets"
+                        and not envelope["operations"] and bool(envelope["subjects"]))
+        if (envelope is None or (not object_bound and op not in envelope["operations"])
+                or object_bound != object_coordinate):
             raise ValueError("requirement evidence does not bind the complete proposed scope")
         if envelope["subjects"] != set(subjects):
             raise ValueError("candidate scope differs from the source requirement subject set")
         actual_conditions = execution | envelope["conditions"]
         if set(conditions) != actual_conditions:
             raise ValueError("candidate scope cannot discard or invent source conditions")
-        envelopes.append((envelope["kind"], envelope["target_class"], forms.get(requirement, "atom")))
+        envelopes.append(("objects" if object_bound else envelope["kind"],
+                          envelope["target_class"], forms.get(requirement, "atom")))
     if len(set(envelopes)) != 1:
         raise ValueError("normalization must preserve the whole scope and composition")
     requirement_types = {nodes[key]["node_type"] for key in requirements}
@@ -334,7 +344,7 @@ def _query(selector: dict, feature_id: str) -> dict:
     # Policy-internal guards are frozen with the factor, not required by this
     # feature-independent task query.
     execution = set(selector.get('execution_condition_semantic_ids', conditions))
-    relations = sorted({(s, "used_by", op) for s in subjects}
+    relations = sorted({(s, "used_by", op) for s in subjects if selector["scope_kind"] != "objects"}
                        | {(c, "conditions" if c in execution else "context_for", op) for c in conditions})
     identity = content_hash(dict(required_semantics=semantics, required_relations=relations))
     return dict(query_id="context_" + identity, realization_id=content_id("candidate_query_", (identity, feature_id)),

@@ -1991,7 +1991,8 @@ def _inventory_status(contract: OpenTaskContract) -> dict[str, Any]:
                 unresolved_units=unresolved, unresolved_layers=layers, missing_role_bindings=missing)
 
 
-def _scope_blockers(contract: OpenTaskContract, status: dict, operation: str) -> list[str]:
+def _scope_blockers(contract: OpenTaskContract, status: dict, operation: str,
+                    *, object_subjects: tuple[str, ...] = ()) -> list[str]:
     """Localize only with explicit whole-source impact declarations, never missing edges."""
     if status["status"] != "INCOMPLETE":
         return []
@@ -2015,6 +2016,11 @@ def _scope_blockers(contract: OpenTaskContract, status: dict, operation: str) ->
         if (impact is None or impact["effect"] in {"global", "unresolved"}
             or impact["effect"] == "local" and operation in impact["operations"]):
             blocked.append("source_unit:" + key)
+        elif object_subjects and impact["effect"] == "local":
+            # Existing impacts name operations, not object-wide influence. Missing
+            # incidence cannot certify that an unresolved unit is irrelevant to
+            # an object shared across uses (or with no stated use at all).
+            blocked.append("unlocalized_object_impact:" + key)
     blocked.extend("unbound_role:" + row["subject"] for row in status["missing_role_bindings"]
                    if row["operation"] == operation)
     return blocked
@@ -2156,10 +2162,13 @@ def fixed_scope_request(
         if derived is not None:
             scope["role_domain_check"] = derived
     inventory_status = _inventory_status(contract)
-    blockers = {key: sorted({reason for target in
-                ([fact_id for fact_id, fact in facts.items() if fact["node_type"] == "task_operation"]
-                 if row["target"] == "task.root" else [row["target"]])
-                for reason in _scope_blockers(contract, inventory_status, target)}) for key, row in scopes.items()}
+    blockers = {}
+    for key, row in scopes.items():
+        objects = row.get("policy_scope", {}).get("scope_kind") == "objects"
+        targets = ([fact_id for fact_id, fact in facts.items() if fact["node_type"] == "task_operation"]
+                   if row["target"] == "task.root" and not objects else [row["target"]])
+        blockers[key] = sorted({reason for target in targets for reason in _scope_blockers(
+            contract, inventory_status, target, object_subjects=tuple(row["subjects"]) if objects else ())})
     for key, row in scopes.items():
         if row["concept_id"] in selectors:
             continue  # Whole-policy matching above does not require a local projection.
@@ -2195,6 +2204,9 @@ def fixed_scope_request(
         "binding_consistency": "Use complete definitions and source-supported bound_subject_roles. role_domain_check is only a necessary role prerequisite, not a final applicability judgment. The program cannot promote it to applicability. Verify operation context, caller origin when required, and all other definition premises directly from the source. An upstream claim unsupported by the source leaves the affected scope unresolved and needs upstream correction. A fixed concept ID or an unexpressed requirement alone proves no applicability.",
         "whole_policy_semantics": (
             "When policy_scope is supplied, assess the COMPLETE frozen policy at that boundary. "
+            "For scope_kind=objects, task.root is only a coordinate anchor: the policy constrains "
+            "the exact named objects, not the entire task or every operation using them. No operation "
+            "incidence or result relation is inferred; object applicability still needs source support. "
             "policy_conditions are internal to the policy, not additional task-selection facts; "
             "their absence from the source is not by itself an unresolved context. They must be "
             "preserved in a positive requirement's structural guards. task means one overall runtime "

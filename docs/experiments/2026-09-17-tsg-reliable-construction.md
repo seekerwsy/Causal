@@ -74,14 +74,10 @@ critical binding mismatch in these three graphs. A small passing pilot does not
 establish stability on repeated or new natural tasks, and the absence of repairs
 means compiler feedback cannot explain the observed difference from provider runs.
 
-The graph-to-candidate mapping has a concrete separate limitation: valid firmware
-size/header requirements directly constrain `blob_bytes`, but the current projector
-requires an additional direct requirement-to-operation edge. These requirements
-therefore have zero candidate bindings. That is not proof of extraction error.
-Saved-path containment also has a valid direct object target without a represented
-operation incidence. Adding a false producer or broader operation constraint solely
-to satisfy the projector would change the source meaning. Object-bound policy
-projection must be resolved before these graphs support the intended comparisons.
+The pilot exposed a separate projection defect: valid requirements directly on
+`blob_bytes` or the saved path had no candidate binding without an additional
+requirement-to-operation edge. The object projection correction below handles
+these requirements without changing their source graphs or inventing participation.
 
 One debug label was also corrected prospectively: absence of an operation execution
 gate now reads “NO DECLARED EXECUTION GUARD,” not “UNCONDITIONAL execution.” An
@@ -89,6 +85,93 @@ operation's presence does not mean it executes on every path. This changes no gr
 compiler rule or requirement guard; old archived readbacks remain unchanged. A
 missing **requirement** condition is still a semantic omission, not excused by this
 clarification.
+
+## Eight-task construction repetition
+
+The fixed source-only agent procedure was run twice on eight natural development
+tasks. Four were prior construction regressions; four were preselected transfer
+cases from an already exposed pool, not untouched evaluation. All 16 retained
+first drafts compiled, so no compiler-driven repair occurred. The subsequent
+author audit checked each fixed requirement and the actual graph's additional
+bindings. Auditors were separate from constructors, but this is not independent
+human gold. Neither the audit nor this construction procedure became a new default
+component.
+
+| Task | Correct / fixed reference assessments, both repetitions | Source-audit usable graphs | Remaining issue |
+| --- | ---: | ---: | --- |
+| Firmware upload | 20/20 | 2/2 | Edit overlap and object anchors still require separate checks. |
+| File download | 14/14 | 2/2 | No confirmed critical mismatch found. |
+| Pandoc conversion | 12/16 | 0/2 | Two API predicates narrowed in both repetitions relative to the frozen reference; source wording is ambiguous. |
+| Book query | 12/12 | 2/2 | Example modality differs; no global database-content claim is inferred. |
+| Registration | 8/8 | 2/2 | Hash result and before-insert order retained. |
+| Unsubscribe | 10/10 | 2/2 | One generation-unit locality explanation remains uncertain. |
+| Package changelogs | 6/6 | 2/2 | Universal input-package domain retained. |
+| Privilege ordering | 6/10 | 0/2 | Correct order edges, but four requirement-target assessments unresolved. |
+| **Total** | **88/96** | **12/16** | **Four reference mismatches and four unresolved assessments.** |
+
+The frozen construction gate was not met: fixed-reference correct coverage was
+91.67%, below 95%, and 12 usable graphs were below 15. Security predicates did not
+match the reference in both repeats; full privilege-order bindings remained
+unresolved. These are 48 meanings observed twice within eight tasks, not 96
+independent accuracy trials. Earlier-case coverage was 58/62 and exposed-pool
+transfer coverage 30/34, with 6/8 usable runs in each group.
+
+Pandoc's phrase “that can cause arbitrary code execution” admits explanatory and
+restrictive readings. Both constructors retained a restrictive qualifier, while
+the frozen reference prescribes the broader user-input/API-pattern prohibition.
+The four mismatches are one repeated interpretation issue across two predicates,
+not four independently established source errors. The reference and original
+scores remain unchanged; 91.67% is fixed-reference agreement, not independently
+verified population semantic accuracy.
+
+Both privilege graphs contain `raise -> create -> lower`. Their complete imperative
+requirements also directly target both the performing action and directory
+creation. Under distributive target compilation, an action's temporal counterpart
+can become another recipient of the whole predicate. This is unresolved binding
+meaning, not a missing order edge or proof that extra privilege calls occur.
+Operation-owned order relations also need separate intervention-dependency review;
+correct source order alone does not establish an editable single policy.
+
+Thus the next correction should clarify direct targets versus participants and
+preserve genuinely ambiguous source predicates as unresolved. It should not add
+reviewers, reinterpret the old reference to obtain a pass, or repeat the same
+requests until a preferred answer appears. Candidate-level use and actual edits
+remain untested in this batch; whole-graph audit status does not automatically
+reject every unrelated candidate. New transfer evidence would be needed before
+claiming stable construction quality or changing the default workflow.
+
+A Codex usage interruption affected execution bookkeeping: one compiled graph and
+one complete draft were recovered without resampling; a case with no retained
+draft resumed with identical instructions. `runtime-interruption.json` records
+this. Exact model/seed continuity is unavailable, and no reset credit was used.
+All 16 saved attempts replay exactly with the frozen compiler; this is not a new
+model sample. This batch made zero external-provider calls, leaving the authorized
+external budget at CNY33.226719.
+
+The retained inputs, drafts, graphs, four source audits and mechanically recounted
+summary are in `agent-repeatability`. The constructor never received the reference
+or another output. Its inherited model/runtime differ from the provider checks,
+so the result cannot isolate the benefit of an agent procedure from model choice.
+
+## Object policy projection
+
+The existing candidate selector now accepts `scope_kind=objects`: one exact set
+of constrained objects, its original policy expression and guards. `task.root`
+is only a coordinate anchor. It does not assert a requirement on every operation
+using those objects. No source schema or `FeatureScope` field was added.
+
+The retained pilot firmware graph rebuilds unchanged. Its size, FWR1-header and
+saved-path requirements now each yield one complete object binding. Shared objects
+with zero, one or multiple uses do not split or broaden the policy. Ambiguous object
+identity and unlocalized dependencies remain unresolved; operation-only locality
+cannot establish that an object requirement is unaffected.
+
+Candidate availability is not edit approval. Raw size removal overlaps the type/AND
+evidence, and raw containment removal loses object anchors; both safeguards remain.
+No natural ADD/REMOVE, factor eligibility or improved downstream effect is claimed.
+`object-projection` retains the graph comparison and implementation check. The
+clean exported reviewer suite passed all 103 tests in 29.019 seconds. Six relevant
+contrasts were consolidated into an existing test, with no new test function.
 
 ## Reproduction and boundaries
 
@@ -103,8 +186,9 @@ Credentials remain owner-only on the existing server and are absent from package
 
 This replays all eleven retained calls without network access using their exact
 archived implementations. It verifies request bytes, output/failure and conservative
-cost, not natural-language correctness. It also recompiles the three retained agent
-responses against their archived implementation; it does not resample the agents.
-The affected full default suite passed
-103 checks in the existing clean supported environment. These implementation checks
-do not compensate for the observed semantic failures.
+cost, not natural-language correctness. It also recompiles the three pilot responses
+and 16 repeated constructions against their archived implementations, and checks
+the saved author-audit totals against the fixed reference IDs. All saved calls and
+graphs replayed; the audit recount passed separately after adding its summary.
+The verifier does not resample agents or certify the author's semantic judgments.
+Implementation checks do not compensate for the observed semantic limitations.

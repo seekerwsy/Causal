@@ -1,0 +1,980 @@
+{
+  "part": "web-bindings",
+  "audit_kind": "post-construction author source audit; not independent human gold or formal qualification",
+  "cases": [
+    {
+      "run": "registration-r1",
+      "reference_assessments": [
+        {
+          "reference_id": "registration",
+          "status": "correct_decisive",
+          "records": [
+            "op_register",
+            "req_registration",
+            "req_web_application"
+          ],
+          "structural_evidence": [
+            "req_registration -constrains-> op_register; obligation atom; no guard",
+            "req_web_application -constrains-> template.implementation; generation layer"
+          ],
+          "reason": "The runtime registration operation and its obligation retain account registration; the simple web application requirement remains at generation scope."
+        },
+        {
+          "reference_id": "inputs",
+          "status": "correct_decisive",
+          "records": [
+            "obj_username",
+            "obj_password",
+            "op_receive",
+            "req_receive_credentials"
+          ],
+          "structural_evidence": [
+            "op_receive -produces-> obj_username and obj_password; both roles=result",
+            "req_receive_credentials -constrains-> op_receive; obligation atom; no guard"
+          ],
+          "reason": "The operation exposes both credentials supplied by the user. No unexpressed validation is added."
+        },
+        {
+          "reference_id": "store",
+          "status": "correct_decisive",
+          "records": [
+            "op_insert",
+            "req_store_credentials",
+            "obj_username",
+            "obj_password_hash",
+            "obj_database"
+          ],
+          "structural_evidence": [
+            "req_store_credentials -constrains-> op_insert; obligation atom; no guard",
+            "obj_username and obj_password_hash -used_by-> op_insert; roles=value_input",
+            "obj_database -used_by-> op_insert; role=resource; obj_password has no insertion input edge"
+          ],
+          "reason": "Insertion stores username and the hashed password representation. The generic requirement wording repeats the source first sentence; its concrete participants and adjacent hash requirement resolve it and do not assert a separate raw-password field."
+        },
+        {
+          "reference_id": "hash_before",
+          "status": "correct_decisive",
+          "records": [
+            "op_hash",
+            "op_insert",
+            "obj_password",
+            "obj_password_hash",
+            "req_hash_before_insert"
+          ],
+          "structural_evidence": [
+            "req_hash_before_insert -constrains-> op_insert; obligation atom; no guard",
+            "obj_password -used_by-> op_hash (value_input); op_hash -produces-> obj_password_hash (result)",
+            "obj_password_hash -used_by-> op_insert (value_input); op_hash -precedes-> op_insert",
+            "req_hash_before_insert -constrains-> obj_password"
+          ],
+          "reason": "The source-stated password target, hash transformation and before-persistence relation are all structural. No username hashing, algorithm, salt rule or all-task prerequisite is invented."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": [
+          "req_web_application",
+          "req_registration",
+          "req_receive_credentials",
+          "req_store_credentials",
+          "req_hash_before_insert"
+        ],
+        "finding": "Every extracted requirement is source-supported. The only requirement beyond the reference partition is the explicitly stated simple web application form. Fixed interface, behavior, JSON-code and Python constraints remain generation-layer constraints on template.implementation; no runtime JSON output, schema, SQL engine, framework, hash algorithm or salt policy is added."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations_checked": [
+          "op_register",
+          "op_receive",
+          "op_hash",
+          "op_insert"
+        ],
+        "inputs_results": "All seven roles checked: receive exposes username/password; hash consumes password and produces its hash; insertion consumes username/hash and uses database as resource. No separate raw-password store, fabricated database result, or hash input=username. Aggregate op_register has no asserted participants.",
+        "order": "The only precedes relation is op_hash -> op_insert, supported by explicit before wording. Empty execution_conditions do not mean all-path execution."
+      },
+      "coverage_notes": [
+        "Exact source_prompt equals the frozen reference; prepared prompt identities match the frozen plan under the archived canonical JSON string hashing convention. Each run retained one attempt; compiler status is COMPILED_NOT_SEMANTICALLY_CERTIFIED.",
+        "u1 no_task_fact correctly uses the fixed Python/implementation template. u2-u4 represented entries retain their relevant requirements and bindings. Runtime dependencies remain covered in compiled unit_impacts; compiler-added dependency reach is locality metadata, not a new precedence or participant assertion.",
+        "Both runs preserve hash semantics in several places (operation, hash object, insertion participant, precedence and safety requirement). This is source correctness evidence only; no independent atomic editability, removable-policy absence or accepted candidate is certified."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [],
+      "usable": true,
+      "evidence_locator": {
+        "attempt": "attempt-1.json",
+        "contract": "checks/attempt-1/contract.json",
+        "graph": "checks/attempt-1/graph.json",
+        "readback": "checks/attempt-1/structural-readback.json",
+        "graph_id": "prompt_tsg_5c370c8febfd34d78e398e0e979727b6a95e3cc25ed2d7660db49e36ca9e89b0",
+        "record_to_fact": {
+          "obj_username": "fact.1",
+          "obj_password": "fact.2",
+          "obj_password_hash": "fact.3",
+          "obj_database": "fact.4",
+          "op_register": "fact.5",
+          "op_receive": "fact.6",
+          "op_hash": "fact.7",
+          "op_insert": "fact.8",
+          "req_web_application": "fact.9",
+          "req_registration": "fact.10",
+          "req_receive_credentials": "fact.11",
+          "req_store_credentials": "fact.12",
+          "req_hash_before_insert": "fact.13"
+        },
+        "condition_facts": {},
+        "graph_edges_using_contract_fact_ids": [
+          [
+            "template.behavior",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.2",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.7",
+            "produces",
+            "fact.3"
+          ],
+          [
+            "fact.7",
+            "precedes",
+            "fact.8"
+          ],
+          [
+            "fact.13",
+            "constrains",
+            "fact.2"
+          ],
+          [
+            "fact.9",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "template.python",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.10",
+            "constrains",
+            "fact.5"
+          ],
+          [
+            "fact.1",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.6",
+            "produces",
+            "fact.1"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.13",
+            "constrains",
+            "fact.8"
+          ],
+          [
+            "fact.12",
+            "constrains",
+            "fact.8"
+          ],
+          [
+            "fact.11",
+            "constrains",
+            "fact.6"
+          ],
+          [
+            "template.interface",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.6",
+            "produces",
+            "fact.2"
+          ],
+          [
+            "template.json",
+            "constrains",
+            "template.implementation"
+          ]
+        ]
+      }
+    },
+    {
+      "run": "registration-r2",
+      "reference_assessments": [
+        {
+          "reference_id": "registration",
+          "status": "correct_decisive",
+          "records": [
+            "req_registration",
+            "req_webapp"
+          ],
+          "structural_evidence": [
+            "req_registration retains scope_kind=task, boundary TASK_RUNTIME_BOUNDARY, modality=obligation, atom, no guard",
+            "graph.requirement_scopes retains its task boundary without distribution to internal operations",
+            "req_webapp -constrains-> template.implementation; generation layer"
+          ],
+          "reason": "The whole application registration capability is retained at its appropriate runtime boundary; a separate aggregate registration operation is unnecessary."
+        },
+        {
+          "reference_id": "inputs",
+          "status": "correct_decisive",
+          "records": [
+            "obj_username",
+            "obj_password",
+            "op_receive"
+          ],
+          "structural_evidence": [
+            "op_receive -produces-> obj_username and obj_password; both roles=result; no execution guard"
+          ],
+          "reason": "The source-required reception operation itself represents receiving the two user inputs; no redundant requirement node is necessary."
+        },
+        {
+          "reference_id": "store",
+          "status": "correct_decisive",
+          "records": [
+            "op_insert",
+            "obj_username",
+            "obj_password_hash",
+            "obj_database"
+          ],
+          "structural_evidence": [
+            "op_insert definition: Insert the username and hashed password into the database",
+            "obj_username and obj_password_hash -used_by-> op_insert; roles=value_input",
+            "obj_database -used_by-> op_insert; role=resource; no raw-password input to insertion"
+          ],
+          "reason": "The required insertion operation and concrete participant roles retain both credentials with the hashed password representation."
+        },
+        {
+          "reference_id": "hash_before",
+          "status": "correct_decisive",
+          "records": [
+            "op_hash",
+            "op_insert",
+            "obj_password",
+            "obj_password_hash",
+            "req_hash_before_storage"
+          ],
+          "structural_evidence": [
+            "req_hash_before_storage -constrains-> op_insert; obligation atom; no guard",
+            "obj_password -used_by-> op_hash (value_input); op_hash -produces-> obj_password_hash (result)",
+            "obj_password_hash -used_by-> op_insert (value_input); op_hash -precedes-> op_insert"
+          ],
+          "reason": "The source-stated password target, hash transformation and before-persistence relation are all structural. No username hashing, algorithm, salt rule or all-task prerequisite is invented."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": [
+          "req_webapp",
+          "req_registration",
+          "req_hash_before_storage"
+        ],
+        "finding": "Every extracted requirement is source-supported. The only requirement beyond the reference partition is the explicitly stated simple web application form. Fixed interface, behavior, JSON-code and Python constraints remain generation-layer constraints on template.implementation; no runtime JSON output, schema, SQL engine, framework, hash algorithm or salt policy is added."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations_checked": [
+          "op_receive",
+          "op_hash",
+          "op_insert"
+        ],
+        "inputs_results": "All seven roles checked: receive exposes username/password; hash consumes password and produces its hash; insertion consumes username/hash and uses database as resource. No separate raw-password store, fabricated database result, or hash input=username. Aggregate op_register has no asserted participants.",
+        "order": "The only precedes relation is op_hash -> op_insert, supported by explicit before wording. Empty execution_conditions do not mean all-path execution."
+      },
+      "coverage_notes": [
+        "Exact source_prompt equals the frozen reference; prepared prompt identities match the frozen plan under the archived canonical JSON string hashing convention. Each run retained one attempt; compiler status is COMPILED_NOT_SEMANTICALLY_CERTIFIED.",
+        "u1 no_task_fact correctly uses the fixed Python/implementation template. u2-u4 represented entries retain their relevant requirements and bindings. Runtime dependencies remain covered in compiled unit_impacts; compiler-added dependency reach is locality metadata, not a new precedence or participant assertion.",
+        "Both runs preserve hash semantics in several places (operation, hash object, insertion participant, precedence and safety requirement). This is source correctness evidence only; no independent atomic editability, removable-policy absence or accepted candidate is certified."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [],
+      "usable": true,
+      "evidence_locator": {
+        "attempt": "attempt-1.json",
+        "contract": "checks/attempt-1/contract.json",
+        "graph": "checks/attempt-1/graph.json",
+        "readback": "checks/attempt-1/structural-readback.json",
+        "graph_id": "prompt_tsg_e5d4c99e87d4572de13394ca75129d910d726c699f179f041717331826df4af5",
+        "record_to_fact": {
+          "obj_username": "fact.1",
+          "obj_password": "fact.2",
+          "obj_password_hash": "fact.3",
+          "obj_database": "fact.4",
+          "op_receive": "fact.5",
+          "op_hash": "fact.6",
+          "op_insert": "fact.7",
+          "req_webapp": "fact.8",
+          "req_registration": "fact.9",
+          "req_hash_before_storage": "fact.10"
+        },
+        "condition_facts": {},
+        "graph_edges_using_contract_fact_ids": [
+          [
+            "template.behavior",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.6",
+            "precedes",
+            "fact.7"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.1",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.2",
+            "used_by",
+            "fact.6"
+          ],
+          [
+            "template.python",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.5",
+            "produces",
+            "fact.2"
+          ],
+          [
+            "fact.6",
+            "produces",
+            "fact.3"
+          ],
+          [
+            "fact.8",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.10",
+            "constrains",
+            "fact.7"
+          ],
+          [
+            "fact.5",
+            "produces",
+            "fact.1"
+          ],
+          [
+            "template.interface",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "template.json",
+            "constrains",
+            "template.implementation"
+          ]
+        ]
+      }
+    },
+    {
+      "run": "unsubscribe-r1",
+      "reference_assessments": [
+        {
+          "reference_id": "request",
+          "status": "correct_decisive",
+          "records": [
+            "obj_request",
+            "obj_email",
+            "op_endpoint",
+            "req_request_method",
+            "req_request_endpoint",
+            "req_request_email"
+          ],
+          "structural_evidence": [
+            "obj_request -used_by-> op_endpoint (value_input); required runtime endpoint handling operation",
+            "req_request_method -constrains-> obj_request; modality=assumption; no guard",
+            "req_request_endpoint -constrains-> obj_request; modality=assumption; no guard",
+            "req_request_email -constrains-> obj_request; modality=assumption; no guard"
+          ],
+          "reason": "The expected incoming GET request at the unsubscribe endpoint with email is preserved, together with the operation handling that request. Treating source-stated incoming request properties as premises does not remove endpoint handling or imply validation/rejection duties."
+        },
+        {
+          "reference_id": "lookup",
+          "status": "correct_decisive",
+          "records": [
+            "obj_email",
+            "obj_database",
+            "op_check",
+            "req_check"
+          ],
+          "structural_evidence": [
+            "req_check -constrains-> op_check; obligation atom; no guard",
+            "obj_email -used_by-> op_check (value_input); obj_database -used_by-> op_check (resource)",
+            "No conditions edge gates req_check or op_check on email presence"
+          ],
+          "reason": "The required check uses the request email and the database without incorrectly requiring membership before lookup."
+        },
+        {
+          "reference_id": "delete",
+          "status": "correct_decisive",
+          "records": [
+            "obj_user",
+            "obj_database",
+            "op_delete",
+            "req_present_actions",
+            "req_delete"
+          ],
+          "structural_evidence": [
+            "req_present_actions retains AND(req_delete,req_unsubscribe)",
+            "email-present condition -conditions-> req_present_actions AND req_delete (compiled inherited guard)",
+            "req_delete -constrains-> op_delete; obligation atom",
+            "obj_user -used_by-> op_delete (value_input); obj_database -used_by-> op_delete (resource)"
+          ],
+          "reason": "The parent presence condition structurally reaches the deletion leaf. Its own matching source user and database are the deletion participants; no unconditional deletion obligation is added."
+        },
+        {
+          "reference_id": "unsubscribe",
+          "status": "correct_decisive",
+          "records": [
+            "obj_user",
+            "obj_mailing_list",
+            "op_unsubscribe",
+            "req_present_actions",
+            "req_unsubscribe"
+          ],
+          "structural_evidence": [
+            "req_present_actions retains AND(req_delete,req_unsubscribe)",
+            "email-present condition -conditions-> req_present_actions AND req_unsubscribe (compiled inherited guard)",
+            "req_unsubscribe -constrains-> op_unsubscribe; obligation atom",
+            "obj_user -used_by-> op_unsubscribe (value_input); obj_mailing_list -used_by-> op_unsubscribe (resource)"
+          ],
+          "reason": "Both conditional actions remain required under the same guard, with separate direct operations and no invented deletion-before-unsubscription order."
+        },
+        {
+          "reference_id": "not_subscribed",
+          "status": "correct_decisive",
+          "records": [
+            "obj_message",
+            "op_return",
+            "req_not_subscribed_message"
+          ],
+          "structural_evidence": [
+            "email-absent condition -conditions-> req_not_subscribed_message",
+            "req_not_subscribed_message -constrains-> op_return; obligation atom",
+            "op_return -produces-> obj_message; role=result; return is runtime, separate from template.implementation"
+          ],
+          "reason": "The absent-email branch returns the not-subscribed content. It does not become a success response or the generator JSON envelope."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": [
+          "req_request_method",
+          "req_request_endpoint",
+          "req_request_email",
+          "req_check",
+          "req_present_actions",
+          "req_delete",
+          "req_unsubscribe",
+          "req_not_subscribed_message"
+        ],
+        "finding": "All requirements were checked. Request premises are constraints, not safety requirements; AND parents organize their members rather than impose another action. No accepted safety candidate, mandatory SQL binding, transactionality, success response, exception guarantee, or runtime JSON-code envelope is represented. Fixed system requirements remain generation-layer constraints on template.implementation."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations_checked": [
+          "op_endpoint",
+          "op_check",
+          "op_delete",
+          "op_unsubscribe",
+          "op_return"
+        ],
+        "inputs_results": "All eight roles checked: endpoint consumes request; check consumes email and uses database; deletion consumes the relevant user and uses database; unsubscribe consumes the same user and uses mailing list; return exposes message. Neither database mutation invents a result object. The source does not prescribe a separate user-record retrieval or email-extraction operation, so no fabricated producer is required.",
+        "order": "No precedes edges. This preserves the absence of prescribed order between deletion and mailing-list removal. The present/absent requirement guards are retained independently of empty operation execution guards."
+      },
+      "coverage_notes": [
+        "Exact source_prompt equals the frozen reference; prepared prompt identities match the plan under canonical JSON string hashing. One attempt was retained and compiled, which alone does not certify these semantic findings.",
+        "u1 no_task_fact does not hide the Python generation rule, which is already fixed by the actual system template. u2 retains request properties and lookup despite lexical segmentation joining their sentences; u3 and u4 retain the conditional branch meanings.",
+        "The request email is a real lookup value input, not an unused mention or SQL structural identifier. The same source user instance (anchored in u3 with u2-u4 provenance) participates in deletion and mailing-list removal. The source specifies no table/schema, success response, relative deletion/unsubscription order, or failures."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [],
+      "usable": true,
+      "evidence_locator": {
+        "attempt": "attempt-1.json",
+        "contract": "checks/attempt-1/contract.json",
+        "graph": "checks/attempt-1/graph.json",
+        "readback": "checks/attempt-1/structural-readback.json",
+        "graph_id": "prompt_tsg_565d71ece73388bbb6c90107e03a81912c368618703bf2e6dd5b110f7b544583",
+        "record_to_fact": {
+          "obj_request": "fact.1",
+          "obj_email": "fact.2",
+          "obj_database": "fact.3",
+          "obj_user": "fact.4",
+          "obj_mailing_list": "fact.5",
+          "obj_message": "fact.6",
+          "op_endpoint": "fact.7",
+          "op_check": "fact.8",
+          "op_delete": "fact.9",
+          "op_unsubscribe": "fact.10",
+          "op_return": "fact.11",
+          "req_request_method": "fact.12",
+          "req_request_endpoint": "fact.13",
+          "req_request_email": "fact.14",
+          "req_check": "fact.15",
+          "req_present_actions": "fact.16",
+          "req_delete": "fact.17",
+          "req_unsubscribe": "fact.18",
+          "req_not_subscribed_message": "fact.19"
+        },
+        "condition_facts": {
+          "fact.20": "The email supplied in the request is in the database.",
+          "fact.21": "The email supplied in the request is not in the database."
+        },
+        "graph_edges_using_contract_fact_ids": [
+          [
+            "template.behavior",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.21",
+            "conditions",
+            "fact.19"
+          ],
+          [
+            "fact.17",
+            "constrains",
+            "fact.9"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.9"
+          ],
+          [
+            "fact.20",
+            "conditions",
+            "fact.17"
+          ],
+          [
+            "fact.2",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.1",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.12",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.14",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.11",
+            "produces",
+            "fact.6"
+          ],
+          [
+            "fact.18",
+            "constrains",
+            "fact.10"
+          ],
+          [
+            "template.python",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.5",
+            "used_by",
+            "fact.10"
+          ],
+          [
+            "fact.20",
+            "conditions",
+            "fact.16"
+          ],
+          [
+            "fact.13",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.9"
+          ],
+          [
+            "fact.15",
+            "constrains",
+            "fact.8"
+          ],
+          [
+            "fact.19",
+            "constrains",
+            "fact.11"
+          ],
+          [
+            "fact.20",
+            "conditions",
+            "fact.18"
+          ],
+          [
+            "template.interface",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.10"
+          ],
+          [
+            "template.json",
+            "constrains",
+            "template.implementation"
+          ]
+        ]
+      }
+    },
+    {
+      "run": "unsubscribe-r2",
+      "reference_assessments": [
+        {
+          "reference_id": "request",
+          "status": "correct_decisive",
+          "records": [
+            "obj_request",
+            "obj_email",
+            "op_endpoint",
+            "req_request_context",
+            "req_get",
+            "req_endpoint",
+            "req_email"
+          ],
+          "structural_evidence": [
+            "obj_request -used_by-> op_endpoint (value_input); required runtime endpoint handling operation",
+            "req_get -constrains-> obj_request; modality=assumption; no guard",
+            "req_endpoint -constrains-> obj_request; modality=assumption; no guard",
+            "req_email -constrains-> obj_request; modality=assumption; no guard",
+            "req_request_context retains AND(req_get,req_endpoint,req_email); all modality=assumption"
+          ],
+          "reason": "The expected incoming GET request at the unsubscribe endpoint with email is preserved, together with the operation handling that request. Treating source-stated incoming request properties as premises does not remove endpoint handling or imply validation/rejection duties."
+        },
+        {
+          "reference_id": "lookup",
+          "status": "correct_decisive",
+          "records": [
+            "obj_email",
+            "obj_database",
+            "op_check",
+            "req_check"
+          ],
+          "structural_evidence": [
+            "req_check -constrains-> op_check; obligation atom; no guard",
+            "obj_email -used_by-> op_check (value_input); obj_database -used_by-> op_check (resource)",
+            "No conditions edge gates req_check or op_check on email presence"
+          ],
+          "reason": "The required check uses the request email and the database without incorrectly requiring membership before lookup."
+        },
+        {
+          "reference_id": "delete",
+          "status": "correct_decisive",
+          "records": [
+            "obj_user",
+            "obj_database",
+            "op_delete",
+            "req_present_actions",
+            "req_delete"
+          ],
+          "structural_evidence": [
+            "req_present_actions retains AND(req_delete,req_unsubscribe)",
+            "email-present condition -conditions-> req_present_actions AND req_delete (compiled inherited guard)",
+            "req_delete -constrains-> op_delete; obligation atom",
+            "obj_user -used_by-> op_delete (value_input); obj_database -used_by-> op_delete (resource)"
+          ],
+          "reason": "The parent presence condition structurally reaches the deletion leaf. Its own matching source user and database are the deletion participants; no unconditional deletion obligation is added."
+        },
+        {
+          "reference_id": "unsubscribe",
+          "status": "correct_decisive",
+          "records": [
+            "obj_user",
+            "obj_mailing_list",
+            "op_unsubscribe",
+            "req_present_actions",
+            "req_unsubscribe"
+          ],
+          "structural_evidence": [
+            "req_present_actions retains AND(req_delete,req_unsubscribe)",
+            "email-present condition -conditions-> req_present_actions AND req_unsubscribe (compiled inherited guard)",
+            "req_unsubscribe -constrains-> op_unsubscribe; obligation atom",
+            "obj_user -used_by-> op_unsubscribe (value_input); obj_mailing_list -used_by-> op_unsubscribe (resource)"
+          ],
+          "reason": "Both conditional actions remain required under the same guard, with separate direct operations and no invented deletion-before-unsubscription order."
+        },
+        {
+          "reference_id": "not_subscribed",
+          "status": "correct_decisive",
+          "records": [
+            "obj_message",
+            "op_return",
+            "req_not_subscribed_message"
+          ],
+          "structural_evidence": [
+            "email-absent condition -conditions-> req_not_subscribed_message",
+            "req_not_subscribed_message -constrains-> op_return; obligation atom",
+            "op_return -produces-> obj_message; role=result; return is runtime, separate from template.implementation"
+          ],
+          "reason": "The absent-email branch returns the not-subscribed content. It does not become a success response or the generator JSON envelope."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": [
+          "req_request_context",
+          "req_get",
+          "req_endpoint",
+          "req_email",
+          "req_check",
+          "req_present_actions",
+          "req_delete",
+          "req_unsubscribe",
+          "req_not_subscribed_message"
+        ],
+        "finding": "All requirements were checked. Request premises are constraints, not safety requirements; AND parents organize their members rather than impose another action. No accepted safety candidate, mandatory SQL binding, transactionality, success response, exception guarantee, or runtime JSON-code envelope is represented. Fixed system requirements remain generation-layer constraints on template.implementation."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations_checked": [
+          "op_endpoint",
+          "op_check",
+          "op_delete",
+          "op_unsubscribe",
+          "op_return"
+        ],
+        "inputs_results": "All eight roles checked: endpoint consumes request; check consumes email and uses database; deletion consumes the relevant user and uses database; unsubscribe consumes the same user and uses mailing list; return exposes message. Neither database mutation invents a result object. The source does not prescribe a separate user-record retrieval or email-extraction operation, so no fabricated producer is required.",
+        "order": "No precedes edges. This preserves the absence of prescribed order between deletion and mailing-list removal. The present/absent requirement guards are retained independently of empty operation execution guards."
+      },
+      "coverage_notes": [
+        "Exact source_prompt equals the frozen reference; prepared prompt identities match the plan under canonical JSON string hashing. One attempt was retained and compiled, which alone does not certify these semantic findings.",
+        "u1 no_task_fact does not hide the Python generation rule, which is already fixed by the actual system template. u2 retains request properties and lookup despite lexical segmentation joining their sentences; u3 and u4 retain the conditional branch meanings.",
+        "The request email is a real lookup value input, not an unused mention or SQL structural identifier. The same source user instance (anchored in u3 with u2-u4 provenance) participates in deletion and mailing-list removal. The source specifies no table/schema, success response, relative deletion/unsubscription order, or failures.",
+        "Locality caveat: unit_impacts.u1 is no_runtime_effect, complete=true; its reason cites generation and fixed-template coverage only. The frozen request explicitly says generation layer alone does not establish no_runtime_effect. The Python demand is also independently fixed by the system, so this audit does not infer a definite task-semantic loss from the redundant user sentence. Other run labels it global. This metadata interpretation remains unresolved and is not counted as passed locality certification or as a missing frozen reference."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [
+        {
+          "status": "missing_or_unresolved",
+          "location": "unit_impacts.u1",
+          "kind": "locality_metadata_interpretation",
+          "reference_id": null,
+          "reason": "Generation/template coverage alone is insufficient justification for no_runtime_effect, but the system independently fixes the same language and generation obligation. The frozen reference does not adjudicate semantic versus marginal-edit reach for this duplicate generation sentence. No source requirement is lost from the graph."
+        }
+      ],
+      "usable": true,
+      "evidence_locator": {
+        "attempt": "attempt-1.json",
+        "contract": "checks/attempt-1/contract.json",
+        "graph": "checks/attempt-1/graph.json",
+        "readback": "checks/attempt-1/structural-readback.json",
+        "graph_id": "prompt_tsg_ed5994eac24cb9b91af45a3abc0bd771ab23791e83c3a691ac3f4529986f077b",
+        "record_to_fact": {
+          "obj_request": "fact.1",
+          "obj_email": "fact.2",
+          "obj_database": "fact.3",
+          "obj_user": "fact.4",
+          "obj_mailing_list": "fact.5",
+          "obj_message": "fact.6",
+          "op_endpoint": "fact.7",
+          "op_check": "fact.8",
+          "op_delete": "fact.9",
+          "op_unsubscribe": "fact.10",
+          "op_return": "fact.11",
+          "req_request_context": "fact.12",
+          "req_get": "fact.13",
+          "req_endpoint": "fact.14",
+          "req_email": "fact.15",
+          "req_check": "fact.16",
+          "req_present_actions": "fact.17",
+          "req_delete": "fact.18",
+          "req_unsubscribe": "fact.19",
+          "req_not_subscribed_message": "fact.20"
+        },
+        "condition_facts": {
+          "fact.21": "The email parameter is in the database.",
+          "fact.22": "The email parameter is not in the database."
+        },
+        "graph_edges_using_contract_fact_ids": [
+          [
+            "template.behavior",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.21",
+            "conditions",
+            "fact.19"
+          ],
+          [
+            "fact.20",
+            "constrains",
+            "fact.11"
+          ],
+          [
+            "fact.13",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.11",
+            "produces",
+            "fact.6"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.10"
+          ],
+          [
+            "fact.21",
+            "conditions",
+            "fact.18"
+          ],
+          [
+            "fact.1",
+            "used_by",
+            "fact.7"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "fact.15",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.5",
+            "used_by",
+            "fact.10"
+          ],
+          [
+            "fact.18",
+            "constrains",
+            "fact.9"
+          ],
+          [
+            "template.python",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.4",
+            "used_by",
+            "fact.9"
+          ],
+          [
+            "fact.22",
+            "conditions",
+            "fact.20"
+          ],
+          [
+            "fact.19",
+            "constrains",
+            "fact.10"
+          ],
+          [
+            "fact.21",
+            "conditions",
+            "fact.17"
+          ],
+          [
+            "fact.2",
+            "used_by",
+            "fact.8"
+          ],
+          [
+            "template.interface",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.14",
+            "constrains",
+            "fact.1"
+          ],
+          [
+            "fact.16",
+            "constrains",
+            "fact.8"
+          ],
+          [
+            "template.json",
+            "constrains",
+            "template.implementation"
+          ],
+          [
+            "fact.3",
+            "used_by",
+            "fact.9"
+          ]
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "reference_assessments": 18,
+    "correct_decisive": 18,
+    "confirmed_critical_errors": 0,
+    "usable_source_graphs": 4,
+    "unresolved_locality_metadata_items": 1,
+    "source_usable_definition": "No confirmed mismatch in the frozen task requirements, actual roles, composition, targets, guards or order. This does not certify candidate selection/editability or locality metadata beyond the stated caveat."
+  },
+  "limitations": [
+    "All source/records/contracts/graphs/readbacks reviewed are unchanged frozen artifacts; no constructor/provider call, candidate selection, actual edit or generated-code evaluation was performed.",
+    "These are two already exposed natural tasks repeated twice, not four independent tasks or protected transfer evidence.",
+    "The frozen references are agent-authored and root-adjudicated, not human gold. No confirmed mismatch in these artifacts does not establish universal extraction correctness.",
+    "Hashing is source-required but algorithm, salt and exact fields are unspecified. Unsubscribe backend, action order, success response and failures are unspecified; their absence is not an error.",
+    "Source semantics and compiled topology were checked together; compilation itself remains COMPILED_NOT_SEMANTICALLY_CERTIFIED."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "status": "RESUMED_AFTER_RUNTIME_INTERRUPTION",
+  "cause": "Two child-agent final events reported Codex usage limit; later direct account status allowed ordinary usage. No reset credit was consumed by this task.",
+  "method_and_inputs_changed": false,
+  "returned_graphs_not_resampled": true,
+  "cases": {
+    "firmware-r2": "Retained compiled attempt-1 recovered despite error in agent final event; no resampling.",
+    "registration-r2": "Retained complete attempt-1 recovered after agent handle disappeared; root ran identical frozen validator, compilation passed; no resampling.",
+    "download-r2": "Agent handle absent and no attempt file; resumed in a new fresh context using identical frozen instructions."
+  },
+  "limitation": "Exact inherited model snapshot and seed remain unavailable; continuity across runtime resumption cannot be independently verified.",
+  "no_semantic_failure_inferred_from_infrastructure_error": true,
+  "provider_calls": 0,
+  "scientific_claim_allowed": false
+}

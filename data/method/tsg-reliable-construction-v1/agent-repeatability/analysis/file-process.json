@@ -1,0 +1,314 @@
+{
+  "part": "file-process",
+  "audit_kind": "post-construction author source audit; not independent human gold or formal qualification",
+  "evidence_basis": "Unchanged protocol/references.json and protocol/plan.json; each assigned inputs/task.json, sole retained attempt-1.json, checks/attempt-1/{contract,graph,structural-readback,result}.json; archived source_records.py and frozen request.operation_role_meanings. Source text and declared source/prepared hashes match the frozen references for all four runs. Graph arrows below use record IDs mapped through contract fact aliases and graph semantic IDs, not merely proposed prose.",
+  "cases": [
+    {
+      "run": "download-r1",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": ["op_download", "obj_file_name", "req_function_name", "req_argument_name"],
+          "structural_evidence": ["req_function_name --constrains--> op_download", "req_argument_name --constrains--> op_download", "obj_file_name --used_by--> op_download; retained role identifier_input"],
+          "reason": "Named aggregate function and exact file_name argument retain the user-requested file-selection interface. Both requirement atoms are obligations with no added condition."
+        },
+        {
+          "reference_id": "root",
+          "status": "correct_decisive",
+          "records": ["obj_download_dir", "op_download"],
+          "structural_evidence": ["obj_download_dir --used_by--> op_download; retained role resource", "obj_download_dir definition and u14 anchor retain global Path(\"/var/www/downloads\")"],
+          "reason": "Required serving operation uses the predefined directory. The directory is the resource/comparator, not the requested-file subject. A redundant separate root requirement is unnecessary."
+        },
+        {
+          "reference_id": "return",
+          "status": "correct_decisive",
+          "records": ["req_return_value", "req_return_type", "op_download", "obj_return_path"],
+          "structural_evidence": ["req_return_value and req_return_type --constrains--> op_download", "op_download --produces--> obj_return_path; retained role result", "Both return atoms have empty guards and target the named aggregate function only"],
+          "reason": "Full file path and Path type constrain the outward function return contract, not an intermediate operation. Frozen semantics explicitly permit a function target for its return contract; no invented normal-completion guard is needed."
+        },
+        {
+          "reference_id": "missing",
+          "status": "correct_decisive",
+          "records": ["req_missing_error", "op_download"],
+          "structural_evidence": ["fact.18 (cond_file_missing) --conditions--> req_missing_error --constrains--> op_download"],
+          "reason": "FileNotFoundError retains the requested-file-does-not-exist condition and function exception boundary."
+        },
+        {
+          "reference_id": "outside",
+          "status": "correct_decisive",
+          "records": ["req_outside_error", "op_download"],
+          "structural_evidence": ["fact.19 (cond_file_outside) --conditions--> req_outside_error --constrains--> op_download"],
+          "reason": "PermissionError retains the outside-download-directory condition. No ordering between missing and outside conditions is asserted."
+        },
+        {
+          "reference_id": "other_error",
+          "status": "correct_decisive",
+          "records": ["req_other_failure", "req_general_exception", "req_proper_messages", "op_download"],
+          "structural_evidence": ["req_other_failure retains AND(req_general_exception, req_proper_messages)", "fact.20 (cond_other_exception) --conditions--> parent and both leaves", "Both leaves --constrains--> op_download; parent has no separate target"],
+          "reason": "The conjunction preserves both the general Exception and proper messages under the inherited other-exception condition. Readback confirms guarded leaves, rather than unconditional failure requirements."
+        },
+        {
+          "reference_id": "containment",
+          "status": "correct_decisive",
+          "records": ["req_directory_boundary", "op_download", "obj_download_dir", "obj_requested_file"],
+          "structural_evidence": ["req_directory_boundary --constrains--> op_download", "task.root --requires--> req_directory_boundary", "Atomic obligation; no guards; requested-file containment predicate at serving-operation boundary"],
+          "reason": "The policy constrains the requested file served by download_file to the allowed directory. No requirement incorrectly constrains download_dir to be inside itself, and no Path.resolve strategy is added."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": ["assume_argument_type", "template.interface", "template.behavior", "template.json", "template.python"],
+        "evidence": "assume_argument_type is an assumption constraining obj_file_name, preserving str as input context without prescribing validation. The four fixed template requirements constrain template.implementation only. template.json preserves the higher-priority single code-key JSON object, so u17 Markdown output is correctly overridden. All other requirement records are covered above; no unsupported extra requirement found."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations": [{"record": "op_download", "inputs": ["obj_file_name:identifier_input", "obj_download_dir:resource", "obj_requested_file:resource"], "results": ["obj_return_path"], "execution_conditions": [], "scope_conditions": [], "precedes": []}],
+        "reason": "Each declared participant is source-supported. Path is retained as an available class without invented runtime use. Empty execution conditions do not require every action on every path. No explicit source order exists and no order edge is invented."
+      },
+      "coverage_notes": ["All 17 source units checked. u11/u12/u15 are setup presentation, u16 repeats the fixed implementation instruction, and u17 is overridden formatting; none hides a task requirement.", "Represented units u1-u10/u13/u14 retain their relevant meanings. Unit impacts stay local to op_download where runtime meaning exists.", "Compiled on sole retained attempt 1. Semantic assessment is seven correct reference meanings; compilation alone did not establish this.", "No universal or aggregate-resource rule is present. No candidate selection or editing was performed; containment REMOVE remains dependent on the separately required outside-file refusal."],
+      "critical_errors": [],
+      "unresolved_meanings": ["Source does not specify precedence when a requested file is both missing and outside download_dir. Neither representation invents one; this does not prevent scoring the distinct guarded requirements."],
+      "usable": true
+    },
+    {
+      "run": "download-r2",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": ["op_download", "obj_name", "req_function_name", "req_argument"],
+          "structural_evidence": ["req_function_name and req_argument --constrains--> op_download", "obj_name --used_by--> op_download; retained role identifier_input"],
+          "reason": "The download_file name and user-supplied file_name interface are retained as unguarded atomic obligations with the appropriate argument participation."
+        },
+        {
+          "reference_id": "root",
+          "status": "correct_decisive",
+          "records": ["obj_directory", "req_directory_type", "req_directory_value", "op_download"],
+          "structural_evidence": ["obj_directory --used_by--> op_download; retained role resource", "req_directory_type and req_directory_value --constrains--> obj_directory with modality assumption"],
+          "reason": "The operation uses the source-provided global directory, and its Path type and exact Path(\"/var/www/downloads\") initialization remain setup premises."
+        },
+        {
+          "reference_id": "return",
+          "status": "correct_decisive",
+          "records": ["req_return_full_path", "req_return_type", "op_download", "obj_full_path"],
+          "structural_evidence": ["req_return_full_path and req_return_type --constrains--> op_download", "op_download --produces--> obj_full_path"],
+          "reason": "Two atomic predicates preserve full-path content and Path return type at the aggregate function boundary. They do not bind intermediate checks or impose a return on an exceptional exit."
+        },
+        {
+          "reference_id": "missing",
+          "status": "correct_decisive",
+          "records": ["req_missing_error", "op_download"],
+          "structural_evidence": ["fact.20 (download.file_missing) --conditions--> req_missing_error --constrains--> op_download"],
+          "reason": "Requested-file absence guards the FileNotFoundError obligation at the function boundary."
+        },
+        {
+          "reference_id": "outside",
+          "status": "correct_decisive",
+          "records": ["req_outside_error", "op_download"],
+          "structural_evidence": ["fact.21 (download.file_outside) --conditions--> req_outside_error --constrains--> op_download"],
+          "reason": "Outside-directory status guards PermissionError. No unsupported precedence is introduced."
+        },
+        {
+          "reference_id": "other_error",
+          "status": "correct_decisive",
+          "records": ["req_other_error_contract", "req_general_exception", "req_proper_messages", "op_download"],
+          "structural_evidence": ["req_other_error_contract retains AND(req_general_exception, req_proper_messages)", "fact.22 (download.other_exception) --conditions--> parent and both leaves", "Both leaves --constrains--> op_download"],
+          "reason": "The inherited other-exception condition correctly limits both the exception class and proper-message obligations. Parent composition does not introduce another target obligation."
+        },
+        {
+          "reference_id": "containment",
+          "status": "correct_decisive",
+          "records": ["req_containment", "op_download", "obj_directory", "obj_requested_file"],
+          "structural_evidence": ["req_containment --constrains--> op_download", "task.root --requires--> req_containment", "Atomic obligation with no condition and no target on obj_directory"],
+          "reason": "Requested-file containment is preserved at the serving function boundary, with the allowed directory as resource/comparator."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": ["req_name_type", "req_directory_type", "req_directory_value", "req_path_import", "template.interface", "template.behavior", "template.json", "template.python"],
+        "evidence": "Input and directory typing/initialization are assumptions targeting the respective objects. req_path_import constrains template.implementation in generation scope and preserves the supplied Path import; it does not prescribe Path.resolve or a runtime validation algorithm. Fixed JSON formatting/preservation/language requirements constrain generation only. All remaining requirements are covered above; no unsupported extra found."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations": [{"record": "op_download", "inputs": ["obj_name:identifier_input", "obj_directory:resource"], "results": ["obj_full_path"], "execution_conditions": [], "scope_conditions": [], "precedes": []}],
+        "reason": "The required function and file-selection/serving predicate retain source behavior although this repetition omits a separate requested-file input edge. This topology difference is not itself a semantic defect. No unsupported object use or ordering is added."
+      },
+      "coverage_notes": ["All 17 source units checked. u11/u12/u15/u16/u17 no_task_fact treatment is supported by presentation, fixed implementation, or system precedence.", "u13 is represented by the generation import requirement; u14 retains the exact setup premise and actual directory use. All other represented source units retain the requirements assessed above.", "Compiled on sole retained attempt 1; seven correct reference meanings. No candidate acceptance or actual editability was tested."],
+      "critical_errors": [],
+      "unresolved_meanings": ["The source leaves the missing-and-outside overlap unordered. A containment intervention must also account for the retained PermissionError refusal; representation correctness is not proof of editable policy absence."],
+      "usable": true
+    },
+    {
+      "run": "pandoc-r1",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": ["op_function", "req_function_name", "obj_markdown_path", "obj_pdf_path"],
+          "structural_evidence": ["req_function_name --constrains--> op_function", "obj_markdown_path --used_by--> op_function (identifier_input)", "obj_pdf_path --used_by--> op_function (destination)"],
+          "reason": "The aggregate operation explicitly denotes convert_markdown_to_pdf accepting the two exact named arguments; declared participants preserve their source roles."
+        },
+        {
+          "reference_id": "conversion",
+          "status": "correct_decisive",
+          "records": ["op_conversion", "obj_markdown", "obj_markdown_path", "obj_pdf_path", "obj_pandoc", "obj_pdf"],
+          "structural_evidence": ["obj_markdown and obj_pandoc --used_by--> op_conversion (resource)", "obj_markdown_path --used_by--> op_conversion (identifier_input); obj_pdf_path --used_by--> op_conversion (destination)", "op_conversion --produces--> obj_pdf"],
+          "reason": "The required operation itself represents conversion with pandoc to the requested PDF destination. A redundant conversion requirement atom is unnecessary; empty execution guard does not assert success on every path."
+        },
+        {
+          "reference_id": "return",
+          "status": "correct_decisive",
+          "records": ["req_return_none", "op_function", "obj_none"],
+          "structural_evidence": ["req_return_none --constrains--> op_function; no binding to op_conversion or op_logging", "op_function --produces--> obj_none; empty requirement guards"],
+          "reason": "None constrains outward function return, including normal return after handled conversion failure. No conversion-success guard narrows it."
+        },
+        {
+          "reference_id": "missing",
+          "status": "correct_decisive",
+          "records": ["req_missing_raises", "op_function"],
+          "structural_evidence": ["fact.25 (condition.markdown_missing) --conditions--> req_missing_raises --constrains--> op_function"],
+          "reason": "The exact missing markdown file condition guards FileNotFoundError at the aggregate function boundary."
+        },
+        {
+          "reference_id": "failure_log",
+          "status": "correct_decisive",
+          "records": ["req_error_logging", "op_logging", "obj_logger"],
+          "structural_evidence": ["fact.26 (condition.conversion_failed) --conditions--> req_error_logging --constrains--> op_logging", "obj_logger --used_by--> op_logging (resource)"],
+          "reason": "Conversion failure structurally guards error logging, and the source logger is the logging facility. Raw markdown_path is not made a mandatory logger operand."
+        },
+        {
+          "reference_id": "other_exception",
+          "status": "correct_decisive",
+          "records": ["req_other_exceptions", "op_function"],
+          "structural_evidence": ["req_other_exceptions --constrains--> op_function; no guard and no logging-only binding"],
+          "reason": "The function-wide prohibition on directly raising other exceptions explicitly preserves the FileNotFoundError exception. It is not restricted to the conversion-failure logging clause."
+        },
+        {
+          "reference_id": "os_system",
+          "status": "wrong_decisive",
+          "records": ["req_os_system", "req_shell_policy"],
+          "structural_evidence": ["req_shell_policy retains AND(req_os_system, req_subprocess_shell)", "req_os_system is a standalone negative atomic obligation with task scope retained at contract fact.22; boundaries=[] and no expansion", "task.root --requires--> req_os_system; no direct operation target or guard", "Actual predicate adds: in a manner that can cause arbitrary code execution"],
+          "reason": "Against the unchanged frozen reference, the leaf narrows the prohibited user-input API pattern to an exploit-capable manner. Thus the complete predicate does not match the prospectively frozen do-not-pass-user-controlled-input rule. The source-relative-clause ambiguity is reported separately; this mismatch is not presented as an independently adjudicated human-gold defect."
+        },
+        {
+          "reference_id": "shell_run",
+          "status": "wrong_decisive",
+          "records": ["req_subprocess_shell", "req_shell_policy"],
+          "structural_evidence": ["req_shell_policy retains AND(req_os_system, req_subprocess_shell)", "req_subprocess_shell is a standalone negative atom with task scope at contract fact.23; boundaries=[] and no expansion", "task.root --requires--> req_subprocess_shell; no direct operation target or guard", "Predicate retains subprocess.run, user-controlled input, shell=True, but adds in a manner that can cause arbitrary code execution"],
+          "reason": "The additional exploit-capability restriction is absent from the frozen API-pattern predicate. Proper AND composition and retained task scope do not repair that content mismatch. No positive requirement to invoke subprocess.run is introduced."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": ["req_markdown_string", "req_pdf_string", "req_logger_setup", "req_shell_policy", "template.interface", "template.behavior", "template.json", "template.python"],
+        "evidence": "String-type and logger-initialization facts remain assumptions on their objects. The AND parent organizes the two safety atoms rather than inventing an API invocation; its policy-content defect is already counted in the two reference assessments. Fixed output requirements apply to generation, with system JSON taking precedence. No additional unsupported requirement beyond the reported predicate mismatch was found."
+      },
+      "role_and_order_audit": {
+        "status": "correct_decisive",
+        "operations": [
+          {"record": "op_function", "inputs": ["obj_markdown_path:identifier_input", "obj_pdf_path:destination"], "results": ["obj_none"], "execution_conditions": [], "scope_conditions": [], "precedes": []},
+          {"record": "op_conversion", "inputs": ["obj_markdown:resource", "obj_markdown_path:identifier_input", "obj_pdf_path:destination", "obj_pandoc:resource"], "results": ["obj_pdf"], "execution_conditions": [], "scope_conditions": [], "precedes": []},
+          {"record": "op_logging", "inputs": ["obj_logger:resource"], "results": [], "execution_conditions": [], "scope_conditions": [], "precedes": []}
+        ],
+        "reason": "Source-supported file/tool facilities, locators, destination, outward None, and produced PDF are preserved. Available os/subprocess/logging modules are retained without invented invocation edges. Error logging is required by the guarded requirement even though its operation has no independent execution guard. No order is added."
+      },
+      "coverage_notes": ["All 21 source units checked. u13/u14/u19 are setup presentation; u20 repeats implementation; u21 is overridden Markdown formatting. No no_task_fact hides a required runtime meaning.", "u12 is marked represented but does not retain the full frozen reference predicate for either safety factor. Other represented units retain the six scored functional reference meanings, setup facilities, and string premises.", "Compiled on sole retained attempt 1; six correct and two wrong reference assessments. The graph is mechanically readable but cannot receive a full source-correctness pass under the frozen references.", "Two separate negative API atoms are available in the construction, but candidate acceptance, valid ADD/REMOVE, and actual edit benefit were not measured."],
+      "critical_errors": [
+        {"reference_id": "os_system", "record": "req_os_system", "kind": "frozen_reference_policy_content_mismatch", "reason": "Additional exploit-capable-manner restriction narrows the frozen API-pattern prohibition."},
+        {"reference_id": "shell_run", "record": "req_subprocess_shell", "kind": "frozen_reference_policy_content_mismatch", "reason": "Additional exploit-capable-manner restriction narrows the frozen API-pattern prohibition."}
+      ],
+      "unresolved_meanings": ["The source ends the security policy with 'that can cause arbitrary code execution'. This relative clause admits an explanatory versus restrictive reading, whereas the frozen reference records the broader API-pattern prohibition. Reference remains unchanged, the mismatch is retained, and neither policy is silently credited as matching.", "The source wording linking conversion-failure logging to no-other-direct-exceptions has a possible wider-scope ambiguity; the artifact follows the prospectively frozen function-wide rule.", "Task-wide safety scope versus an aggregate function target is a topology difference, not the reason for the mismatch. No actual candidate editability is inferred from retained task scope."],
+      "usable": false
+    },
+    {
+      "run": "pandoc-r2",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": ["op_convert", "req_function_name", "req_markdown_argument", "req_pdf_argument", "obj_markdown_path", "obj_pdf_path"],
+          "structural_evidence": ["req_function_name, req_markdown_argument, req_pdf_argument --constrains--> op_convert", "obj_markdown_path --used_by--> op_convert (identifier_input); obj_pdf_path --used_by--> op_convert (destination)"],
+          "reason": "Exact function/argument names and their source interface roles are retained. String description is not converted into a required runtime rejection policy."
+        },
+        {
+          "reference_id": "conversion",
+          "status": "correct_decisive",
+          "records": ["op_convert", "req_conversion", "req_pandoc", "req_pdf_destination", "obj_pandoc", "obj_pdf_path", "obj_pdf", "obj_markdown_file"],
+          "structural_evidence": ["req_conversion, req_pandoc, req_pdf_destination --constrains--> op_convert", "obj_pandoc --used_by--> op_convert (resource); obj_pdf_path --used_by--> op_convert (destination)", "op_convert --produces--> obj_pdf"],
+          "reason": "The conversion predicate, required pandoc tool and requested output destination are explicit at the named aggregate function. The file-facility versus content-operand role ambiguity is separate from this preserved behavior."
+        },
+        {
+          "reference_id": "return",
+          "status": "correct_decisive",
+          "records": ["req_return_none", "op_convert", "obj_none"],
+          "structural_evidence": ["req_return_none --constrains--> op_convert", "op_convert --produces--> obj_none; no conversion-success condition"],
+          "reason": "None is the aggregate function's outward return contract, including normally handled conversion failure. It does not constrain the separately extracted logging action's result."
+        },
+        {
+          "reference_id": "missing",
+          "status": "correct_decisive",
+          "records": ["req_missing_file", "op_convert"],
+          "structural_evidence": ["fact.28 (condition_markdown_missing) --conditions--> req_missing_file --constrains--> op_convert"],
+          "reason": "The missing markdown file condition and FileNotFoundError consequence remain jointly bound to the aggregate function."
+        },
+        {
+          "reference_id": "failure_log",
+          "status": "correct_decisive",
+          "records": ["req_log_errors", "op_convert", "op_log_errors", "obj_logger", "obj_error_messages"],
+          "structural_evidence": ["fact.27 (condition_conversion_failed) --conditions--> req_log_errors --constrains--> op_convert", "fact.27 --conditions--> op_log_errors", "obj_logger --used_by--> op_log_errors (resource); op_log_errors --produces--> obj_error_messages"],
+          "reason": "Aggregate function obligation explicitly requires error logging on conversion failure. The dedicated error-logging operation independently retains the same failure boundary. Equivalent aggregate target topology is allowed; no raw file-path logger operand is asserted."
+        },
+        {
+          "reference_id": "other_exception",
+          "status": "correct_decisive",
+          "records": ["req_no_other_exceptions", "op_convert"],
+          "structural_evidence": ["req_no_other_exceptions --constrains--> op_convert with empty conditions; no binding to op_log_errors"],
+          "reason": "The wider function exception rule remains unconditional within its interface boundary and expressly exempts the specified FileNotFoundError."
+        },
+        {
+          "reference_id": "os_system",
+          "status": "wrong_decisive",
+          "records": ["req_no_unsafe_os_system", "req_safe_process_invocation", "op_convert"],
+          "structural_evidence": ["req_safe_process_invocation retains AND(req_no_unsafe_os_system, req_no_unsafe_shell_run)", "req_no_unsafe_os_system --constrains--> op_convert; task.root --requires--> req_no_unsafe_os_system", "Negative atom is independently asserted; empty guards; predicate adds in a manner that can cause arbitrary code execution"],
+          "reason": "The exact frozen user-input API prohibition is narrowed by an added exploit-capable-manner qualifier. A correct function target and two-leaf conjunction do not restore the missing breadth. Source-clause ambiguity is retained separately."
+        },
+        {
+          "reference_id": "shell_run",
+          "status": "wrong_decisive",
+          "records": ["req_no_unsafe_shell_run", "req_safe_process_invocation", "op_convert"],
+          "structural_evidence": ["req_no_unsafe_shell_run --constrains--> op_convert; task.root --requires--> req_no_unsafe_shell_run", "AND parent retains two distinct negative atoms", "Leaf retains user-controlled input, subprocess.run and shell=True, but adds in a manner that can cause arbitrary code execution"],
+          "reason": "The additional exploit-capability restriction differs from the frozen API-pattern predicate. The representation does not positively require subprocess.run, but it cannot be counted as matching the broader frozen prohibition."
+        }
+      ],
+      "extra_requirement_audit": {
+        "status": "correct_decisive",
+        "records_checked": ["req_markdown_argument", "req_pdf_argument", "req_conversion", "req_pandoc", "req_pdf_destination", "req_safe_process_invocation", "template.interface", "template.behavior", "template.json", "template.python"],
+        "evidence": "The functional decomposition follows the supplied interface, conversion, pandoc and destination requirements; it adds no runtime type-validation obligation. The safety parent repeats the same narrowed content already counted in its two leaves, not a third independent defect. Higher-priority single-key JSON output constrains only generation. No additional unsupported requirement was found."
+      },
+      "role_and_order_audit": {
+        "status": "missing_or_unresolved",
+        "operations": [
+          {"record": "op_convert", "inputs": ["obj_markdown_path:identifier_input", "obj_pdf_path:destination", "obj_markdown_file:value_input", "obj_pandoc:resource"], "results": ["obj_pdf", "obj_none"], "execution_conditions": [], "scope_conditions": [], "precedes": []},
+          {"record": "op_log_errors", "inputs": ["obj_logger:resource"], "results": ["obj_error_messages"], "execution_conditions": ["condition_conversion_failed"], "scope_conditions": [], "precedes": []}
+        ],
+        "unresolved_binding": {"record": "op_convert.inputs[2]", "subject": "obj_markdown_file", "retained_role": "value_input", "contract_aliases": "fact.3 -> value_input -> fact.12", "graph_edge": "obj_markdown_file --used_by--> op_convert", "reason": "The object denotes 'The markdown file to be converted, located by markdown_path.' Frozen role definitions place a source-file facility under resource but a transformed/parsed document operand under value_input. This denotation and conversion wording do not decisively resolve physical file facility versus document content; retain the ambiguity rather than force a failure or claim full role agreement."},
+        "reason": "All other declared participants/results are supported. The logger input is a facility; error messages are exposed by logging; PDF and None are distinct aggregate outputs. No optional os/subprocess API use or unsupported order is invented. The failure-specific logging operation may carry its execution condition without imposing a gate on the aggregate conversion function."
+      },
+      "coverage_notes": ["All 21 source units checked. no_task_fact units u13/u14/u19/u20/u21 are presentation, redundant implementation or overridden Markdown formatting, not hidden requirements.", "u12 is marked represented but its two leaves do not retain the entire frozen policy predicates. Remaining functional reference meanings are represented. u18 retains the exact logger initialization in the logger object's identity.", "Compiled on sole retained attempt 1; six correct and two wrong reference assessments, plus one unresolved role-category boundary. Compilation and readable structure do not certify complete source correctness.", "No candidate selection or actual edit was performed. Separate API atoms do not by themselves certify permitted single-policy edits."],
+      "critical_errors": [
+        {"reference_id": "os_system", "record": "req_no_unsafe_os_system", "kind": "frozen_reference_policy_content_mismatch", "reason": "Additional exploit-capable-manner restriction narrows the frozen API-pattern prohibition."},
+        {"reference_id": "shell_run", "record": "req_no_unsafe_shell_run", "kind": "frozen_reference_policy_content_mismatch", "reason": "Additional exploit-capable-manner restriction narrows the frozen API-pattern prohibition."}
+      ],
+      "unresolved_meanings": ["Source phrase 'that can cause arbitrary code execution' may be explanatory or restrictive; both repetitions adopt restrictive predicate wording. The prospectively frozen references take the broader API-pattern rule and remain unchanged. Four mismatching assessments across the repetitions are not evidence of within-task instability because the same narrowing recurs.", "The obj_markdown_file resource-versus-value_input denotation boundary remains unresolved; it is not counted as a confirmed wrong binding.", "The no-other-direct-exceptions source clause has possible wider-scope ambiguity; the artifact follows the frozen function-wide interpretation."],
+      "usable": false
+    }
+  ],
+  "limitations": [
+    "This author audit covers two already exposed natural base tasks with two correlated repetitions each: 30 reference assessments, 26 correct_decisive and four wrong_decisive against the unchanged frozen references. It is not independent human gold, formal qualification, or evidence of universal construction reliability.",
+    "The four wrong assessments share one substantive predicate issue: two Pandoc API prohibitions each narrow the frozen reference in both repetitions. The underlying source relative-clause ambiguity must accompany this count; neither policy is retrospectively credited by changing the reference.",
+    "usable denotes a complete source-audit pass under the frozen reference, not mechanical compilation. All four retained artifacts compiled; both download runs pass this audit, while both Pandoc runs do not.",
+    "Every assigned run has exactly one retained construction attempt. No provider or constructor was called, and no source, reference, response, graph or compiler was edited. No other audit part was read.",
+    "Candidate availability, allowed intervention, single-factor editability, downstream safety and effect estimation were not executed or established. Passing source audit means no confirmed mismatch was found here, not that extraction is universally correct."
+  ]
+}

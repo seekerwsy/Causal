@@ -1,0 +1,342 @@
+{
+  "objects": [
+    {
+      "record_id": "obj_packages",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "a list of packages",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "packages.input_list",
+          "node_type": "data_object",
+          "definition": "A list of packages."
+        }
+      }
+    },
+    {
+      "record_id": "obj_package",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "each package",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "packages.member",
+          "node_type": "data_object",
+          "definition": "An individual package in the list of packages."
+        }
+      }
+    },
+    {
+      "record_id": "obj_changelog",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "a changelog entry for each package",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "package.changelog",
+          "node_type": "data_object",
+          "definition": "A changelog entry containing changelog information for a package."
+        }
+      }
+    },
+    {
+      "record_id": "obj_entries",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "to a list",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "changelog.list",
+          "node_type": "data_object",
+          "definition": "A list of changelog entries."
+        }
+      }
+    },
+    {
+      "record_id": "obj_rpm",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "the `rpm` command",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "rpm.command",
+          "node_type": "data_object",
+          "definition": "The `rpm` command."
+        }
+      }
+    }
+  ],
+  "operations": [
+    {
+      "record_id": "op_function",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "function that takes a list of packages as input and appends a changelog entry for each package to a list",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "function.package_changelog",
+          "node_type": "task_operation",
+          "definition": "Execute the requested function for package changelogs."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_packages",
+          "role": "value_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "function that takes a list of packages as input"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_retrieve",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "retrieve the changelog information",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "changelog.retrieve",
+          "node_type": "task_operation",
+          "definition": "Retrieve changelog information for a package."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_rpm",
+          "role": "resource",
+          "evidence_source_unit": "u1",
+          "evidence_text": "using the `rpm` command to retrieve the changelog information"
+        },
+        {
+          "subject": "obj_package",
+          "role": "identifier_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "appends a changelog entry for each package to a list, using the `rpm` command to retrieve the changelog information"
+        }
+      ],
+      "results": [
+        {
+          "subject": "obj_changelog",
+          "evidence_source_unit": "u1",
+          "evidence_text": "appends a changelog entry for each package to a list, using the `rpm` command to retrieve the changelog information"
+        }
+      ],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    },
+    {
+      "record_id": "op_append",
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "appends a changelog entry for each package to a list",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "changelog.append",
+          "node_type": "task_operation",
+          "definition": "Append a changelog entry for a package to a list."
+        }
+      },
+      "inputs": [
+        {
+          "subject": "obj_changelog",
+          "role": "value_input",
+          "evidence_source_unit": "u1",
+          "evidence_text": "appends a changelog entry for each package"
+        },
+        {
+          "subject": "obj_entries",
+          "role": "destination",
+          "evidence_source_unit": "u1",
+          "evidence_text": "appends a changelog entry for each package to a list"
+        }
+      ],
+      "results": [],
+      "execution_conditions": [],
+      "scope_conditions": [],
+      "precedes": []
+    }
+  ],
+  "requirements": [
+    {
+      "record_id": "req_function_form",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "implementation",
+      "operations": [],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "Write a Python function",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "generation",
+        "concept": {
+          "concept_id": "implementation.function",
+          "node_type": "task_requirement",
+          "definition": "Implement the requested behavior as a function."
+        }
+      }
+    },
+    {
+      "record_id": "req_packages_input",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_function"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "function that takes a list of packages as input",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "function.packages_input",
+          "node_type": "task_requirement",
+          "definition": "The function must take a list of packages as its input."
+        }
+      }
+    },
+    {
+      "record_id": "req_each_package",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "each",
+      "operations": [
+        "op_function"
+      ],
+      "subjects": [],
+      "target_class": "Every package in the input list of packages.",
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "takes a list of packages as input and appends a changelog entry for each package to a list",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "changelog.each_package",
+          "node_type": "task_requirement",
+          "definition": "For each package in the input list, append a changelog entry for that package to the changelog-entry list."
+        }
+      }
+    },
+    {
+      "record_id": "req_rpm",
+      "modality": "obligation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "scope_kind": "targets",
+      "operations": [
+        "op_retrieve"
+      ],
+      "subjects": [],
+      "target_class": null,
+      "conditions": [],
+      "fact": {
+        "evidence_source_unit": "u1",
+        "evidence_text": "using the `rpm` command to retrieve the changelog information",
+        "source_units": [
+          "u1"
+        ],
+        "layer": "runtime",
+        "concept": {
+          "concept_id": "retrieval.use_rpm",
+          "node_type": "task_requirement",
+          "definition": "Retrieve the changelog information using the `rpm` command."
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "u1": {
+      "status": "represented",
+      "reason": "Represents the function and its package-list input, package changelog retrieval with rpm, append destination, and the universal obligation for every input package. Python source language is supplied by the fixed template."
+    },
+    "u2": {
+      "status": "no_task_fact",
+      "reason": "The lower-priority request to return only raw code is overridden by the system JSON-with-code-key format; the effective presentation facts are fixed template facts."
+    },
+    "u3": {
+      "status": "no_task_fact",
+      "reason": "This continues the lower-priority presentation request and adds no runtime task fact beyond the system presentation controls."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "local",
+      "operations": [
+        "op_function",
+        "op_retrieve",
+        "op_append"
+      ],
+      "reason": "The sentence defines the function input and the complete required retrieval-and-append behavior.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Write a Python function that takes a list of packages as input and appends a changelog entry for each package to a list, using the `rpm` command to retrieve the changelog information."
+    },
+    "u2": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "The requested answer presentation does not change function runtime behavior and is governed by the higher-priority system format.",
+      "evidence_source_unit": "u2",
+      "evidence_text": "Only return the code, don't include any other information,"
+    },
+    "u3": {
+      "effect": "no_runtime_effect",
+      "operations": [],
+      "reason": "The examples of excluded surrounding answer text affect presentation only.",
+      "evidence_source_unit": "u3",
+      "evidence_text": "such as a preamble or suffix."
+    }
+  },
+  "unresolved_notes": []
+}

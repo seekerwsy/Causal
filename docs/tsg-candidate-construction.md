@@ -67,6 +67,13 @@ remain part of the complete requirement. Separately judged equivalent units can
 deduplicate under the existing normalized-definition and exact-scope rules. The model
 cannot supply policy keys, review acceptance, scores or effect direction.
 
+A requirement that directly constrains only source objects retains that exact
+object set as an `objects` scope. The task root is its coordinate anchor, not a
+task-wide constraint. No using operation or producing operation is invented, and
+sharing an object across operations does not duplicate its policy. An explicit
+operation-plus-object requirement remains a different binding. A missing or
+ambiguous object identity leaves the scope unresolved.
+
 These are identity and binding-preservation guarantees, not semantic eligibility
 guarantees. A correctly copied binding can still be wrong in the source graph; a
 faithful definition can still describe ordinary required functionality, a duplicated
@@ -89,7 +96,8 @@ declared atom requires source repair, never downstream splitting. One source nod
 under different normalized requirement definitions. The same atomic meaning may
 still have multiple exact source scopes; those can produce different scoped factors.
 
-The compiler verifies direct edges or retained boundary/class, input use, complete
+The compiler verifies direct edges or retained boundary/class, input use where
+the source actually binds an operation, exact object sets for object policies, complete
 conditions and exactly one decision per source requirement. It constructs stable
 feature IDs from the semantic definition, requirement role and structural scope
 selector. Identical definitions and scope signatures deduplicate; distinct scopes
@@ -126,7 +134,8 @@ Prepare a fresh request rather than changing the interpretation of a frozen one.
 The catalogue stores `feature_scope_selectors`: boundary kind, quantified class,
 expression kind, internal policy conditions and independent execution context.
 Scope selection reads only task/operation identity, input-use bindings and execution
-conditions. It never reads the requirement or its state; ambiguity returns `null`.
+conditions, or the exact source-object identities for an object policy. It never
+reads the requirement or its state; ambiguity returns `null`.
 Requirement-only guards remain part of the policy without becoming execution edges
 or additional task-selection prerequisites. They may disappear when that policy is
 removed. Positive expression requires their exact structural binding; a correct
@@ -141,6 +150,12 @@ Independent source review includes retained scope assertions. Reviewed edits che
 non-target composition and whole/universal scopes as well as ordinary edges.
 Only expression members and exclusively used guards inside the target citation can
 belong to its edit; shared context, operation and object evidence remains protected.
+Projecting an object requirement does not certify editability. A size requirement
+whose citation also contains an input type cannot be removed by deleting that
+whole citation. An object mentioned only inside the target requirement may lose
+its scope anchor after deletion. Existing overlap protection and reviewed rewrite
+checks still apply. Unresolved source-impact metadata that cannot establish
+object-level relevance remains unresolved, even if no operation-use edge exists.
 
 After the vocabulary changes, extraction must run again under that exact frozen
 catalogue. Old graphs cannot be relabelled or have old unknowns converted into

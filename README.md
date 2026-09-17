@@ -69,6 +69,11 @@ removed candidate truncation and reference re-entry: one decision now names each
 original requirement and the program preserves its bindings. Two factors survived
 author review, but inappropriate selections and source-construction errors remain.
 Independent inventories were not adopted as a default stage or a reliable reference.
+The subsequent source-only agent check compiled all 16 drafts from eight tasks
+run twice. Author audit matched 88/96 fixed meanings; 12/16 graphs passed, below
+the frozen gate. Repeated source-interpretation and target-binding ambiguities
+remain. Direct object requirements now project without invented operation edges,
+but candidate editability and a stable automatic construction path are unproved.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) records the exact active procedure,
 negative results and next research decision. The

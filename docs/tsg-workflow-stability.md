@@ -27,6 +27,12 @@ structure did not guarantee correct guards, scope or composition. Candidate deli
 now uses one exact requirement key per decision and program-restored bindings;
 semantic eligibility still needs review. Bounded source-only construction agents are
 development diagnostics, not an additional default reviewer or qualification.
+The eight-task repetition compiled all 16 retained first drafts. Author audit
+matched 88/96 fixed meanings and accepted 12/16 whole graphs; the bounded gate
+failed. Four Pandoc policy mismatches retain a source-clause ambiguity, and four
+privilege requirements have unresolved direct targets despite correct order edges.
+This is not independent human gold, untouched transfer, or evidence of candidate
+editability. No default constructor/reviewer change follows from that batch.
 
 1. **Prepare exact input.** `task_input.py` combines actual system/user messages and
    declared language. The program indexes source units; users do not manually number
@@ -112,6 +118,9 @@ development diagnostics, not an additional default reviewer or qualification.
    Frozen `feature_scope_selectors` retain scope kind, universal class, expression
    kind and policy-internal guards. Task matching reads only independent geometry;
    a policy-only guard does not become an additional source-context prerequisite.
+   The `objects` selector preserves an exact direct object boundary without requiring
+   an invented operation target. Root is only its coordinate anchor; object uses
+   do not broaden it. Object identity and relevant dependencies must be decisive.
    Scope assessment checks the complete policy at that boundary, including exact
    positive guard bindings and independent applicability. Root existence or a
    vacuously empty class is no applicability proof. Whole scopes and composition

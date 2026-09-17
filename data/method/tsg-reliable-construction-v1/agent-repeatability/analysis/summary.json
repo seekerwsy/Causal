@@ -1,0 +1,216 @@
+{
+  "base_tasks": 8,
+  "runs": 16,
+  "reference_assessments": 96,
+  "statuses": {
+    "correct_decisive": 88,
+    "wrong_decisive": 4,
+    "missing_or_unresolved": 4,
+    "reference_ambiguous": 0,
+    "unsupported_extra": 0
+  },
+  "compiled_runs": 16,
+  "retained_attempts": 16,
+  "source_audit_usable_runs": 12,
+  "fixed_reference_correct_fraction": 0.9166666666666666,
+  "cases": [
+    {
+      "run": "firmware-r1",
+      "base_task": "firmware",
+      "repeat": 1,
+      "reference_count": 10,
+      "statuses": {
+        "correct_decisive": 10
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "firmware-r2",
+      "base_task": "firmware",
+      "repeat": 2,
+      "reference_count": 10,
+      "statuses": {
+        "correct_decisive": 10
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "download-r1",
+      "base_task": "download",
+      "repeat": 1,
+      "reference_count": 7,
+      "statuses": {
+        "correct_decisive": 7
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "download-r2",
+      "base_task": "download",
+      "repeat": 2,
+      "reference_count": 7,
+      "statuses": {
+        "correct_decisive": 7
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "pandoc-r1",
+      "base_task": "pandoc",
+      "repeat": 1,
+      "reference_count": 8,
+      "statuses": {
+        "correct_decisive": 6,
+        "wrong_decisive": 2
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": false
+    },
+    {
+      "run": "pandoc-r2",
+      "base_task": "pandoc",
+      "repeat": 2,
+      "reference_count": 8,
+      "statuses": {
+        "correct_decisive": 6,
+        "wrong_decisive": 2
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": false
+    },
+    {
+      "run": "book-r1",
+      "base_task": "book",
+      "repeat": 1,
+      "reference_count": 6,
+      "statuses": {
+        "correct_decisive": 6
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "book-r2",
+      "base_task": "book",
+      "repeat": 2,
+      "reference_count": 6,
+      "statuses": {
+        "correct_decisive": 6
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "registration-r1",
+      "base_task": "registration",
+      "repeat": 1,
+      "reference_count": 4,
+      "statuses": {
+        "correct_decisive": 4
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "registration-r2",
+      "base_task": "registration",
+      "repeat": 2,
+      "reference_count": 4,
+      "statuses": {
+        "correct_decisive": 4
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "unsubscribe-r1",
+      "base_task": "unsubscribe",
+      "repeat": 1,
+      "reference_count": 5,
+      "statuses": {
+        "correct_decisive": 5
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "unsubscribe-r2",
+      "base_task": "unsubscribe",
+      "repeat": 2,
+      "reference_count": 5,
+      "statuses": {
+        "correct_decisive": 5
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "rpm_each-r1",
+      "base_task": "rpm_each",
+      "repeat": 1,
+      "reference_count": 3,
+      "statuses": {
+        "correct_decisive": 3
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "rpm_each-r2",
+      "base_task": "rpm_each",
+      "repeat": 2,
+      "reference_count": 3,
+      "statuses": {
+        "correct_decisive": 3
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": true
+    },
+    {
+      "run": "privilege_order-r1",
+      "base_task": "privilege_order",
+      "repeat": 1,
+      "reference_count": 5,
+      "statuses": {
+        "correct_decisive": 3,
+        "missing_or_unresolved": 2
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": false
+    },
+    {
+      "run": "privilege_order-r2",
+      "base_task": "privilege_order",
+      "repeat": 2,
+      "reference_count": 5,
+      "statuses": {
+        "correct_decisive": 3,
+        "missing_or_unresolved": 2
+      },
+      "compiled": true,
+      "retained_attempts": 1,
+      "source_audit_usable": false
+    }
+  ],
+  "independent_semantic_certification": false,
+  "note": "Pandoc wrong_decisive denotes frozen-reference mismatch with source-clause ambiguity; privilege bindings remain unresolved. Counts are correlated within eight tasks."
+}

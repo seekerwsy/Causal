@@ -1,0 +1,590 @@
+{
+  "part": "quantifier-order",
+  "audit_kind": "Post-construction author source audit; not independent human gold or formal qualification",
+  "evidence_base": "D:/MyCode/Causal/data/method/tsg-reliable-construction-v1/agent-repeatability",
+  "evidence_files": "Each assigned run: inputs/task.json and request.json, retained attempt-1.json, checks/attempt-1/{contract,graph,structural-readback,result}.json. Contract fact IDs in structural_evidence are actual compiled local IDs; stated graph relations were checked through matching semantic IDs.",
+  "frozen_semantics_verified": {
+    "source_records_sha256": "3db6cf2e61358677b0e5c4bbd2b3c8144d0b3c7d0e5684ae9f4699c0182012d9",
+    "prompt_tsg_sha256": "88a31ec180554757c806bd1985cf9847df48dc32379f25eee58e3f973f6d51a1",
+    "matches_execution_source_archive": true
+  },
+  "cases": [
+    {
+      "run": "rpm_each-r1",
+      "retained_attempts": [
+        "attempt-1.json"
+      ],
+      "compilation_status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": [
+            "req_input_list",
+            "op_function",
+            "obj_packages"
+          ],
+          "structural_evidence": "contract fact.9 constrains fact.6; fact.1 used_by fact.6 with value_input. Graph preserves those edges. req_input_list is an unconditional standalone obligation atom targeting op_function.",
+          "reason": "Exact list-of-packages input contract is retained on the runtime function."
+        },
+        {
+          "reference_id": "retrieve",
+          "status": "correct_decisive",
+          "records": [
+            "req_use_rpm",
+            "op_retrieve",
+            "obj_rpm",
+            "obj_package",
+            "obj_entry"
+          ],
+          "structural_evidence": "contract fact.11 constrains fact.7; fact.5 used_by fact.7 as resource; fact.2 used_by fact.7 as identifier_input; fact.7 produces fact.3. Graph preserves all four. req_use_rpm is an unconditional standalone obligation atom.",
+          "reason": "Required rpm retrieval acts on a package and exposes its changelog information; no particular subprocess API or shell interpretation is imposed."
+        },
+        {
+          "reference_id": "each",
+          "status": "correct_decisive",
+          "records": [
+            "req_each_package_entry",
+            "op_function",
+            "op_append",
+            "obj_entry",
+            "obj_entries_list",
+            "obj_packages",
+            "obj_package"
+          ],
+          "structural_evidence": "contract source_inventory.requirement_scopes[fact.10] retains kind=each, boundaries=[fact.6], target_class=Every package in the function's input list of packages. Graph requirement_scopes retains the same open class and mapped function node. No finite-instance expansion or per-operation constrains edge substitutes for that scope. fact.3 used_by fact.8 as value_input; fact.4 used_by fact.8 as destination.",
+          "reason": "Universal appending is structurally retained within the permitted enclosing function boundary. The package instance is not treated as the complete domain. The complete predicate appends that package's entry to the list without imposing nonempty input, deduplication, distinct-package cardinality or a function return."
+        }
+      ],
+      "extra_requirement_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "req_input_list",
+            "req_each_package_entry",
+            "req_use_rpm"
+          ],
+          "structural_evidence": "All runtime requirements are the three assessed unconditional obligation atoms, with no hidden composite members or extra guards.",
+          "reason": "No additional validation, error, return, ordering, or security obligation found."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "template.interface",
+            "template.behavior",
+            "template.json",
+            "template.python",
+            "template.implementation"
+          ],
+          "structural_evidence": "The four fixed generation controls have constrains edges only to template.implementation; source_inventory.layers marks all five generation. No runtime JSON-return or Python-runtime constraint is fabricated.",
+          "reason": "Matches the exact effective system wrapper and keeps generation separate from runtime."
+        }
+      ],
+      "role_and_order_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_function",
+            "op_retrieve",
+            "op_append",
+            "obj_packages",
+            "obj_package",
+            "obj_rpm",
+            "obj_entry",
+            "obj_entries_list"
+          ],
+          "structural_evidence": "All six role entries inspected: packages→function value_input; package→retrieve identifier_input; rpm→retrieve resource; retrieve→entry result; entry→append value_input; list→append destination. These match graph used_by/produces edges and contract role metadata.",
+          "reason": "Required roles preserve the retrieval-to-append information flow. No function-result list, collective-list production by individual retrieval, mandatory API, or fabricated package instance domain is asserted."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_function",
+            "op_retrieve",
+            "op_append"
+          ],
+          "structural_evidence": "All precedes, execution_conditions and scope_conditions lists are empty; graph has no precedes edges.",
+          "reason": "Source adds no independently fixed explicit sequencing, path condition, or failure policy. Empty execution guards are not interpreted as every-path execution."
+        }
+      ],
+      "coverage_notes": [
+        "Exact task source matches frozen reference. u1 is represented by the checked operations, objects and three required meanings.",
+        "u2/u3 no_task_fact correctly concern lower-priority code-only presentation; the effective system JSON code object remains in the fixed generation template.",
+        "All 3 frozen reference IDs occur once. All requirement records, role records and ordering lists were inspected."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [
+        "Source leaves rpm failures, package ordering, exact entry format, destination-list origin and return behavior unspecified. None is silently filled."
+      ],
+      "usable": true,
+      "usable_reason": "No confirmed mismatch or unresolved required binding found in this artifact; this is author-audit usability, not qualification or editability."
+    },
+    {
+      "run": "rpm_each-r2",
+      "retained_attempts": [
+        "attempt-1.json"
+      ],
+      "compilation_status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": [
+            "req_packages_input",
+            "op_function",
+            "obj_packages"
+          ],
+          "structural_evidence": "contract fact.10 constrains fact.6; fact.1 used_by fact.6 with value_input. Graph preserves those edges. req_packages_input is an unconditional standalone obligation atom targeting op_function.",
+          "reason": "Exact list-of-packages input contract is retained on the runtime function."
+        },
+        {
+          "reference_id": "retrieve",
+          "status": "correct_decisive",
+          "records": [
+            "req_rpm",
+            "op_retrieve",
+            "obj_rpm",
+            "obj_package",
+            "obj_changelog"
+          ],
+          "structural_evidence": "contract fact.12 constrains fact.7; fact.5 used_by fact.7 as resource; fact.2 used_by fact.7 as identifier_input; fact.7 produces fact.3. Graph preserves all four. req_rpm is an unconditional standalone obligation atom.",
+          "reason": "Required rpm retrieval acts on a package and exposes its changelog information; no particular subprocess API or shell interpretation is imposed."
+        },
+        {
+          "reference_id": "each",
+          "status": "correct_decisive",
+          "records": [
+            "req_each_package",
+            "op_function",
+            "op_append",
+            "obj_changelog",
+            "obj_entries",
+            "obj_packages",
+            "obj_package"
+          ],
+          "structural_evidence": "contract source_inventory.requirement_scopes[fact.11] retains kind=each, boundaries=[fact.6], target_class=Every package in the input list of packages. Graph requirement_scopes retains the same open class and mapped function node. No finite-instance expansion or per-operation constrains edge substitutes for that scope. fact.3 used_by fact.8 as value_input; fact.4 used_by fact.8 as destination.",
+          "reason": "Universal appending is structurally retained within the permitted enclosing function boundary. The package instance is not treated as the complete domain. The complete predicate appends that package's entry to the list without imposing nonempty input, deduplication, distinct-package cardinality or a function return."
+        }
+      ],
+      "extra_requirement_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "req_packages_input",
+            "req_each_package",
+            "req_rpm"
+          ],
+          "structural_evidence": "All runtime requirements are the three assessed unconditional obligation atoms, with no hidden composite members or extra guards.",
+          "reason": "No additional validation, error, return, ordering, or security obligation found."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "req_function_form"
+          ],
+          "structural_evidence": "contract fact.9 constrains template.implementation; fact.9 is generation, scope_kind=implementation, standalone obligation atom.",
+          "reason": "The source explicitly requests a function; this extra implementation-form requirement is supported."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "template.interface",
+            "template.behavior",
+            "template.json",
+            "template.python",
+            "template.implementation"
+          ],
+          "structural_evidence": "The four fixed generation controls have constrains edges only to template.implementation; source_inventory.layers marks all five generation. No runtime JSON-return or Python-runtime constraint is fabricated.",
+          "reason": "Matches the exact effective system wrapper and keeps generation separate from runtime."
+        }
+      ],
+      "role_and_order_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_function",
+            "op_retrieve",
+            "op_append",
+            "obj_packages",
+            "obj_package",
+            "obj_rpm",
+            "obj_changelog",
+            "obj_entries"
+          ],
+          "structural_evidence": "All six role entries inspected: packages→function value_input; package→retrieve identifier_input; rpm→retrieve resource; retrieve→entry result; entry→append value_input; list→append destination. These match graph used_by/produces edges and contract role metadata.",
+          "reason": "Required roles preserve the retrieval-to-append information flow. No function-result list, collective-list production by individual retrieval, mandatory API, or fabricated package instance domain is asserted."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_function",
+            "op_retrieve",
+            "op_append"
+          ],
+          "structural_evidence": "All precedes, execution_conditions and scope_conditions lists are empty; graph has no precedes edges.",
+          "reason": "Source adds no independently fixed explicit sequencing, path condition, or failure policy. Empty execution guards are not interpreted as every-path execution."
+        }
+      ],
+      "coverage_notes": [
+        "Exact task source matches frozen reference. u1 is represented by the checked operations, objects and three required meanings.",
+        "u2/u3 no_task_fact correctly concern lower-priority code-only presentation; the effective system JSON code object remains in the fixed generation template.",
+        "All 3 frozen reference IDs occur once. All requirement records, role records and ordering lists were inspected."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [
+        "Source leaves rpm failures, package ordering, exact entry format, destination-list origin and return behavior unspecified. None is silently filled."
+      ],
+      "usable": true,
+      "usable_reason": "No confirmed mismatch or unresolved required binding found in this artifact; this is author-audit usability, not qualification or editability."
+    },
+    {
+      "run": "privilege_order-r1",
+      "retained_attempts": [
+        "attempt-1.json"
+      ],
+      "compilation_status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": [
+            "op_make_user_dir",
+            "obj_username"
+          ],
+          "structural_evidence": "contract fact.5 is makeNewUserDir(username); fact.2 used_by fact.5 has identifier_input. The graph preserves this edge; fixed template.interface constrains the generation implementation.",
+          "reason": "Exact source callable and username parameter are retained. A redundant interface requirement node is unnecessary."
+        },
+        {
+          "reference_id": "mkdir",
+          "status": "correct_decisive",
+          "records": [
+            "op_create",
+            "req_create_user_directory",
+            "obj_username",
+            "obj_home",
+            "obj_directory"
+          ],
+          "structural_evidence": "fact.6 is Create the requested directory; fact.2 used_by fact.6 as identifier_input, fact.3 used_by fact.6 as destination, fact.6 produces fact.4. fact.9 constrains fact.6 as unconditional obligation atom. Graph preserves these.",
+          "reason": "Creates the directory for username under /home; neither a particular mkdir API nor a separate containment security policy is imposed."
+        },
+        {
+          "reference_id": "raise_before",
+          "status": "missing_or_unresolved",
+          "records": [
+            "op_raise",
+            "op_create",
+            "req_raise"
+          ],
+          "structural_evidence": "Correct order is independently explicit: op_raise.precedes=[op_create], contract fact.7 precedes fact.6, and matching graph precedes edge. req_raise additionally constrains both fact.7 and fact.6, with predicate 'Increase privilege using raisePrivileges() before the directory creation.' and no guard.",
+          "reason": "Required named elevation and order are present. Full binding correctness remains unresolved because the extra creation target distributes an action-form predicate without an explicit distinction between action performer and temporal counterpart. The safety_requirement type also differs from the frozen functional reference role; that alone is not evidence of candidate acceptance."
+        },
+        {
+          "reference_id": "lower_after",
+          "status": "missing_or_unresolved",
+          "records": [
+            "op_lower",
+            "op_create",
+            "req_lower"
+          ],
+          "structural_evidence": "Correct order is independently explicit: op_create.precedes=[op_lower], contract fact.6 precedes fact.8, and matching graph precedes edge. req_lower additionally constrains both fact.8 and fact.6, with predicate 'Lower privilege using lowerPrivileges() after the directory creation.' and no guard.",
+          "reason": "Required named lowering after creation is present. Full binding correctness remains unresolved because the extra creation target distributes an action-form predicate without identifying whether it is only a temporal counterpart. No try/finally or all-failure-path guarantee is inferred from empty execution guards."
+        },
+        {
+          "reference_id": "exists",
+          "status": "correct_decisive",
+          "records": [
+            "req_exists_exception",
+            "cond_directory_exists",
+            "op_make_user_dir"
+          ],
+          "structural_evidence": "contract fact.13 conditions fact.12; fact.12 constrains fact.5; graph preserves both. Standalone obligation atom has structural condition 'The requested directory already exists.' Readback binds the guarded handler predicate only to op_make_user_dir.",
+          "reason": "Conditional existing-directory exception handling targets the outward function behavior; no exception class, recovery result or universal no-error policy is fabricated."
+        }
+      ],
+      "extra_requirement_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "req_create_user_directory",
+            "req_exists_exception"
+          ],
+          "structural_evidence": "The assessed home/username creation and guarded exception requirements are the remaining runtime obligation atoms.",
+          "reason": "No additional source-unsupported behavior found in these requirements."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_raise",
+            "op_raise",
+            "op_create"
+          ],
+          "structural_evidence": "req_raise is scope_kind=targets, operations=[op_raise,op_create], no conditions, standalone obligation atom. Contract and graph emit fact.10 constrains fact.6 and fact.10 constrains fact.7. Readback separately says its whole predicate directly constrains each operation; it does not encode a joint relation argument list.",
+          "reason": "The source supports the explicit temporal relation, but the op_create binding of the imperative increase-privilege predicate does not distinguish requiring the creation action itself to raise privileges from redundantly constraining its position in the workflow. The frozen compiler calls direct targets distributive. This is a target-meaning ambiguity, not a missing precedes edge or a confirmed categorical semantic error."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_lower",
+            "op_lower",
+            "op_create"
+          ],
+          "structural_evidence": "req_lower is scope_kind=targets, operations=[op_lower,op_create], no conditions, standalone obligation atom. Contract and graph emit fact.11 constrains fact.6 and fact.11 constrains fact.8. Readback separately says its whole predicate directly constrains each operation; it does not encode a joint relation argument list.",
+          "reason": "The source supports the explicit temporal relation, but the op_create binding of the imperative lower-privilege predicate does not distinguish requiring the creation action itself to lower privileges from redundantly constraining its position in the workflow. The frozen compiler calls direct targets distributive. This is a target-meaning ambiguity, not a missing precedes edge or a confirmed categorical semantic error."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_raise"
+          ],
+          "structural_evidence": "fact.10.node_type=safety_requirement; graph task.root requires its mapped node. Frozen reference raise_before.role=functional and candidate_targets contains only lower_after.",
+          "reason": "This is a type/reference-role discrepancy requiring caution, but type is not candidate eligibility and no proposer or candidate acceptance was run. Do not report a confirmed false accepted safety candidate."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "template.interface",
+            "template.behavior",
+            "template.json",
+            "template.python",
+            "template.implementation"
+          ],
+          "structural_evidence": "The four fixed generation controls have constrains edges only to template.implementation; source_inventory.layers marks all five generation. No runtime JSON-return or Python-runtime constraint is fabricated.",
+          "reason": "Matches the exact effective system wrapper and keeps generation separate from runtime."
+        }
+      ],
+      "role_and_order_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_make_user_dir",
+            "op_create",
+            "op_raise",
+            "op_lower",
+            "obj_username",
+            "obj_home",
+            "obj_directory",
+            "obj_os"
+          ],
+          "structural_evidence": "Four role entries inspected: username→function identifier_input; username→create identifier_input; /home→create destination; create→directory result. Both helper actions have no invented input/result roles. obj_os is retained with no used_by edge.",
+          "reason": "All participating objects and results are source-supported. Imported os availability is not converted to mandatory use; directory creation produces the required directory."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_raise",
+            "op_create",
+            "op_lower"
+          ],
+          "structural_evidence": "The only precedes edges are fact.7→fact.6 and fact.6→fact.8, corresponding to raisePrivileges→creation→lowerPrivileges. All execution_conditions and scope_conditions are empty.",
+          "reason": "Both explicit order relations are correct in their own right. No reverse, helper-to-unrelated-operation, exception-path, or sentence-order-only relation is added."
+        }
+      ],
+      "coverage_notes": [
+        "Exact task source matches frozen reference. u1 retains os availability, u2/u4 named helpers, u6 interface, u8 creation, u11 guarded exception behavior. u9/u10 retain their order edges but contain the unresolved duplicated action-target interpretation.",
+        "u3/u5 pass placeholders and u7/u12 docstring delimiters are reasonably no_task_fact; they hide no frozen requirement.",
+        "u1 unit_impacts is unresolved while its object coverage is represented. Unknown operation use is honestly retained and is not a missing task obligation.",
+        "All 5 frozen reference IDs occur once. Three are decisive; both order relations are structurally correct but full corresponding requirement bindings are not counted decisive."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [
+        {
+          "kind": "representation_ambiguity",
+          "records": [
+            "req_raise",
+            "req_lower"
+          ],
+          "meaning": "Two endpoint constrains lists plus imperative action predicates do not unambiguously distinguish relational order constraints from assigning elevation/reduction actions to creation. Frozen direct-target distribution prevents treating this as an automatic pass; available artifacts also do not justify asserting that an extra privilege call was required."
+        },
+        {
+          "kind": "source_unspecified",
+          "meaning": "Helper implementation, exact directory creation API, handling behavior on existing directory, and all-failure-path privilege lowering remain unspecified. None is demanded by this audit."
+        },
+        {
+          "kind": "candidate_editability_not_tested",
+          "meaning": "Correct precedes edges do not prove that a one-requirement intervention can own/remove that edge. No candidate selection or edit was performed; lower_after candidate editability remains unmeasured."
+        }
+      ],
+      "usable": false,
+      "usable_reason": "Withheld as a decisively source-faithful complete graph because the additional order-requirement targets remain ambiguous. This is not a confirmed compilation failure, missing explicit order, or proven false candidate."
+    },
+    {
+      "run": "privilege_order-r2",
+      "retained_attempts": [
+        "attempt-1.json"
+      ],
+      "compilation_status": "COMPILED_NOT_SEMANTICALLY_CERTIFIED",
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "status": "correct_decisive",
+          "records": [
+            "op_make_user_dir",
+            "obj_username"
+          ],
+          "structural_evidence": "contract fact.5 is makeNewUserDir(username); fact.2 used_by fact.5 has identifier_input. The graph preserves this edge; fixed template.interface constrains the generation implementation.",
+          "reason": "Exact source callable and username parameter are retained. A redundant interface requirement node is unnecessary."
+        },
+        {
+          "reference_id": "mkdir",
+          "status": "correct_decisive",
+          "records": [
+            "op_create_dir",
+            "req_parent_home",
+            "req_given_username",
+            "obj_username",
+            "obj_home",
+            "obj_directory"
+          ],
+          "structural_evidence": "fact.6 is Create the requested directory; fact.2 used_by fact.6 as identifier_input, fact.3 used_by fact.6 as destination, fact.6 produces fact.4. fact.9 and fact.10 constrains fact.6 as unconditional obligation atoms. Graph preserves these.",
+          "reason": "Creates the directory for username under /home; neither a particular mkdir API nor a separate containment security policy is imposed."
+        },
+        {
+          "reference_id": "raise_before",
+          "status": "missing_or_unresolved",
+          "records": [
+            "op_raise",
+            "op_create_dir",
+            "req_raise_before_creation"
+          ],
+          "structural_evidence": "Correct order is independently explicit: op_raise.precedes=[op_create_dir], contract fact.7 precedes fact.6, and matching graph precedes edge. req_raise_before_creation additionally constrains both fact.7 and fact.6, with predicate 'Increase privilege using raisePrivileges() before creating the directory.' and no guard.",
+          "reason": "Required named elevation and order are present. Full binding correctness remains unresolved because the extra creation target distributes an action-form predicate without an explicit distinction between action performer and temporal counterpart. The safety_requirement type also differs from the frozen functional reference role; that alone is not evidence of candidate acceptance."
+        },
+        {
+          "reference_id": "lower_after",
+          "status": "missing_or_unresolved",
+          "records": [
+            "op_lower",
+            "op_create_dir",
+            "req_lower_after_creation"
+          ],
+          "structural_evidence": "Correct order is independently explicit: op_create_dir.precedes=[op_lower], contract fact.6 precedes fact.8, and matching graph precedes edge. req_lower_after_creation additionally constrains both fact.8 and fact.6, with predicate 'Lower privilege using lowerPrivileges() after creating the directory.' and no guard.",
+          "reason": "Required named lowering after creation is present. Full binding correctness remains unresolved because the extra creation target distributes an action-form predicate without identifying whether it is only a temporal counterpart. No try/finally or all-failure-path guarantee is inferred from empty execution guards."
+        },
+        {
+          "reference_id": "exists",
+          "status": "correct_decisive",
+          "records": [
+            "req_handle_existing",
+            "condition_directory_exists",
+            "op_make_user_dir"
+          ],
+          "structural_evidence": "contract fact.14 conditions fact.13; fact.13 constrains fact.5; graph preserves both. Standalone obligation atom has structural condition 'The requested directory already exists.' Readback binds the guarded handler predicate only to op_make_user_dir.",
+          "reason": "Conditional existing-directory exception handling targets the outward function behavior; no exception class, recovery result or universal no-error policy is fabricated."
+        }
+      ],
+      "extra_requirement_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "req_parent_home",
+            "req_given_username",
+            "req_handle_existing"
+          ],
+          "structural_evidence": "The assessed home/username creation and guarded exception requirements are the remaining runtime obligation atoms.",
+          "reason": "No additional source-unsupported behavior found in these requirements."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_raise_before_creation",
+            "op_raise",
+            "op_create_dir"
+          ],
+          "structural_evidence": "req_raise_before_creation is scope_kind=targets, operations=[op_raise,op_create_dir], no conditions, standalone obligation atom. Contract and graph emit fact.11 constrains fact.6 and fact.11 constrains fact.7. Readback separately says its whole predicate directly constrains each operation; it does not encode a joint relation argument list.",
+          "reason": "The source supports the explicit temporal relation, but the op_create_dir binding of the imperative increase-privilege predicate does not distinguish requiring the creation action itself to raise privileges from redundantly constraining its position in the workflow. The frozen compiler calls direct targets distributive. This is a target-meaning ambiguity, not a missing precedes edge or a confirmed categorical semantic error."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_lower_after_creation",
+            "op_lower",
+            "op_create_dir"
+          ],
+          "structural_evidence": "req_lower_after_creation is scope_kind=targets, operations=[op_lower,op_create_dir], no conditions, standalone obligation atom. Contract and graph emit fact.12 constrains fact.6 and fact.12 constrains fact.8. Readback separately says its whole predicate directly constrains each operation; it does not encode a joint relation argument list.",
+          "reason": "The source supports the explicit temporal relation, but the op_create_dir binding of the imperative lower-privilege predicate does not distinguish requiring the creation action itself to lower privileges from redundantly constraining its position in the workflow. The frozen compiler calls direct targets distributive. This is a target-meaning ambiguity, not a missing precedes edge or a confirmed categorical semantic error."
+        },
+        {
+          "status": "missing_or_unresolved",
+          "records": [
+            "req_raise_before_creation"
+          ],
+          "structural_evidence": "fact.11.node_type=safety_requirement; graph task.root requires its mapped node. Frozen reference raise_before.role=functional and candidate_targets contains only lower_after.",
+          "reason": "This is a type/reference-role discrepancy requiring caution, but type is not candidate eligibility and no proposer or candidate acceptance was run. Do not report a confirmed false accepted safety candidate."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "template.interface",
+            "template.behavior",
+            "template.json",
+            "template.python",
+            "template.implementation"
+          ],
+          "structural_evidence": "The four fixed generation controls have constrains edges only to template.implementation; source_inventory.layers marks all five generation. No runtime JSON-return or Python-runtime constraint is fabricated.",
+          "reason": "Matches the exact effective system wrapper and keeps generation separate from runtime."
+        }
+      ],
+      "role_and_order_audit": [
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_make_user_dir",
+            "op_create_dir",
+            "op_raise",
+            "op_lower",
+            "obj_username",
+            "obj_home",
+            "obj_directory",
+            "obj_os"
+          ],
+          "structural_evidence": "Four role entries inspected: username→function identifier_input; username→create identifier_input; /home→create destination; create→directory result. Both helper actions have no invented input/result roles. obj_os is retained with no used_by edge.",
+          "reason": "All participating objects and results are source-supported. Imported os availability is not converted to mandatory use; directory creation produces the required directory."
+        },
+        {
+          "status": "correct_decisive",
+          "records": [
+            "op_raise",
+            "op_create_dir",
+            "op_lower"
+          ],
+          "structural_evidence": "The only precedes edges are fact.7→fact.6 and fact.6→fact.8, corresponding to raisePrivileges→creation→lowerPrivileges. All execution_conditions and scope_conditions are empty.",
+          "reason": "Both explicit order relations are correct in their own right. No reverse, helper-to-unrelated-operation, exception-path, or sentence-order-only relation is added."
+        }
+      ],
+      "coverage_notes": [
+        "Exact task source matches frozen reference. u1 retains os availability, u2/u4 named helpers, u6 interface, u8 creation, u11 guarded exception behavior. u9/u10 retain their order edges but contain the unresolved duplicated action-target interpretation.",
+        "u3/u5 pass placeholders and u7/u12 docstring delimiters are reasonably no_task_fact; they hide no frozen requirement.",
+        "u1 unit_impacts is global for module availability, with no invented operation participant.",
+        "All 5 frozen reference IDs occur once. Three are decisive; both order relations are structurally correct but full corresponding requirement bindings are not counted decisive."
+      ],
+      "critical_errors": [],
+      "unresolved_meanings": [
+        {
+          "kind": "representation_ambiguity",
+          "records": [
+            "req_raise_before_creation",
+            "req_lower_after_creation"
+          ],
+          "meaning": "Two endpoint constrains lists plus imperative action predicates do not unambiguously distinguish relational order constraints from assigning elevation/reduction actions to creation. Frozen direct-target distribution prevents treating this as an automatic pass; available artifacts also do not justify asserting that an extra privilege call was required."
+        },
+        {
+          "kind": "source_unspecified",
+          "meaning": "Helper implementation, exact directory creation API, handling behavior on existing directory, and all-failure-path privilege lowering remain unspecified. None is demanded by this audit."
+        },
+        {
+          "kind": "candidate_editability_not_tested",
+          "meaning": "Correct precedes edges do not prove that a one-requirement intervention can own/remove that edge. No candidate selection or edit was performed; lower_after candidate editability remains unmeasured."
+        }
+      ],
+      "usable": false,
+      "usable_reason": "Withheld as a decisively source-faithful complete graph because the additional order-requirement targets remain ambiguous. This is not a confirmed compilation failure, missing explicit order, or proven false candidate."
+    }
+  ],
+  "limitations": [
+    "No input, reference, attempt, contract, graph or implementation was changed; no provider, constructor, candidate selection, or actual edit was invoked.",
+    "All four runs compiled on their retained first attempt. Compilation certifies structure only.",
+    "Two RPM repetitions show no confirmed mismatch. Privilege repetitions preserve source order but leave duplicated target interpretation unresolved; no categorical critical error is asserted from that ambiguity.",
+    "Types alone do not establish accepted security candidates. Candidate editability and actual editing benefit are outside this construction-only batch.",
+    "Repetitions are correlated within two already exposed natural task units. Passing author audit means no confirmed mismatch found here, not universal extraction correctness."
+  ]
+}
