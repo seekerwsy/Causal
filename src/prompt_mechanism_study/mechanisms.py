@@ -353,6 +353,153 @@ def render_task_hypothesis(
     return result
 
 
+def _reviewed_edit_scope(binding, graph, target, *, prompt, target_prompt, catalog, review, enabled,
+                         node_map, source_owned, target_owned):
+    """Read candidate-local source judgments without inferring global ownership.
+
+    Quotes identify the reviewed source, not proof that a fact is policy-only.
+    Graph checks can reject contradictory sharing; independent qualification
+    must still establish the semantic accuracy of the source review.
+    """
+    scope = review.get("edit_scope", {})
+    fields = {"source_nodes", "variant_nodes", "source_edges", "variant_edges"}
+    if not isinstance(scope, Mapping) or set(scope) - fields:
+        raise MechanismRegistryError("candidate edit scope fields are invalid")
+    declarations = {}
+    for field in fields:
+        rows = scope.get(field, {})
+        current, text = (graph, prompt) if field.startswith("source_") else (target, target_prompt)
+        known = {item.node_id for item in current.nodes} if field.endswith("nodes") else {
+            item.edge_id for item in current.edges}
+        if not isinstance(rows, Mapping) or set(rows) - known:
+            raise MechanismRegistryError("candidate edit scope references an unknown " + field)
+        if field.endswith("edges"):
+            roots = {node.node_id for node in current.nodes
+                     if node.node_type == "task" and node.semantic_id == "task.root"}
+            if any(edge.edge_id in rows and edge.source_id in roots
+                   and edge.edge_type in {"contains", "requires"} for edge in current.edges):
+                raise MechanismRegistryError("candidate edit scope cannot review compiled root membership")
+        for row in rows.values():
+            if (not isinstance(row, Mapping)
+                or set(row) != {"status", "source_evidence", "rationale"}
+                or row["status"] not in {"policy_only", "shared", "unresolved"}
+                or not isinstance(row["source_evidence"], list) or not row["source_evidence"]):
+                raise MechanismRegistryError("candidate edit scope judgment is invalid")
+            require_text(row["rationale"], "candidate edit scope rationale")
+            for citation in row["source_evidence"]:
+                if (not isinstance(citation, Mapping) or set(citation) != {"start", "end"}
+                    or type(citation["start"]) is not int or type(citation["end"]) is not int
+                    or not 0 <= citation["start"] < citation["end"] <= len(text)
+                    or not text[citation["start"]:citation["end"]].strip()):
+                    raise MechanismRegistryError("candidate edit scope source evidence is invalid")
+        declarations[field] = rows
+
+    query = next((q for q in catalog["queries"] if q["query_id"] == binding.context_query_id), None)
+    if scope and query is None:
+        raise MechanismRegistryError("candidate edit scope needs the frozen context query")
+    anchors = {s.operation_node_id for s in binding.factor_scopes}
+    context_nodes = {key for nodes, _ in query_bindings(graph, query=query)
+                     if anchors & set(nodes) for key in nodes} if query else set()
+    root_before = next(n.node_id for n in graph.nodes if n.semantic_id == "task.root")
+    root_after = next(n.node_id for n in target.nodes if n.semantic_id == "task.root")
+    translated = {**node_map, root_before: root_after}
+    retained_context = {translated[key] for key in context_nodes if key in translated}
+    released, introduced, removable_edges, added_edges = set(), set(), set(), set()
+    for side, current, owned, context, changed_nodes, changed_edges in (
+        ("source", graph, source_owned, context_nodes, released, removable_edges),
+        ("variant", target, target_owned, retained_context, introduced, added_edges),
+    ):
+        nodes = {n.node_id: n for n in current.nodes}
+        edges = {e.edge_id: e for e in current.edges}
+        protected = set(context)
+        for assessment in current.scoped_feature_assessments:
+            protected.update((assessment.scope.operation_node_id, *assessment.scope.subject_node_ids,
+                              *assessment.scope.condition_node_ids))
+        for owner, _, boundaries, _ in current.requirement_scopes:
+            if owner not in owned:
+                protected.update(boundaries)
+        for owner, source, _, dest in current.requirement_relations:
+            if owner not in owned:
+                protected.update((source, dest))
+        for edge in current.edges:
+            endpoints = {edge.source_id, edge.target_id}
+            # Independent order and non-target obligations are never waived by
+            # saying an operation is exclusive to the edited policy.
+            if (edge.edge_type == "precedes" or any(
+                key not in owned and nodes[key].node_type in {
+                    "task_requirement", "safety_requirement", "constraint", "presentation_control", "condition"}
+                for key in endpoints)):
+                protected.update(endpoints)
+        # Protection is global by default, but an unchanged unknown elsewhere
+        # does not make the current candidate unresolved.
+        relevant = set(context) | owned
+        relevant.update(key for relation in current.requirement_relations if relation[0] in owned
+                        for key in (relation[1], relation[3]))
+        relevant.update(key for edge in current.edges
+                        if edge.source_id in owned or edge.target_id in owned
+                        for key in (edge.source_id, edge.target_id))
+        allowed = bool(enabled[0]) and binding.factor_operations[0] == (
+            "remove" if side == "source" else "add")
+        for key, row in declarations[side + "_nodes"].items():
+            if row["status"] == "unresolved" and key in relevant:
+                raise MechanismRegistryError("candidate edit scope has unresolved relevant support")
+            if row["status"] != "policy_only":
+                continue
+            if (not allowed or nodes[key].node_type not in {"task_operation", "data_object"}
+                or key in protected or (side == "source" and key in node_map)
+                or (side == "variant" and key in node_map.values())):
+                raise MechanismRegistryError("candidate edit scope cannot release shared or context facts")
+            changed_nodes.add(key)
+        for key, row in declarations[side + "_edges"].items():
+            edge = edges[key]
+            endpoints = {edge.source_id, edge.target_id}
+            if row["status"] == "unresolved" and endpoints & (relevant | changed_nodes):
+                raise MechanismRegistryError("candidate edit scope has unresolved relevant support")
+            if row["status"] != "policy_only":
+                continue
+            if (not allowed or not endpoints & changed_nodes or edge.edge_type not in {"used_by", "produces"}
+                or any(endpoint not in owned and nodes[endpoint].node_type in {
+                    "task_requirement", "safety_requirement", "constraint", "presentation_control", "condition"}
+                    for endpoint in endpoints)):
+                raise MechanismRegistryError("candidate edit scope cannot waive independent relations")
+            changed_edges.add(key)
+        supported = set(owned)
+        supported.update(key for relation in current.requirement_relations if relation[0] in owned
+                         for key in (relation[1], relation[3]))
+        supported.update(key for edge in current.edges
+                         if edge.source_id in owned or edge.target_id in owned
+                         for key in (edge.source_id, edge.target_id))
+        # A reviewed label is necessary but cannot release an unrelated graph
+        # component. This connectivity test does not infer semantic ownership.
+        pending = True
+        while pending:
+            before = set(supported)
+            for key in changed_edges:
+                edge = edges[key]
+                if {edge.source_id, edge.target_id} & supported:
+                    supported.update((edge.source_id, edge.target_id))
+            pending = supported != before
+        if changed_nodes - supported:
+            raise MechanismRegistryError("candidate edit scope facts are unrelated to the edited requirement")
+        checked_semantics = {nodes[key].semantic_id for key in relevant | changed_nodes}
+        if scope and enabled[0] and (
+            checked_semantics & set(current.unresolved_semantics)
+            or any({source, dest} & checked_semantics for source, _, dest in current.unresolved_relations)
+        ):
+            raise MechanismRegistryError("candidate edit scope has unresolved relevant support")
+        for edge in current.edges:
+            endpoints = {edge.source_id, edge.target_id}
+            if (edge.edge_type in {"contains", "requires"} and edge.target_id in changed_nodes
+                and nodes[edge.source_id].node_type == "task"
+                and nodes[edge.source_id].semantic_id == "task.root"):
+                # Root membership is compiled bookkeeping, not an independent
+                # source assertion needing another semantic judgment.
+                changed_edges.add(edge.edge_id)
+            if endpoints & changed_nodes and not endpoints & owned and edge.edge_id not in changed_edges:
+                raise MechanismRegistryError("candidate edit scope leaves an incident relation unreviewed")
+    return released, introduced, removable_edges, added_edges
+
+
 def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, variant, inactive_texts):
     """Check a source-reviewed full realization, including shared-clause neutral rewrites.
 
@@ -410,7 +557,21 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
         for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)
         for key in scoped_feature_assessment(graph, feature, scope).requirement_node_ids
     }
-    preserved = set(old) - requirement_owned_nodes(graph, targeted_requirements)
+    source_owned = requirement_owned_nodes(graph, targeted_requirements)
+    source_root = next(node.node_id for node in graph.nodes if node.semantic_id == "task.root")
+    target_root = next(node.node_id for node in target.nodes if node.semantic_id == "task.root")
+    scope_map = {**node_map, source_root: target_root}
+    assigned_scopes = {(feature, FeatureScope(scope_map.get(scope.operation_node_id),
+        tuple(sorted(scope_map.get(key, "") for key in scope.subject_node_ids)),
+        tuple(sorted(scope_map.get(key, "") for key in scope.condition_node_ids))))
+        for feature, scope in zip(binding.factor_feature_ids, binding.factor_scopes, strict=True)}
+    target_owned = requirement_owned_nodes(target, {
+        key for item in target.scoped_feature_assessments
+        if (item.feature_id, item.scope) in assigned_scopes for key in item.requirement_node_ids})
+    released, introduced, removable_edges, added_edges = _reviewed_edit_scope(
+        binding, graph, target, prompt=prompt, target_prompt=target_prompt, catalog=catalog,
+        review=review, enabled=enabled, node_map=node_map, source_owned=source_owned, target_owned=target_owned)
+    preserved = set(old) - source_owned - released
     if (
         not preserved <= set(node_map)
         or set(node_map) - set(old)
@@ -429,23 +590,25 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
             != target_prompt[after.evidence_start : after.evidence_end]
         ):
             raise MechanismRegistryError("neutral rewrite changed non-target source evidence")
+    old_root = next(node.node_id for node in graph.nodes if node.semantic_id == "task.root")
+    new_root = next(node.node_id for node in target.nodes if node.semantic_id == "task.root")
+    boundary_map = {**node_map, old_root: new_root}
     source_edges = {
-        (node_map[edge.source_id], edge.edge_type, node_map[edge.target_id])
+        (boundary_map[edge.source_id], edge.edge_type, boundary_map[edge.target_id])
         for edge in graph.edges
-        if edge.source_id in preserved and edge.target_id in preserved
+        if not {edge.source_id, edge.target_id} & source_owned
+        and edge.edge_id not in removable_edges
     }
     retained = {node_map[key] for key in preserved}
     target_edges = {
         (edge.source_id, edge.edge_type, edge.target_id)
         for edge in target.edges
-        if edge.source_id in retained and edge.target_id in retained
+        if not {edge.source_id, edge.target_id} & (target_owned | set(neutral_nodes.values()))
+        and edge.edge_id not in added_edges
     }
     if source_edges != target_edges:
         raise MechanismRegistryError("neutral rewrite changed non-target relation structure")
 
-    old_root = next(node.node_id for node in graph.nodes if node.semantic_id == "task.root")
-    new_root = next(node.node_id for node in target.nodes if node.semantic_id == "task.root")
-    boundary_map = {**node_map, old_root: new_root}
     old_structures = {(node_map[key], kind, tuple(sorted(node_map[child] for child in members)))
                       for key, kind, members in graph.requirement_structures
                       if key in preserved and set(members) <= preserved}
@@ -503,6 +666,7 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     # cannot hide behind a correct target-state label.
     covered = (
         retained
+        | introduced
         | set(neutral_nodes.values())
         | requirement_owned_nodes(target, {key for item in target.scoped_feature_assessments for key in item.requirement_node_ids})
     )

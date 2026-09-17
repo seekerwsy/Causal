@@ -152,12 +152,24 @@ agent workflow executes, but reliable semantic repair is not established.
    Source dependencies and edit checks include both operands. Removing a target
    owner may remove its relations; other owners and independent ordinary relations
    remain non-target invariants. This preserves semantics, not proof of editability.
-   The two-task complete repair round now tests actual whole-policy deletion:
-   both edits remain blocked. A policy can introduce its action or result, while
-   the current editor protects all operation/object anchors and its selector needs
-   those same anchors in both arms. Owned order fixes do not solve this ownership
-   and applicability boundary. Do not retain a deleted action as mandatory neutral
-   context, reinterpret the factor as order-only, or waive overlap checks to pass.
+   The retained two-task complete repair round blocked both whole-policy deletions:
+   its editor protected policy-introduced action/result anchors. The current bounded
+   revision permits an explicitly reviewed candidate `applicability_scope` distinct
+   from its unchanged complete policy signature. Selection uses the background;
+   positive expression still requires the actual policy targets, guards and order.
+   Missing policy operands alone never establish absence. Background selection must
+   use frozen source meanings and existing semantic review of independent support.
+   No alternate anchor is inferred from a remaining relation endpoint.
+   At editing time only, the existing reviewed realization may supply a local
+   `source_review.edit_scope`. Default preservation remains. Explicit policy-only
+   operation/object facts and their reviewed input/output relations can change with
+   the enabled policy. Shared requirements, independent order, background coordinates
+   and other scope assessments stay protected; relevant unknown support blocks the
+   edit. Unchanged unrelated unknowns do not invalidate the entire graph. Root
+   membership is compiled structure, not another model judgment. This adds no global
+   ownership field, extraction gate, second graph or reviewer. Authored controls
+   demonstrate the mechanical ADD/REMOVE boundary, not automatic attribution accuracy
+   or qualification of the two historical natural edits.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.

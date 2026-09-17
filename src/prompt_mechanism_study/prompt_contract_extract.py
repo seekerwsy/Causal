@@ -2146,8 +2146,21 @@ def fixed_scope_request(
             scope["policy_conditions"] = [dict(concept_id=key, definition=catalog["semantic_guidance"][key])
                                            for key in selector["policy_condition_semantic_ids"]]
             if selector.get("policy_relations"):
+                endpoints = select_policy_relation_endpoints(graph, selector)
                 scope["policy_relations"] = [dict(source=node_to_local[a], edge_type=relation, target=node_to_local[b])
-                    for a, relation, b in select_policy_relation_endpoints(graph, selector)]
+                    for a, relation, b in (endpoints or ())]
+            if "applicability_scope" in selector:
+                scope["coordinate_kind"] = "applicability_background"
+                policy_coordinate = select_feature_scope(graph, {key: value for key, value in selector.items()
+                                                                 if key != "applicability_scope"})
+                scope["policy_coordinate"] = (dict(target=node_to_local[policy_coordinate.operation_node_id],
+                    subjects=[node_to_local[key] for key in policy_coordinate.subject_node_ids],
+                    conditions=[node_to_local[key] for key in policy_coordinate.condition_node_ids])
+                    if policy_coordinate else None)
+                scope["policy_relation_definitions"] = [dict(
+                    source=dict(concept_id=a, definition=catalog["semantic_guidance"][a]), edge_type=relation,
+                    target=dict(concept_id=b, definition=catalog["semantic_guidance"][b]))
+                    for a, relation, b in selector.get("policy_relations", ())]
             scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
                 if fact["semantic_id"] == scope["concept_id"] and key in asserted_requirements
                 and (contract.source_inventory or {}).get("statement_kinds", {}).get(key, "obligation") == "obligation"
@@ -2177,6 +2190,11 @@ def fixed_scope_request(
                    if row["target"] == "task.root" and not objects else [row["target"]])
         targets = set(targets) | {endpoint for relation in row.get("policy_relations", [])
                                   for endpoint in (relation["source"], relation["target"])}
+        if row.get("coordinate_kind") == "applicability_background":
+            policy = row["policy_scope"]
+            policy_operands = {policy["operation_semantic_id"], *(endpoint
+                for a, _, b in policy.get("policy_relations", ()) for endpoint in (a, b))}
+            targets |= {key for key, fact in facts.items() if fact["semantic_id"] in policy_operands}
         blockers[key] = sorted({reason for target in targets for reason in _scope_blockers(
             contract, inventory_status, target, object_subjects=tuple(row["subjects"]) if objects else ())})
     for key, row in scopes.items():
@@ -2224,13 +2242,21 @@ def fixed_scope_request(
             "their absence from the source is not by itself an unresolved context. They must be "
             "preserved in a positive requirement's structural guards. policy_relations likewise "
             "belong to the requirement: preserve their exact "
-            "direction and endpoints in positive evidence. Their endpoints must independently exist; "
-            "the order itself is not an applicability prerequisite and is never inferred from free text. "
+            "direction and endpoints in positive evidence. When coordinate_kind=applicability_background, "
+            "target/subjects/conditions identify the separately reviewed task background, not the policy's "
+            "direct targets. policy_coordinate is the source-resolved complete policy coordinate, or null "
+            "when it cannot be resolved. policy_relation_definitions retain frozen operand meanings even "
+            "when corresponding source operations are absent. Do not create those operations to fill the "
+            "background. The background must be supported independently of the target policy; its geometry "
+            "alone does not establish that independence. Missing policy operands do not prove not_expressed: "
+            "read the complete source, and use unresolved if source meaning or its binding remains unclear. "
+            "Without an explicit applicability_background coordinate, the fixed selector still requires its "
+            "policy operands to exist. The order itself is not an applicability prerequisite and is never inferred from free text. "
             "An endpoint is an operand, not an additional direct target. task means one overall runtime "
             "contract; each means a universal rule over target_class, never a finite instance list. "
             "Verify from the unchanged task that the policy is meaningful and feasible. A root node, "
             "the policy's presence, or a vacuously empty class proves no applicability. Relevant "
-            "operations, objects, interfaces and non-target obligations must remain unchanged. "
+            "background operations, objects, interfaces and non-target obligations must remain unchanged. "
             "Only whole OR/NOT expressions may be positive, never their unasserted members. "
             "Preserve ordered predicates such as before/after in the complete definition; reversed "
             "order is not equivalent. No condition or qualifier may be recovered only from a label."),

@@ -264,6 +264,18 @@ def requirement_matches_policy(graph, requirement, scope, selector):
         node_types={key: node.node_type for key, node in nodes.items()},
         structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes,
         owned_relations=graph.requirement_relations)
+    if "applicability_scope" in selector:
+        # Applicability may survive removal of the policy's own action. Positive
+        # evidence must still carry that action and its entire original binding.
+        if select_feature_scope(graph, selector) != scope or binding is None:
+            return False
+        connected = binding["operations"] | {key for a, _, b in binding["relations"] for key in (a, b)}
+        if scope.operation_node_id not in connected:
+            return False
+        scope = select_feature_scope(graph, {key: value for key, value in selector.items()
+                                             if key != "applicability_scope"})
+        if scope is None:
+            return False
     kind = {key: kind for key, kind, _ in graph.requirement_structures}.get(requirement, "atom")
     execution = {a for a, rel, b in links if rel == "conditions" and b == scope.operation_node_id}
     relation_endpoints = select_policy_relation_endpoints(graph, selector)
@@ -451,7 +463,7 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
             fields = {"operation_semantic_id", "subject_semantic_ids", "condition_semantic_ids",
                       "execution_condition_semantic_ids", "match_rule", "scope_kind", "target_class",
                       "policy_condition_semantic_ids", "requirement_kind"}
-            if (not isinstance(selector, dict) or set(selector) - {"policy_relations"} != fields
+            if (not isinstance(selector, dict) or set(selector) - {"policy_relations", "applicability_scope"} != fields
                 or selector["scope_kind"] not in {"targets", "task", "each", "objects"}
                 or selector["requirement_kind"] not in {"atom", "or", "not"}
                 or selector["match_rule"] != "unique_source_geometry_match"
@@ -486,6 +498,23 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
                            for row in rows)
                     or rows != [list(row) for row in sorted(set(map(tuple, rows)))]):
                     raise PromptTSGError("policy relation operands must be sorted unique operation meanings")
+            if "applicability_scope" in selector:
+                background = selector["applicability_scope"]
+                fields = {"operation_semantic_id", "subject_semantic_ids", "execution_condition_semantic_ids"}
+                if (not isinstance(background, dict) or set(background) != fields
+                    or semantics.get(background["operation_semantic_id"]) != "task_operation"):
+                    raise PromptTSGError("candidate applicability needs a declared source operation coordinate")
+                for name, kind in (("subject_semantic_ids", "data_object"),
+                                   ("execution_condition_semantic_ids", "condition")):
+                    ids = background[name]
+                    if (not isinstance(ids, list) or any(not isinstance(key, str) for key in ids)
+                        or ids != sorted(ids) or any(semantics.get(key) != kind for key in ids)
+                        or name == "execution_condition_semantic_ids" and len(set(ids)) != len(ids)):
+                        raise PromptTSGError("candidate applicability must preserve source input and execution roles")
+                connected = {selector["operation_semantic_id"], *(key
+                    for a, _, b in selector.get("policy_relations", []) for key in (a, b))}
+                if background["operation_semantic_id"] not in connected:
+                    raise PromptTSGError("candidate applicability is disconnected from its complete policy")
     if "feature_role_domains" in value:
         rules = value["feature_role_domains"]
         callers = _unique_strings(value["caller_supplied_concepts"], "caller-supplied concepts")
@@ -994,6 +1023,11 @@ def validate_prompt_tsg(
                             owned_relations=graph.requirement_relations)
                         if (envelope is None or item.scope.operation_node_id in envelope["operations"]
                             or roots[0].node_id in envelope["operations"]
+                            or "applicability_scope" in selector and (
+                                item.scope.operation_node_id in {endpoint for a, _, b in envelope["relations"]
+                                                                  for endpoint in (a, b)}
+                                or any(node_by_id[key].semantic_id == selector["operation_semantic_id"]
+                                       for key in envelope["operations"]))
                             or selector["scope_kind"] == "objects" and (
                                 set(item.scope.subject_node_ids) & envelope["subjects"] or not envelope["subjects"])):
                             raise PromptTSGError("negative policy state contradicts a source expression at this boundary")
@@ -1129,7 +1163,11 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
     Conditions use execution guards or non-gating source contexts, never target state.
     """
     nodes = {n.node_id: n for n in graph.nodes}
-    if select_policy_relation_endpoints(graph, selector) is None:
+    background = selector.get("applicability_scope")
+    if background:
+        selector = dict(background, scope_kind="targets",
+                        condition_semantic_ids=background["execution_condition_semantic_ids"])
+    elif select_policy_relation_endpoints(graph, selector) is None:
         return None
     links = {(e.source_id, e.edge_type, e.target_id) for e in graph.edges}
     matches = []

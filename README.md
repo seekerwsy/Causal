@@ -59,7 +59,13 @@ The current binding repair separates direct targets from requirement-owned order
 Owned relations retain their requirement, guards and operands through compilation,
 candidate matching and edit checks. A [two-task development check](docs/experiments/2026-09-17-tsg-reliable-construction.md#repairing-ownership-of-temporal-requirements)
 retained all nine fixed source meanings and three order bindings; one sample per
-task does not establish stability, and natural policy editability remains untested.
+task does not establish stability. The subsequent complete repair round corrected
+two planted target errors, but both natural policy deletions were blocked by
+policy-dependent anchors. The current candidate-local revision separates an explicitly
+reviewed applicability background from the complete policy signature and permits
+reviewed policy-only facts to change during an edit. Authored ADD/REMOVE controls
+pass; automatic support judgments and natural edit qualification remain unproved.
+TSG construction itself gains no global ownership gate or extra reviewer.
 
 Complete conditional, whole-task and universal requirements can now enter Atomic
 candidate construction at their original boundary. Policy-internal conditions

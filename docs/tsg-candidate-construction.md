@@ -138,6 +138,19 @@ operation operands. These relations belong to the requirement; operands are not
 extra direct targets. Scope selection requires unique independent endpoints,
 not an already expressed order. Positive evidence must match the complete relation
 envelope. Different OR/NOT member envelopes remain represented but unprojected.
+An explicitly supplied full occurrence may add `applicability_scope`, using the
+same local operation/subject/condition coordinate fields as `scope`. The existing
+candidate compiler freezes this separate background without replacing the policy
+signature. The operation must be a source-bound direct target or owned-order
+operand, with exact input and execution-condition coordinates; this structural
+connection is necessary, not proof of independent support. Existing factor review
+must establish independence. No coordinate is chosen automatically. The compact
+proposer remains unchanged and does not yet propose these separate backgrounds.
+This is an optional input to the same candidate compiler and review, not another
+construction path. The background is part of the factor identity before freezing.
+With it, task selection can survive missing policy-only operands; positive matching
+still checks the complete original policy. The scope reviewer receives both meanings
+and uses the full source to distinguish unexpressed policy from unresolved extraction.
 Scope selection reads only task/operation identity, input-use bindings and execution
 conditions, or the exact source-object identities for an object policy. It never
 reads the requirement or its state; ambiguity returns `null`.
@@ -236,6 +249,25 @@ remain the existing protocolization and measurement responsibilities.
 
 ## Development verification
 
+The existing source-reviewed realization can declare candidate-local support in
+`source_review.edit_scope`. Its optional `source_nodes`, `variant_nodes`,
+`source_edges` and `variant_edges` maps use existing node/edge IDs. Each judgment
+contains `status` (`policy_only`, `shared`, `unresolved`), nonempty `rationale` and
+`source_evidence: [{start, end}]` in the corresponding complete prompt. These are
+fallible source judgments, not inferred ownership or new TSG fields.
+
+Only an enabled REMOVE may release source facts; only an enabled ADD may introduce
+variant facts. Eligible facts are operations/objects connected to the edited
+requirement. Every affected `used_by`/`produces` edge also needs explicit support.
+Shared requirements, independent precedence, guards, background and other assessed
+scope coordinates cannot be released. Default preservation protects undeclared facts;
+unresolved relevant support blocks the edit. An unchanged unrelated unknown is retained
+without becoming a whole-graph exclusion. Root membership follows the declared fact
+mechanically and must not be submitted as a semantic support judgment. Source and
+target graphs remain intact inputs. The independent result verifier checks the same
+limits without calling the editor's implementation. Direct literal deletion remains
+strict; these permissions belong to the existing reviewed-realization route.
+
 The active authored checks live in `tests/test_candidate_construction.py` and the
 existing source-inventory tests. They distinguish task/each/direct scope,
 policy-internal versus execution conditions, asserted whole alternatives versus
@@ -262,7 +294,7 @@ subsequently reconstructed two actual policy deletions. Both target instructions
 were absent from the new source representations, but neither deletion passed the
 active editor: the policy's own operation/result evidence was still treated as
 non-target content. Unchanged selectors also lost their original anchors. These
-are unqualified development edits, not accepted ADD/REMOVE policies. Supporting
-them requires explicit policy ownership of introduced facts and an independently
-supported applicability boundary; matching IDs or dropping preservation checks
-would not establish either.
+are unqualified development edits, not accepted ADD/REMOVE policies. The candidate-local
+revision implements explicitly reviewed support and independent background coordinates
+on authored controls. The two old natural edits have not been requalified under it;
+matching IDs or dropping preservation checks would not establish either semantic judgment.

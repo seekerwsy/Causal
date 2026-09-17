@@ -681,3 +681,205 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
     assert factors["object_unused"] == factors["object_used"] == factors["object_shared"]
     assert len(set(factors.values())) == len(cases) - 2
     record_property("authored_policy_checks", json.dumps(results))
+
+
+def test_candidate_local_edit_scope_preserves_background_shared_support_and_unknowns():
+    """Authored policy support permits full edits, never establishes LLM accuracy."""
+    from dataclasses import asdict, replace
+    from prompt_mechanism_study.candidate_construction import _candidate_catalog, choose_candidate_scope
+    from prompt_mechanism_study.prompt_contract_extract import fixed_scope_request, apply_fixed_scope_response
+    from prompt_mechanism_study.prompt_tsg import _edge, requirement_owned_nodes
+    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
+    from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
+
+    base = "Accept a password and insert the account into the database. Return status."
+    text = "Hash the password into a digest before insertion."
+
+    def source(present, catalog=None, feature=None):
+        task = dict(task_id="synthetic-candidate-local-policy", language="python",
+                    prompt=base + (" " + text if present else ""))
+        rows = [("insert", "task_operation", "insertion", "insert the account into the database"),
+                ("password", "data_object", "password", "a password"),
+                ("account", "data_object", "account", "the account"),
+                ("return", "task_operation", "returning", "Return status"),
+                ("invariant", "task_requirement", "status", "Return status")]
+        links = [("account", "used_by", "insert", base),
+                 ("invariant", "constrains", "return", "Return status")]
+        if present:
+            rows += [("hash", "task_operation", "hashing", "Hash the password into a digest"),
+                     ("digest", "data_object", "digest", "a digest"),
+                     ("r", "safety_requirement", "policy", text)]
+            links += [("password", "used_by", "hash", text), ("hash", "produces", "digest", text),
+                      ("digest", "used_by", "insert", text), ("r", "constrains", "hash", text),
+                      ("r", "constrains", "password", text)]
+        identities = {concept: (feature if key == "r" else catalog["normalization_map"][kind + "::" + concept])
+                      if catalog else concept for key, kind, concept, _ in rows}
+        response = dict(
+            concepts=[] if catalog else [dict(concept_id=concept, node_type=kind, definition=quote)
+                                         for _, kind, concept, quote in rows],
+            nodes=[dict(local_id=key, concept_id=identities[concept], evidence_text=quote, occurrence=1)
+                   for key, _, concept, quote in rows],
+            edges=[dict(source_node_local_id=a, edge_type=kind, target_node_local_id=b,
+                        evidence_text=quote, occurrence=1) for a, kind, b, quote in links],
+            concept_states=[], feature_states=[], unresolved_notes=[])
+        source_catalog = catalog or open_concept_catalog()
+        contract = open_contract_from_response(response, task=task, catalog=source_catalog,
+            annotator_id="authored-policy-support-reference", review_status="development_exposed")
+        inventory = dict(source_units={"u": dict(evidence_text=task["prompt"], occurrence=1)},
+            coverage={"u": dict(status="represented", facts=[key for key, _, _, _ in rows], reason="Authored edit boundary.")},
+            layers={key: "runtime" for key, _, _, _ in rows},
+            operation_roles=[dict(operation=b if kind == "used_by" else a,
+                                 subject=a if kind == "used_by" else b,
+                                 role="value_input" if kind == "used_by" else "result", evidence_text=quote, occurrence=1)
+                             for a, kind, b, quote in links if kind in {"used_by", "produces"}],
+            requirement_structures={key: dict(kind="atom", members=[]) for key in (["invariant", "r"] if present else ["invariant"])},
+            requirement_scopes={}, requirement_relations={"r": [dict(source="hash", edge_type="precedes",
+                target="insert", evidence_text=text, occurrence=1)]} if present else {})
+        contract = replace(contract, source_inventory=inventory)
+        return task, contract, compile_task_context_contract(contract, prompt=task["prompt"], catalog=source_catalog)
+
+    task, contract, graph = source(True)
+    intact = prompt_tsg_record(graph)
+    request = candidate_request([task], [contract])
+    nodes = {n["concept_id"]: n for n in request["sources"][0]["nodes"]}
+    response = dict(factors=[dict(label="Password hashing before insertion", definition=text,
+        atomicity_rationale="One complete hashing policy with its required result and order.",
+        occurrences=[dict(task_id=task["task_id"], requirement_node_ids=[nodes["policy"]["node_id"]],
+            scope=dict(operation_node_id=nodes["hashing"]["node_id"], subject_node_ids=[nodes["password"]["node_id"]], condition_node_ids=[]),
+            applicability_scope=dict(operation_node_id=nodes["insertion"]["node_id"], subject_node_ids=[], condition_node_ids=[]))])],
+        dispositions=[dict(task_id=task["task_id"], requirement_node_id=n["node_id"],
+            status="included" if n["concept_id"] == "policy" else "not_actionable",
+            rationale="Only the complete hashing policy is edited.")
+            for n in request["sources"][0]["nodes"] if n["node_type"] in {"task_requirement", "safety_requirement"}])
+    draft = compile_candidate_proposal(request, response, _design())
+    reviewed = compile_candidate_proposal(request, response, _design(), _review(request, response, draft))
+    factor = reviewed["factors"][0]
+    feature, selector = factor["feature_id"], factor["scope_selector"]
+    catalog = _candidate_catalog([contract], reviewed, _design(), reviewed["review"])
+    assert prompt_tsg_record(graph) == intact
+    assert selector["operation_semantic_id"] != selector["applicability_scope"]["operation_semantic_id"]
+    disconnected = json.loads(json.dumps(response))
+    disconnected["factors"][0]["occurrences"][0]["applicability_scope"]["operation_node_id"] = nodes["returning"]["node_id"]
+    with pytest.raises(ValueError, match="applicability scope"):
+        compile_candidate_proposal(request, disconnected, _design())
+
+    def assessed(present):
+        task, contract, graph = source(present, catalog, feature)
+        request = fixed_scope_request(contract, prompt=task["prompt"], catalog=catalog)
+        assert len(request["scopes"]) == 1 and not request["withheld_scopes"]
+        key, row = next(iter(request["scopes"].items()))
+        assert row["admissible_positive_requirements"] == (["r"] if present else [])
+        answer = dict(states={key: dict(applicability="applicable", applicability_rationale="Account insertion remains independently specified.",
+            expression="explicitly_required" if present else "not_expressed", requirements=["r"] if present else [])}, unresolved_notes=[])
+        contract = apply_fixed_scope_response(json.dumps(answer).encode(), request=request, contract=contract, prompt=task["prompt"], catalog=catalog)
+        graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
+        scope = graph.scoped_feature_assessments[0].scope
+        assert choose_candidate_scope(graph, selector) == scope
+        assert next(n.semantic_id for n in graph.nodes if n.node_id == scope.operation_node_id) == selector["applicability_scope"]["operation_semantic_id"]
+        return task, contract, graph, scope
+
+    absent, present = assessed(False), assessed(True)
+    duplicate_background = replace(absent[2], nodes=tuple(replace(n,
+        semantic_id=selector["applicability_scope"]["operation_semantic_id"])
+        if n.semantic_id == catalog["normalization_map"]["task_operation::returning"] else n for n in absent[2].nodes))
+    assert choose_candidate_scope(duplicate_background, selector) is None
+    # Background matching cannot certify a positive graph with lost/changed order.
+    for mutation in ("missing", "reversed"):
+        inventory = json.loads(json.dumps(present[1].source_inventory))
+        if mutation == "missing":
+            inventory["requirement_relations"] = {}
+        else:
+            inventory["requirement_relations"]["r"][0].update(source="insert", target="hash")
+        with pytest.raises(ValueError, match="complete policy binding"):
+            compile_task_context_contract(replace(present[1], source_inventory=inventory), prompt=present[0]["prompt"], catalog=catalog)
+
+    for operation, source_case, target_case in (("remove", present, absent), ("add", absent, present)):
+        source_task, _, source_graph, scope = source_case
+        target_task, _, target_graph, _ = target_case
+        binding = bind_task_hypothesis(policy_id="authored-policy-local", graph=source_graph, query=factor["query"],
+            factor_feature_ids=(feature,), factor_operations=(operation,), factor_scopes=(scope,))
+        source_ids = {n.semantic_id: n.node_id for n in source_graph.nodes if n.node_type != "task"}
+        target_ids = {n.semantic_id: n.node_id for n in target_graph.nodes if n.node_type != "task"}
+        mapped = {key: target_ids[meaning] for meaning, key in source_ids.items() if meaning in target_ids}
+        positive_graph, positive_prompt = present[2], present[0]["prompt"]
+        released = {n.node_id for n in positive_graph.nodes if n.semantic_id in {
+            catalog["normalization_map"]["task_operation::hashing"], catalog["normalization_map"]["data_object::digest"]}}
+        owner = set(positive_graph.scoped_feature_assessments[0].requirement_node_ids)
+        owned = requirement_owned_nodes(positive_graph, owner)
+        incident = {e.edge_id for e in positive_graph.edges if (e.source_id in released or e.target_id in released)
+                    and e.edge_type in {"used_by", "produces"} and not ({e.source_id, e.target_id} & owned)}
+        evidence = dict(status="policy_only", source_evidence=[dict(start=positive_prompt.index(text), end=len(positive_prompt))],
+                        rationale="The authored source gives these facts and links no independent support beyond the target policy.")
+        side = "source" if operation == "remove" else "variant"
+        edit_scope = {side + "_nodes": {key: evidence for key in released}, side + "_edges": {key: evidence for key in incident}}
+        variant = dict(binding_id=binding.binding_id, source_prompt_sha256=content_hash(source_task["prompt"]), enabled=[True],
+            prompt=target_task["prompt"], graph=prompt_tsg_record(target_graph), source_to_variant_nodes=mapped,
+            source_review=dict(outcomes_used=False, reviewer_id="authored-reference", rationale="Preserve independent insertion and status behavior.", edit_scope=edit_scope))
+
+        def render(value=variant, selected_graph=source_graph):
+            return render_task_hypothesis(binding, selected_graph, prompt=source_task["prompt"], catalog=catalog,
+                enabled=(True,), additions={}, reviewed_variant=value)
+
+        def independent(value=variant, selected_graph=source_graph):
+            replay_task = dict(prompt=source_task["prompt"], graph=prompt_tsg_record(selected_graph), factor_scopes=[json.loads(json.dumps(asdict(scope)))],
+                binding_id=binding.binding_id, intervention_compatibility=dict(binding_id=binding.binding_id, decision="compatible", outcomes_used=False),
+                reviewed_variants={"TARGET": value})
+            def check(condition, message):
+                if not condition:
+                    raise ValueError(message)
+            return _replay_scoped_development_prompt(replay_task,
+                dict(query=factor["query"], factors=[dict(feature_id=feature, operation=operation, addition=text)]), "TARGET", check)
+
+        before = prompt_tsg_record(source_graph)
+        assert render()["prompt"] == target_task["prompt"]
+        assert independent() == target_task["prompt"]
+        assert prompt_tsg_record(source_graph) == before
+        extra_state = json.loads(json.dumps(variant))
+        extra_state["graph"]["scoped_feature_assessments"].append(
+            dict(extra_state["graph"]["scoped_feature_assessments"][0]))
+        with pytest.raises(ValueError, match="extra scope state"):
+            independent(extra_state)
+        # The new authority is explicit and local, never inferred from overlap.
+        for mutation in ("missing_scope", "missing_edge", "shared", "unresolved"):
+            corrupted = json.loads(json.dumps(variant))
+            declared = corrupted["source_review"]["edit_scope"]
+            if mutation == "missing_scope":
+                corrupted["source_review"].pop("edit_scope")
+            elif mutation == "missing_edge":
+                declared[side + "_edges"].pop(next(iter(incident)))
+            else:
+                declared[side + "_nodes"][next(iter(released))]["status"] = mutation
+            with pytest.raises(MechanismRegistryError):
+                render(corrupted)
+            with pytest.raises(ValueError):
+                independent(corrupted)
+        unrelated = json.loads(json.dumps(variant))
+        return_id = source_ids[catalog["normalization_map"]["task_operation::returning"]]
+        quote_start = source_task["prompt"].index("Return status")
+        unrelated["source_review"]["edit_scope"].setdefault("source_nodes", {})[return_id] = dict(
+            status="unresolved", source_evidence=[dict(start=quote_start, end=quote_start + len("Return status"))],
+            rationale="Only this unchanged return operation has unresolved local support.")
+        assert render(unrelated)["prompt"] == target_task["prompt"]
+        assert independent(unrelated) == target_task["prompt"]
+        if operation == "remove":
+            # Independent order and another requirement's support cannot be waived.
+            ids = {n.semantic_id: n.node_id for n in source_graph.nodes}
+            hashing = ids[catalog["normalization_map"]["task_operation::hashing"]]
+            invariant = ids[catalog["normalization_map"]["task_requirement::status"]]
+            by_id = {n.node_id: n for n in source_graph.nodes}
+            for origin, kind, destination in ((hashing, "precedes", scope.operation_node_id),
+                                               (invariant, "constrains", hashing)):
+                extra = _edge(by_id[origin], by_id[destination], kind,
+                              {(by_id[origin].node_type, kind, by_id[destination].node_type)})
+                corrupted_graph = replace(source_graph, edges=tuple(sorted(source_graph.edges + (extra,), key=lambda e: e.edge_id)))
+                original_binding = binding
+                binding = bind_task_hypothesis(policy_id="authored-policy-local", graph=corrupted_graph, query=factor["query"],
+                    factor_feature_ids=(feature,), factor_operations=(operation,), factor_scopes=(scope,))
+                corrupted = json.loads(json.dumps(variant))
+                corrupted["binding_id"] = binding.binding_id
+                corrupted["source_review"]["edit_scope"]["source_edges"][extra.edge_id] = evidence
+                with pytest.raises(MechanismRegistryError, match="shared or context|independent relations"):
+                    render(corrupted, corrupted_graph)
+                with pytest.raises(ValueError, match="shared|independent"):
+                    independent(corrupted, corrupted_graph)
+                binding = original_binding

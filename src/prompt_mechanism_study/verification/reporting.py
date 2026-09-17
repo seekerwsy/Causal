@@ -465,11 +465,12 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
     instructions, removals = ([], [])
     for index, (factor, scope, active) in enumerate(zip(factors, scopes, flags, strict=True)):
         op = scope["operation_node_id"]
-        check(op in nodes and nodes[op]["node_type"] == "task_operation", "scope operation")
+        check(op in nodes and nodes[op]["node_type"] in {"task_operation", "task"}, "scope operation")
         check(
             all(
                 (
-                    (key, "used_by", op) in edges and nodes[key]["node_type"] == "data_object"
+                    (nodes[op]["node_type"] == "task" or (key, "used_by", op) in edges)
+                    and nodes[key]["node_type"] == "data_object"
                     for key in scope["subject_node_ids"]
                 )
             ),
@@ -574,8 +575,10 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
             )
             for key in item["requirement_node_ids"]
         }
+        kept = _verify_reviewed_edit_projection(
+            graph, variant, source, policy, scopes, flags, target_requirements, check)
         for key, before in nodes.items():
-            if before["node_type"] == "task" or key in target_requirements:
+            if key not in kept:
                 continue
             check(
                 key in mapped and mapped[key] in rewritten,
@@ -591,12 +594,17 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
                 ),
                 "reviewed realization changes a non-target requirement",
             )
+        scope_map = {**mapped,
+            next(n['node_id'] for n in graph['nodes'] if n['node_type']=='task'):
+            next(n['node_id'] for n in variant['graph']['nodes'] if n['node_type']=='task')}
+        check(len(variant['graph']['scoped_feature_assessments']) == len(graph['scoped_feature_assessments']),
+              'reviewed realization extra scope state')
         for item in graph["scoped_feature_assessments"]:
             scope = item["scope"]
             translated = dict(
-                operation_node_id=mapped[scope["operation_node_id"]],
-                subject_node_ids=sorted((mapped[key] for key in scope["subject_node_ids"])),
-                condition_node_ids=sorted((mapped[key] for key in scope["condition_node_ids"])),
+                operation_node_id=scope_map[scope["operation_node_id"]],
+                subject_node_ids=sorted((scope_map[key] for key in scope["subject_node_ids"])),
+                condition_node_ids=sorted((scope_map[key] for key in scope["condition_node_ids"])),
             )
             expected_state = item["state"]
             for factor, target_scope, active in zip(factors, scopes, flags, strict=True):
@@ -624,6 +632,157 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
         )
         result += "\n".join(("- " + text for key, text in instructions if key == op))
     return result
+
+
+def _verify_reviewed_edit_projection(graph, variant, source, policy, scopes, flags, owners, check):
+    """Independently check a reviewed edit's keep/change boundary on raw records.
+
+    This intentionally does not call the production editor or its ownership helper.
+    Source review supplies semantic judgments; this checks their mechanical limits.
+    """
+    requirement_types = {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
+    target = variant['graph']
+    mapping = variant['source_to_variant_nodes']
+    old = {n['node_id']:n for n in graph['nodes'] if n['node_type'] != 'task'}
+    new = {n['node_id']:n for n in target['nodes'] if n['node_type'] != 'task'}
+    query = policy.get('query',{})
+    meanings = sorted(query.get('required_semantics',[]))
+    graph_edges = {(e['source_id'],e['edge_type'],e['target_id']) for e in graph['edges']}
+    anchors = {s['operation_node_id'] for s in scopes}
+    source_context = set()
+    for values in itertools.product(*[[n['node_id'] for n in graph['nodes'] if n['semantic_id']==meaning]
+                                       for meaning in meanings]):
+        match = dict(zip(meanings,values))
+        if anchors & set(values) and all((match[a],k,match[b]) in graph_edges for a,k,b in query.get('required_relations',[])):
+            source_context.update(values)
+    feature = policy['factors'][0]['feature_id']
+    original_root = next(n['node_id'] for n in graph['nodes'] if n['node_type']=='task')
+    target_root = next(n['node_id'] for n in target['nodes'] if n['node_type']=='task')
+    coordinate_map = {**mapping,original_root:target_root}
+    target_context = {coordinate_map[key] for key in source_context if key in coordinate_map}
+    assigned_scopes = [dict(operation_node_id=coordinate_map.get(s['operation_node_id']),
+        subject_node_ids=sorted(coordinate_map.get(k,'') for k in s['subject_node_ids']),
+        condition_node_ids=sorted(coordinate_map.get(k,'') for k in s['condition_node_ids'])) for s in scopes]
+    target_owners = {key for row in target.get('scoped_feature_assessments', [])
+                     if row['feature_id'] == feature and row['scope'] in assigned_scopes for key in row['requirement_node_ids']}
+
+    def owned_records(g, roots):
+        result = set(roots)
+        while True:
+            expanded = result | {child for key,_,children in g.get('requirement_structures', [])
+                                 if key in result for child in children}
+            if expanded == result: break
+            result = expanded
+        by_id = {n['node_id']:n for n in g['nodes']}
+        for n in g['nodes']:
+            if n['node_type'] != 'condition': continue
+            outgoing = [(e['edge_type'], e['target_id']) for e in g['edges'] if e['source_id'] == n['node_id']]
+            within = any(by_id[p]['node_type'] in requirement_types
+                         and by_id[p]['evidence_start'] <= n['evidence_start'] <= n['evidence_end'] <= by_id[p]['evidence_end']
+                         for p in result)
+            if within and outgoing and all(k == 'conditions' and dest in result for k,dest in outgoing):
+                result.add(n['node_id'])
+        return result
+
+    source_owned, target_owned = owned_records(graph, owners), owned_records(target, target_owners)
+    scope_review = variant['source_review'].get('edit_scope', {})
+    check(isinstance(scope_review, dict) and not set(scope_review)-{
+        'source_nodes','variant_nodes','source_edges','variant_edges'}, 'local edit scope fields')
+    for side,g,prompt,owned in (('source',graph,source,source_owned),('variant',target,variant['prompt'],target_owned)):
+        node_rows = {n['node_id']:n for n in g['nodes']}
+        edge_rows = {e['edge_id']:e for e in g['edges']}
+        decisions = {}
+        for kind, rows in (('nodes',node_rows),('edges',edge_rows)):
+            declared = scope_review.get(side+'_'+kind,{})
+            check(isinstance(declared,dict), 'local edit declarations')
+            for key,review in declared.items():
+                check(key in rows and isinstance(review,dict) and set(review)=={
+                    'status','source_evidence','rationale'}, 'local edit declaration identity')
+                if kind=='edges':
+                    e = rows[key]
+                    check(not (node_rows[e['source_id']]['node_type']=='task'
+                               and e['edge_type'] in {'contains','requires'}), 'root membership is compiled structure')
+                check(review['status'] in {'policy_only','shared','unresolved'}
+                      and isinstance(review['rationale'],str) and bool(review['rationale'].strip()), 'local edit judgment')
+                evidence = review['source_evidence']
+                check(isinstance(evidence,list) and bool(evidence), 'local edit support evidence')
+                for span in evidence:
+                    check(isinstance(span,dict) and set(span)=={'start','end'}
+                          and type(span['start']) is int and type(span['end']) is int
+                          and 0 <= span['start'] < span['end'] <= len(prompt)
+                          and bool(prompt[span['start']:span['end']].strip()), 'local edit evidence bounds')
+            decisions[kind] = {key for key,r in declared.items() if r['status']=='policy_only'}
+        mutable, mutable_edges = decisions['nodes'],decisions['edges']
+        active = flags[0] and policy['factors'][0]['operation']==('remove' if side=='source' else 'add')
+        check(active or not (mutable or mutable_edges), 'inactive or wrong-side edit permission')
+        check(all(node_rows[key]['node_type'] in {'task_operation','data_object'} for key in mutable), 'mutable fact type')
+        context = source_context if side=='source' else target_context
+        protected = set(context)
+        protected.update(key for row in g.get('scoped_feature_assessments', [])
+                         for key in (row['scope']['operation_node_id'], *row['scope']['subject_node_ids'], *row['scope']['condition_node_ids']))
+        protected.update(e['target_id'] for e in g['edges']
+                         if e['source_id'] not in owned and node_rows[e['source_id']]['node_type'] in requirement_types)
+        protected.update(x for owner,a,_,b in g.get('requirement_relations', []) if owner not in owned for x in (a,b))
+        protected.update(x for owner,_,boundaries,_ in g.get('requirement_scopes', []) if owner not in owned for x in boundaries)
+        protected.update(x for e in g['edges'] if e['edge_type']=='precedes'
+                         or any(node_rows[k]['node_type']=='condition' and k not in owned for k in (e['source_id'],e['target_id']))
+                         for x in (e['source_id'],e['target_id']))
+        check(not mutable & protected, 'local edit releases shared or background support')
+        relevant = set(context) | owned
+        relevant.update(x for owner,a,_,b in g.get('requirement_relations', []) if owner in owned for x in (a,b))
+        relevant.update(x for e in g['edges'] if e['source_id'] in owned or e['target_id'] in owned for x in (e['source_id'],e['target_id']))
+        for key,review in scope_review.get(side+'_nodes',{}).items():
+            check(review['status']!='unresolved' or key not in relevant, 'local edit unresolved support')
+        for key,review in scope_review.get(side+'_edges',{}).items():
+            e = edge_rows[key]
+            check(review['status']!='unresolved' or not {e['source_id'],e['target_id']} & (relevant|mutable), 'local edit unresolved support')
+        semantics = {node_rows[key]['semantic_id'] for key in mutable | relevant}
+        check(not (scope_review and flags[0]) or not semantics & set(g.get('unresolved_semantics', [])), 'local edit unresolved dependency')
+        check(not any(a in semantics or b in semantics for a,_,b in g.get('unresolved_relations', []))
+              or not (scope_review and flags[0]), 'local edit unresolved relation')
+        incident = {key for key,e in edge_rows.items()
+                    if {e['source_id'],e['target_id']} & mutable
+                    and e['source_id'] not in owned and e['target_id'] not in owned
+                    and not (node_rows[e['source_id']]['node_type']=='task'
+                             and e['edge_type'] in {'contains','requires'} and e['target_id'] in mutable)}
+        check(incident == mutable_edges, 'local edit incident relation accounting')
+        check(all(edge_rows[key]['edge_type'] in {'used_by','produces'} for key in mutable_edges), 'local edit independent relation')
+        connected = {e['target_id'] for e in g['edges'] if e['source_id'] in owned and e['edge_type']=='constrains'}
+        connected.update(x for owner,a,_,b in g.get('requirement_relations', []) if owner in owned for x in (a,b))
+        while True:
+            expanded = connected | {x for key in mutable_edges for x in (edge_rows[key]['source_id'],edge_rows[key]['target_id'])
+                                   if {edge_rows[key]['source_id'],edge_rows[key]['target_id']} & connected}
+            if expanded == connected: break
+            connected = expanded
+        check(mutable <= connected, 'local edit disconnected fact')
+        exempt_edges = mutable_edges | {key for key,e in edge_rows.items()
+            if node_rows[e['source_id']]['node_type']=='task' and e['edge_type'] in {'contains','requires'}
+            and e['target_id'] in mutable}
+        if side=='source': released,source_exempt_edges = mutable,exempt_edges
+        else: introduced,target_exempt_edges = mutable,exempt_edges
+
+    kept = set(old)-source_owned-released
+    check(kept <= set(mapping) <= set(old) and len(set(mapping.values()))==len(mapping)
+          and set(mapping.values())<=set(new), 'reviewed realization node correspondence')
+    check(not released & set(mapping) and not introduced & set(mapping.values()), 'local edit facts must change sides')
+    retained = {mapping[key] for key in kept}
+    old_root = next(n['node_id'] for n in graph['nodes'] if n['node_type']=='task')
+    new_root = next(n['node_id'] for n in target['nodes'] if n['node_type']=='task')
+    translated = {**mapping,old_root:new_root}
+    old_edges = {(translated[e['source_id']],e['edge_type'],translated[e['target_id']]) for e in graph['edges']
+                 if not {e['source_id'],e['target_id']} & source_owned and e['edge_id'] not in source_exempt_edges}
+    neutral = set(variant.get('neutral_control_nodes',{}).values())
+    new_edges = {(e['source_id'],e['edge_type'],e['target_id']) for e in target['edges']
+                 if not {e['source_id'],e['target_id']} & (target_owned|neutral) and e['edge_id'] not in target_exempt_edges}
+    check(old_edges==new_edges, 'reviewed realization non-target edges')
+    check({(mapping[o],translated[a],k,translated[b]) for o,a,k,b in graph.get('requirement_relations',[]) if o in kept}
+          == {(o,a,k,b) for o,a,k,b in target.get('requirement_relations',[]) if o in retained}, 'reviewed realization owned order')
+    check({(mapping[o],kind,tuple(sorted(mapping[x] for x in children))) for o,kind,children in graph.get('requirement_structures',[]) if o in kept}
+          == {(o,kind,tuple(children)) for o,kind,children in target.get('requirement_structures',[]) if o in retained}, 'reviewed realization composition')
+    check({(mapping[o],kind,tuple(sorted(translated[x] for x in bounds)),cls) for o,kind,bounds,cls in graph.get('requirement_scopes',[]) if o in kept}
+          == {(o,kind,tuple(bounds),cls) for o,kind,bounds,cls in target.get('requirement_scopes',[]) if o in retained}, 'reviewed realization scope')
+    check(set(new) <= retained | target_owned | introduced | neutral, 'reviewed realization unaccounted new node')
+    return kept
 
 
 from prompt_mechanism_study.representation import DataRole, DataRoleManifest

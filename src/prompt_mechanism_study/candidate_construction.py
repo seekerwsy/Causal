@@ -281,7 +281,8 @@ def _fixed_template_concepts():
 
 
 def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, dict]:
-    _fields(occurrence, {"task_id", "requirement_node_ids", "scope"}, "factor occurrence")
+    _fields(occurrence, {"task_id", "requirement_node_ids", "scope"}
+            | ({"applicability_scope"} if "applicability_scope" in occurrence else set()), "factor occurrence")
     nodes = {node["node_id"]: node for node in source["nodes"]}
     links = {(e["source_id"], e["edge_type"], e["target_id"]) for e in source["edges"]}
     requirements = occurrence["requirement_node_ids"]
@@ -348,18 +349,40 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
     evidence = dict(task_id=source["task_id"], prompt_tsg_id=source["prompt_tsg_id"],
                     requirement_node_ids=sorted(requirements), requirement_type=next(iter(requirement_types)),
                     scope=canonical_value(scope))
+    if "applicability_scope" in occurrence:
+        # This is an explicitly proposed, separately reviewed comparison coordinate;
+        # it does not replace the source requirement's complete binding above.
+        background = feature_scope_from_record(occurrence["applicability_scope"])
+        anchor = background.operation_node_id
+        connected = {op, *(key for a, _, b in policy_relations for key in (a, b))}
+        guards = {a for a, rel, b in links if rel == "conditions" and b == anchor}
+        if (anchor not in connected or anchor not in nodes or nodes[anchor]["node_type"] != "task_operation"
+                or background.subject_node_ids != tuple(sorted(set(background.subject_node_ids)))
+                or background.condition_node_ids != tuple(sorted(guards))
+                or any(key not in nodes or nodes[key]["node_type"] != "data_object"
+                       or (key, "used_by", anchor) not in links for key in background.subject_node_ids)):
+            raise ValueError("applicability scope needs an exact source operation/input/execution binding connected to the policy")
+        selector["applicability_scope"] = dict(operation_semantic_id=semantic(anchor),
+            subject_semantic_ids=sorted(semantic(key) for key in background.subject_node_ids),
+            execution_condition_semantic_ids=sorted(semantic(key) for key in guards))
+        evidence["applicability_scope"] = canonical_value(background)
     return selector, evidence
 
 
 def _query(selector: dict, feature_id: str) -> dict:
-    op = selector["operation_semantic_id"]
-    subjects, conditions = selector["subject_semantic_ids"], selector["condition_semantic_ids"]
-    endpoints = {key for a, _, b in selector.get("policy_relations", []) for key in (a, b)}
+    background = selector.get("applicability_scope")
+    coordinate = background or selector
+    op = coordinate["operation_semantic_id"]
+    subjects = coordinate["subject_semantic_ids"]
+    conditions = (coordinate["execution_condition_semantic_ids"] if background
+                  else coordinate["condition_semantic_ids"])
+    endpoints = (set() if background else
+                 {key for a, _, b in selector.get("policy_relations", []) for key in (a, b)})
     semantics = sorted({op, *subjects, *conditions, *endpoints})
-    # Operands must exist independently, but neither the policy's order nor its
-    # internal guards are prerequisites of this feature-independent task query.
-    execution = set(selector.get('execution_condition_semantic_ids', conditions))
-    relations = sorted({(s, "used_by", op) for s in subjects if selector["scope_kind"] != "objects"}
+    # An explicit background excludes policy operands from task selection. Without
+    # one, preserve the original source geometry rather than inventing an anchor.
+    execution = set(coordinate.get('execution_condition_semantic_ids', conditions))
+    relations = sorted({(s, "used_by", op) for s in subjects if background or selector["scope_kind"] != "objects"}
                        | {(c, "conditions" if c in execution else "context_for", op) for c in conditions})
     identity = content_hash(dict(required_semantics=semantics, required_relations=relations))
     return dict(query_id="context_" + identity, realization_id=content_id("candidate_query_", (identity, feature_id)),

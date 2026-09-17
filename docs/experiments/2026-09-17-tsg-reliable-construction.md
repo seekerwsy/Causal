@@ -345,6 +345,73 @@ ownership of policy-introduced facts and a separately supported applicability
 boundary. More reviewers or weakened preservation gates would not resolve that
 specific limitation. Paper, Pair research and formal study stages are unchanged.
 
+## Candidate-local support and independent comparison background
+
+This implementation round keeps the complete TSG and its construction procedure.
+It moves keep/change judgments to the existing source-reviewed realization of one
+candidate. No operation receives a global owner and no additional construction
+review or provider call is introduced.
+
+An explicit candidate occurrence may now supply `applicability_scope` alongside
+its original policy scope. The same candidate compiler and semantic review freeze
+both. Selection reads the background; positive expression still resolves the policy's
+actual target, subjects, guards and owned order. The background must be source-bound
+and connected to the policy, with independent support explicitly reviewed. The
+program does not choose a surviving endpoint automatically. This optional input is
+currently supplied through full occurrences; the compact model proposer is unchanged.
+
+The existing reviewed variant accepts local `policy_only`, `shared` or `unresolved`
+judgments for named source/variant nodes and edges. Only enabled REMOVE-source or
+ADD-variant operation/object facts may be released or introduced. Ordinary input/output
+edges incident on them require explicit judgments too. Connectivity checks reject
+unrelated exemptions but do not prove ownership. Independent precedence, other
+requirements, shared conditions, background and other assessed coordinates remain
+protected. Root membership follows fact removal/addition deterministically. Relevant
+unknowns block the edit; an unchanged unrelated unknown remains in the graph without
+blocking the whole task. Literal deletion is unchanged and supplies no such permission.
+
+One consolidated authored test specifies an independently required account insertion
+and status return, plus a password-hashing policy that introduces a hash operation,
+digest and hash-before-insert relation. With one frozen candidate catalogue:
+
+- Both complete ADD and REMOVE pass the production reviewed editor and independent
+  result replay; the hash operation/result can appear/disappear while insertion remains.
+- Positive evidence with lost or reversed order is rejected. An unrelated background
+  proposal is rejected and an ambiguous background cannot be selected.
+- Missing local declarations, an unreviewed incident edge, shared support and relevant
+  unresolved support block the change. An unchanged unrelated unknown does not.
+- Independently asserted precedence and another requirement's support cannot be
+  waived. Those mutations use valid updated graph bindings, so rejection tests the
+  preservation boundary rather than a stale identity check.
+- Source graphs are unchanged. The independent verifier also rejects additional
+  target assessment rows, rather than only checking that original rows survive.
+
+These are implementation contrasts with authored graphs, assessments and support
+judgments. They do not measure LLM extraction or ownership accuracy, and do not
+regrade the two historical natural deletions. The new interface resolves the
+mechanical impossibility of a reviewed policy-only fact changing; deciding whether
+that fact is actually policy-only remains a semantic judgment requiring evidence.
+Complex requirements remain represented, and unsupported independent backgrounds
+or differing composite bindings remain explicitly unresolved.
+
+Focused candidate/development checks passed 14 tests. A clean export of tracked
+working-tree files passed the complete **105-test** reviewer suite in **28.95 seconds**,
+including the existing smoke and independent verifier. Only one test function was
+added for the new ownership boundary. Reproduction uses Python 3.12, the existing
+`.tmp/tsg-workflow-review-env/Scripts/python.exe`, clean working directory
+`.tmp/tsg-local-edit-review-clean`, `PYTHONPATH=<clean-export>/src`,
+`PYTHONUTF8=1`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, and `-m pytest -q`.
+The same focused boundary is reproducible with:
+
+```text
+.venv/Scripts/python.exe -m pytest tests/test_candidate_construction.py tests/test_development_itt.py -q
+```
+
+No fresh LLM steps or external API spending occurred. Main remains Atomic-only and
+`SPECIFIED_DRAFT`; no manuscript, protected evaluation, outcome generation or effect
+analysis changed. Fresh source-based attribution and actual natural edit validation
+under these fixed interfaces are still needed before claiming an automatic gain.
+
 ## Reproduction and boundaries
 
 Artifact root: `data/method/tsg-reliable-construction-v1`. Each provider experiment
