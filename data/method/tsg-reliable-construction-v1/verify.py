@@ -1130,4 +1130,5 @@ if __name__ == '__main__':
                           default_candidate_natural=verify_default_candidate_natural(),
                           complete_background_natural=verify_complete_background_natural(),
                           structural_repair_boundary=verify_structural_repair_boundary(),
+                          predicate_binding_api=verify(ROOT/'predicate-binding-api'),
                           scientific_claim_allowed=False), indent=2))

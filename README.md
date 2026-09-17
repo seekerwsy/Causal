@@ -73,7 +73,14 @@ preserve uncertainty while closing dangling dependencies. Authored controls on t
 saved registration records now produce a compilable unknown graph, or preserve the
 hashing order while retracting the uncertain username binding under a newly frozen
 normalized predicate. Both saved privilege graphs retain their structure. No fresh
-model experiment has yet established automatic adherence to this revised contract.
+model improvement was established by those authored controls.
+
+The subsequent [DeepSeek Flash API check](data/method/tsg-reliable-construction-v1/predicate-binding-api/README.md)
+made six fresh calls on registration and privilege tasks. Both graphs compiled after
+one mechanical correction each, but neither followed the predicate/binding separation
+contract. Both model reviews approved every record and source unit; registration also
+omitted the web-application/account-registration requirement. The negative result
+leaves automatic adherence unestablished. Conservative spending was CNY0.178368.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
 the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)
