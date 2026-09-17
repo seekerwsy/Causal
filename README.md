@@ -89,6 +89,17 @@ graphs additionally drove 24 four-arm generations and saved-result verification;
 this component check exposed security-profile false alerts and a functional-judge
 false pass, not a validated Discovery or confirmatory effect.
 
+The subsequent [42-task author-assisted closure](data/method/full-chain-development-v1/README.md)
+now compiles all 42 function-boundary reference graphs and derives 17 requirements
+through the open candidate interface, rather than restricting the pool to those
+four factors. Fifteen meanings are author-accepted; opaque clauses, unresolved
+scope and edit qualification remain explicit. Each candidate has only one
+identified source-positive task, so natural Discovery support is not established.
+One source-derived policy then traverses the existing seven stages with explicitly
+synthetic states and code replies, actual FCI and Oracle execution, and independently
+verified 40-assignment ITT. This closes a development integration gap, not the
+natural-data or automatic-extraction evidence gap.
+
 Automatic TSG quality remains incomplete. The latest two-task
 [DeepSeek thinking check](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
 met a narrow predicate/binding check after repair; the same

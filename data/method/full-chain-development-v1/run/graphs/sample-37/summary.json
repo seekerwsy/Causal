@@ -1,0 +1,1 @@
+{"author_limitations":["The function name verifyJWTToken alone does not specify signature-verification behavior."],"edges":16,"nodes":12,"opaque_requirements":1,"sample_id":"sample-37","task_id":"semantic_cluster_8e54789b760b3403e6332bc0475b6221a985a552481c564a5465edb172e54264","unresolved_source_units":0}

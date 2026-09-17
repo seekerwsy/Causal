@@ -22,7 +22,7 @@ import random
 import sys
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
-from prompt_mechanism_study.reviewer_fixture import load_reviewer_smoke_fixture
+from prompt_mechanism_study.reviewer_fixture import ReviewerSmokeFixture, load_reviewer_smoke_fixture
 from prompt_mechanism_study.measurement import close_target_measurements, measure_generated_code
 from prompt_mechanism_study.target_security_profiles import evaluate_target_security_profile
 from prompt_mechanism_study.inference import (
@@ -487,11 +487,19 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
     return report
 
 
-def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
-    """Traverse the seven target stages once without network calls or claims."""
+def run_target_reviewer_smoke(
+    output: Path, *, inputs: ReviewerSmokeFixture | None = None
+) -> dict[str, object]:
+    """Traverse seven stages without network calls or claims.
+
+    Bounded development may supply an authored fixture with rendered variants;
+    the default reviewer fixture and the non-claim boundary are unchanged.
+    """
     if not isinstance(output, Path):
         raise TypeError("target reviewer smoke output must be a Path")
-    inputs = load_reviewer_smoke_fixture()
+    inputs = load_reviewer_smoke_fixture() if inputs is None else inputs
+    if not isinstance(inputs, ReviewerSmokeFixture):
+        raise TypeError("offline smoke inputs must be a ReviewerSmokeFixture")
     manifest = inputs.manifest
     firewall = validate_data_role_firewall(
         manifest,
@@ -553,7 +561,7 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         FixedSlotSource(
             PolicyTrack.ATOMIC,
             "atomic_full",
-            SMOKE_MODEL_ID,
+            inputs.atomic_plan.model_id,
             inputs.atomic_universe.universe_id,
             atomic.full.slots,
             inputs.atomic_universe.model_bound_records,
@@ -561,7 +569,7 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         FixedSlotSource(
             PolicyTrack.ATOMIC,
             "atomic_rd_only",
-            SMOKE_MODEL_ID,
+            inputs.atomic_plan.model_id,
             inputs.atomic_universe.universe_id,
             atomic.rd_only.slots,
             inputs.atomic_universe.model_bound_records,
@@ -637,7 +645,7 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         index=index,
     )
     measurements = []
-    evaluator = {"model_id": SMOKE_MODEL_ID}
+    evaluator = {"model_id": inputs.atomic_plan.model_id}
     for assignment in assignments:
         prompt = inputs.variant_prompt(
             assignment.policy_key, assignment.task_unit_id, assignment.arm.value

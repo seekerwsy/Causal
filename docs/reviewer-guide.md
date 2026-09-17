@@ -31,6 +31,12 @@ the downstream freezes and ITT, not FCI itself. This run does not establish
 automatic TSG accuracy, evaluator accuracy, FCI qualification, natural support
 or formal statistical power.
 
+An explicit offline fixture can also be supplied to the same smoke function.
+The [42-task development replay](../data/method/full-chain-development-v1/README.md)
+uses this to connect an author-derived candidate to real bound prompt variants,
+FCI and downstream inference. Its natural source-support results and synthetic
+continuation are separate; all simulated results retain the non-claim boundary.
+
 `study development OUTPUT --development-plan PLAN` executes an explicitly
 bounded, authorized Atomic development plan. `study verify-development SAVED_RUN`
 checks saved responses, assignment accounting and descriptive statistics without

@@ -106,16 +106,11 @@ def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
     assert verified["bundle_sha256"] == receipt["result_bundle_sha256"]
 
 
-def test_zero_discoverable_candidates_keep_empty_fixed_slots(tmp_path, monkeypatch) -> None:
-    original = target_workflow.load_reviewer_smoke_fixture
-
-    def unsupported_inputs(*args):
-        inputs = original(*args)
-        return replace(inputs, atomic_plan=replace(inputs.atomic_plan, cross_fit_folds=100))
-
-    monkeypatch.setattr(target_workflow, "load_reviewer_smoke_fixture", unsupported_inputs)
+def test_zero_discoverable_candidates_keep_empty_fixed_slots(tmp_path) -> None:
+    inputs = load_reviewer_smoke_fixture()
+    unsupported = replace(inputs, atomic_plan=replace(inputs.atomic_plan, cross_fit_folds=100))
     output = tmp_path / "zero-candidates"
-    receipt = target_workflow.run_target_reviewer_smoke(output)
+    receipt = target_workflow.run_target_reviewer_smoke(output, inputs=unsupported)
     assert receipt["assignment_count"] == receipt["outcome_count"] == 0
     assert receipt["scientific_claim_allowed"] is False
     assert load_and_verify_target_result_bundle(output)["scientific_claim_allowed"] is False
