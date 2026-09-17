@@ -87,6 +87,15 @@ check is not whole-graph correctness or repeated stability. Each batch made six
 API calls; conservative costs were CNY0.178368 and CNY0.964020 respectively. Thinking
 and resource limits changed together; no isolated thinking effect is established.
 
+The same two tasks were then tested with
+[Qwen3.7-Max thinking on Bailian](data/method/tsg-reliable-construction-v1/predicate-binding-qwen-max-api/README.md).
+Both final graphs compiled, but neither met the same predicate/binding boundary.
+One local patch removed input links and preserved order/conditions, while leaving
+the concrete destination inside an operation definition. Registration's web
+constraint was again omitted. Six calls cost a conservative CNY1.756200. This
+comparison favors the tested DeepSeek configuration on the narrow check; it does
+not establish general model superiority or construction stability.
+
 The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
 the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)
 retains earlier failures and the [candidate guide](docs/tsg-candidate-construction.md)

@@ -1132,4 +1132,5 @@ if __name__ == '__main__':
                           structural_repair_boundary=verify_structural_repair_boundary(),
                           predicate_binding_api=verify(ROOT/'predicate-binding-api'),
                           predicate_binding_thinking_api=verify(ROOT/'predicate-binding-thinking-api'),
+                          predicate_binding_qwen_max_api=verify(ROOT/'predicate-binding-qwen-max-api'),
                           scientific_claim_allowed=False), indent=2))
