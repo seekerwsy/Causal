@@ -453,7 +453,9 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
     graph, source = (task["graph"], task["prompt"])
     nodes = {node["node_id"]: node for node in graph["nodes"]}
     edges = {(edge["source_id"], edge["edge_type"], edge["target_id"]) for edge in graph["edges"]}
-    factors, scopes = (policy["factors"], task["factor_scopes"])
+    factors = policy["factors"] if "factors" in policy else [{**policy, "operation": "add"}]
+    scopes = task["factor_scopes"]
+    controls = task["factor_control_texts"] if "factor_control_texts" in task else [task["control_texts"]]
     flags = (arm == "TARGET",)
     check(len(scopes) == len(factors) == len(flags), "factor coordinates")
     compatibility = task.get("intervention_compatibility", {})
@@ -531,7 +533,7 @@ def _replay_scoped_development_prompt(task, policy, arm, check):
             )
             removals.append((node["evidence_start"], node["evidence_end"]))
             continue
-        text = factor["addition"] if active else task["factor_control_texts"][index][arm]
+        text = factor["addition"] if active else controls[index][arm]
 
         def quote(key):
             return json.dumps(

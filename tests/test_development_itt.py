@@ -84,6 +84,14 @@ def _scoped_synthetic_plan():
 
 def test_exact_scopes_reach_actual_requests_and_independent_verification(tmp_path):
     plan = _scoped_synthetic_plan()
+    wrapped_assignments = prepare_development_assignments(plan)
+    # Both accepted single-factor spellings must retain identical assignments
+    # and pass independent saved-result verification.
+    for policy in plan["policies"]:
+        policy.pop("factors", None)
+    for task in plan["tasks"]:
+        task.pop("factor_control_texts")
+    assert prepare_development_assignments(plan) == wrapped_assignments
     path = tmp_path / "scoped-plan.json"
     path.write_text(json.dumps(plan), encoding="utf-8")
     assignments = prepare_development_assignments(plan)

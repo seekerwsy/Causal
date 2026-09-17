@@ -81,6 +81,14 @@ The actual fold constructor still blocks all three factors for missing natural
 positive states. These reference graphs can now be reused for downstream checks;
 they are not independent gold or automatic extraction results.
 
+A [42-task local-model development run](data/method/local-baseline-screen-v1/README.md)
+now retains 84 baseline generations from seven natural sources, with unsafe-code
+diagnostics kept separate from the complete sample. Source-only support still
+blocks the four fixed factors before natural-data FCI. Three preselected author
+graphs additionally drove 24 four-arm generations and saved-result verification;
+this component check exposed security-profile false alerts and a functional-judge
+false pass, not a validated Discovery or confirmatory effect.
+
 Automatic TSG quality remains incomplete. The latest two-task
 [DeepSeek thinking check](data/method/tsg-reliable-construction-v1/predicate-binding-thinking-api/README.md)
 met a narrow predicate/binding check after repair; the same

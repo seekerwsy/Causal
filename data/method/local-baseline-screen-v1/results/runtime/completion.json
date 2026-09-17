@@ -1,0 +1,1 @@
+{"gpu_index": 0, "other_services_stopped": false, "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:20:58) [GCC 14.3.0]", "service_parent_pid": 2302272, "stop_signal": "SIGTERM to verified own process group", "torch": "2.10.0", "vllm": "0.18.0", "weights_path": "/home/ubuntu/RAID5/data/model_zoo/CodeLLMs/Qwen2.5-Coder-7B-Instruct"}

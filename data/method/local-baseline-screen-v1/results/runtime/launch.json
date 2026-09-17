@@ -1,0 +1,47 @@
+{
+  "pid": 2302272,
+  "argv": [
+    "/home/wsy/miniconda3/envs/purp/bin/python",
+    "-m",
+    "vllm.entrypoints.openai.api_server",
+    "--model",
+    "/home/ubuntu/RAID5/data/model_zoo/CodeLLMs/Qwen2.5-Coder-7B-Instruct",
+    "--served-model-name",
+    "Qwen2.5-Coder-7B-Instruct",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18581",
+    "--tensor-parallel-size",
+    "1",
+    "--dtype",
+    "bfloat16",
+    "--max-model-len",
+    "8192",
+    "--max-num-seqs",
+    "4",
+    "--max-num-batched-tokens",
+    "4096",
+    "--gpu-memory-utilization",
+    "0.24",
+    "--enforce-eager",
+    "--generation-config",
+    "vllm",
+    "--seed",
+    "2026091801"
+  ],
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "0",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "VLLM_CACHE_ROOT": "/home/wsy/work/prompt-mechanism-study/results/local-baseline-screen-v1/runtime/vllm-cache",
+    "VLLM_NO_USAGE_STATS": "1",
+    "DO_NOT_TRACK": "1"
+  },
+  "model_identity": {
+    "config.json": "c0242402ad6a13b331ea320feea8c7e3776ffb7a4eff0757b9cd667e116d9a28",
+    "tokenizer_config.json": "959e7f1d9a1b7641a6d6ce05ca97b75c7894fcb66cbe5a040406458fb1128ee4",
+    "model.safetensors.index.json": "998a078123ffc97763690de7f2a677eb89168af5eaf8a5e12e6bc24d18e25bdb"
+  },
+  "cwd": "/home/wsy/work/prompt-mechanism-study"
+}
