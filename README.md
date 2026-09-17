@@ -57,7 +57,7 @@ the existing reviewer judges the independence and sufficiency of the whole tuple
 Construction still uses one ordinary source review and at most one local semantic
 patch. Component accounting adds no reviewer or scientific stage.
 
-The latest [fresh two-task check](docs/experiments/2026-09-17-tsg-reliable-construction.md#fresh-complete-background-check)
+The [fresh two-task check](docs/experiments/2026-09-17-tsg-reliable-construction.md#fresh-complete-background-check)
 accepted both target candidates and compiled four initial graphs without mechanical
 repair. Privilege lowering passed fresh REMOVE, inverse ADD and independent
 verification while preserving elevation. Registration stopped after its present-arm
@@ -66,6 +66,14 @@ its removed-arm scope was absent, but no paired support or edit ran. The frozen
 both-task gate therefore blocked the conditional follow-up. These 17 fresh Codex
 steps used zero external API calls. The successful directions remain one exposed
 task's edit pair, not general construction stability or a causal/security result.
+
+The subsequent [representation/repair revision](data/method/tsg-reliable-construction-v1/structural-repair-boundary/README.md)
+separates operation predicates from concrete bindings and makes explicit withdrawal
+preserve uncertainty while closing dangling dependencies. Authored controls on the
+saved registration records now produce a compilable unknown graph, or preserve the
+hashing order while retracting the uncertain username binding under a newly frozen
+normalized predicate. Both saved privilege graphs retain their structure. No fresh
+model experiment has yet established automatic adherence to this revised contract.
 
 The [TSG workflow](docs/tsg-workflow-stability.md) describes the active procedure;
 the [experiment report](docs/experiments/2026-09-17-tsg-reliable-construction.md)

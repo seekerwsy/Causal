@@ -21,6 +21,7 @@ def _array(item):
 def record_semantics():
     """One binding contract shared by extraction, review, patch and readback."""
     return dict(
+        operation_predicate='An operation fact names its action predicate, retaining necessary mechanism/API distinctions. record_id and source evidence identify the particular occurrence. Input/result participation, execution guards, non-gating contexts and order are asserted ONLY by their respective structural fields. Do not embed those ground bindings in an open operation definition. The complete operation meaning is the predicate applied to its declared bindings; an empty field never recovers an argument from prose. A supplied frozen definition that already bundles a disputed binding cannot be silently narrowed: replace it only under DEVELOPMENT_OPEN or withdraw it and preserve uncertainty.',
         task_scope='An overall runtime-task contract. The compiler retains the boundary and emits NO per-operation obligation. A narrower source-named function/return/operation should use targets.',
         each_scope='A universal rule over target_class within the task or one named enclosing runtime operation. Known instances are not a complete domain; the compiler never replaces the rule by an extracted instance list.',
         composite_scope='AND/OR/NOT parents express logical composition and shared guards, not an additional target obligation. Every member keeps its own binding and owned relations. Only conjunction asserts members independently.',
@@ -49,6 +50,10 @@ def record_request(inventory):
             "Every top-level record has a unique record_id; references name those IDs, never graph IDs. "
             "Each object is declared once. Its identity must not assert unstated origin or use. "
             "Each operation contains only source-required input/result participants and their own evidence. "
+            "For new operation concepts, write the action predicate separately from its arguments: "
+            "retain exact API or mechanism distinctions, but put concrete participants, execution guards "
+            "and order in the corresponding structural fields, not also in the concept definition. "
+            "Different source occurrences remain different record IDs even when they share a predicate. "
             "Availability, nearby mention or business plausibility does not establish participation. "
             "input_unspecified still asserts definite use. Retain available objects without inventing use. "
             "A required unnamed result is an object; optional implementation temporaries are not. "
@@ -138,6 +143,11 @@ def record_response_format(request):
         props = dict(record_id=dict(type="string", description="Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."), fact=fact)
         condition = groups["conditions"]["items"]
         if group == "operations":
+            if 'concept' in fact['properties']:
+                fact['properties']['concept']['properties']['definition']['description'] = (
+                    'Action predicate with necessary API/mechanism distinctions. Concrete participants, '
+                    'execution conditions and order belong exclusively in their structural fields. '
+                    'Keep distinct source occurrences as distinct record IDs, not compound definitions.')
             props.update(inputs=_array(_object(dict(subject=dict(type="string", description="Exact record_id of an objects entry, e.g. obj_form, never a new name or quotation."),
                 role=dict(type="string", enum=["value_input", "identifier_input", "resource", "destination", "input_unspecified"]), **citation))),
                 results=_array(_object(dict(subject=dict(type="string", description="Exact record_id of an objects entry."), **citation))),
@@ -688,10 +698,12 @@ def structural_readback(request, value):
     return dict(requirements=decoded, record_semantics=record_semantics(),
         objects={r['record_id']:dict(source_anchor=r['fact']['evidence_text']) for r in value['objects']},
         operations={key:dict(source_anchor=row['fact']['evidence_text'],
+            predicate_definition_claim=meaning(row['fact']),
+            interpretation='The predicate names the action. Only the following fields assert its ground participants, guards and independent order; prose cannot supply another binding.',
             execution_guard=guards(row['execution_conditions']) or
                 'NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path',
             non_gating_contexts=guards(row['scope_conditions']),
-            inputs=[dict(subject=r['subject'],role=r['role']) for r in row['inputs']],
+            inputs=[dict(subject=r['subject'],role=r['role'],source_quote=r['evidence_text']) for r in row['inputs']],
             results=[r['subject'] for r in row['results']],precedes=[r['operation'] for r in row['precedes']])
             for key,row in operations.items()},
         empty_field_rule='An empty conditions list supplies no guard. A guard present only in prose is NOT represented. Unresolved source coverage remains unresolved; readback never repairs it.')
@@ -702,12 +714,18 @@ def structural_readback(request, value):
 def review_request(request, value, *, compiled_contract=None):
     check = dict(request_kind="source_only_record_review", source_prompt=request["source_prompt"],
         source_units=request["source_units"], records=value,
+        operation_bindings=structural_readback(request, value)['operations'],
         operation_role_meanings=request['operation_role_meanings'],
         record_semantics=record_semantics(),
         instructions=(
             "Audit every record AND every source unit against the complete original source. The proposal "
             "is fallible. For each record check its full predicate, modality, every participant, target, "
-            "guard and precedence. In particular, availability does not require later use; an expected "
+            "guard and precedence. Availability does not require later use. An operation definition "
+            "must not independently bundle concrete participants, guards or order "
+            "that belong in its fields. operation_bindings is the program's actual field interpretation, "
+            "not a second model summary. If an operation definition itself asserts a disputed binding, "
+            "reject fact as well as that binding; removing its edge alone cannot narrow a frozen meaning. "
+            "Necessary action/API distinctions must remain, and distinct occurrences must not be merged. An expected "
             "input domain does not prescribe rejection; branch-result guards do not gate whole operations. "
             "Check task-wide obligations retain task scope and conditional branches are preserved, "
             "including inside explicitly retained composites. Audit unit_impacts and scope_conditions. "
@@ -759,16 +777,26 @@ def _claims(record):
                                  if isinstance(item, list) else [(key, item)])}
 
 
-def _claim_meaning(field, value):
+def _claim_meaning(field, value, known_concepts=None):
     """A changed citation or provisional label cannot revive the same rejected proposition."""
     if isinstance(value,list):
-        return [_claim_meaning(field,item) for item in value]
+        return [_claim_meaning(field,item,known_concepts) for item in value]
+    if value is None:
+        return None
     if field in {'inputs', 'results', 'precedes', 'relations'}:
         return {k:value[k] for k in ('subject','role','operation','source','edge_type','target') if k in value}
     if field in {'fact','conditions','execution_conditions','scope_conditions'}:
-        concept = value.get('concept')
+        concept = value.get('concept') or (known_concepts or {}).get(value.get('concept_id'))
         return {k:concept[k] for k in ('node_type','definition')} if concept else value.get('concept_id')
     return value
+
+
+def _record_references(row):
+    return ({r['subject'] for k in ('inputs', 'results') for r in row.get(k, [])}
+            | {r['operation'] for r in row.get('precedes', [])}
+            | {r[k] for r in row.get('relations', []) for k in ('source', 'target')}
+            | set(row.get('operations', [])) | set(row.get('subjects', []))
+            | set(row.get('structure', {}).get('members', [])))
 
 
 def repair_request(request, value, review):
@@ -781,21 +809,17 @@ def repair_request(request, value, review):
     if not rejected and not units:
         return None
     editable = set(rejected)
-    def references(row):
-        return ({r["subject"] for k in ("inputs", "results") for r in row.get(k, [])}
-                | {r["operation"] for r in row.get("precedes", [])}
-                | {r[k] for r in row.get('relations', []) for k in ('source', 'target')}
-                | set(row.get("operations", [])) | set(row.get("subjects", []))
-                | set(row.get('structure', {}).get('members', [])))
     # A changed source clause or referenced entity can require local rebinding.
     while True:
-        before = set(editable)
+        before = set(editable), set(units)
         for key, row in rows.items():
             if key in editable:
                 units.update(row["fact"]["source_units"])
-            if set(row["fact"]["source_units"]) & units or references(row) & editable:
+            if set(row["fact"]["source_units"]) & units or _record_references(row) & editable:
                 editable.add(key)
-        if before == editable:
+        units.update(unit for unit, impact in value['unit_impacts'].items()
+                     if set(impact['operations']) & editable)
+        if before == (editable, units):
             break
     return dict(request_kind="source_only_record_patch", source_prompt=request["source_prompt"],
         source_units=request["source_units"], original_records=value, source_review=review,
@@ -805,11 +829,18 @@ def repair_request(request, value, review):
             "for editable_record_ids, newly needed records, explicit delete_record_ids and coverage for "
             "affected_source_units, including their unit_impacts. Preserve IDs for surviving records and all unaffected records byte-for-byte. "
             "Copy unit_impacts unchanged for source units whose review is complete=true; a target correction "
-            "does not authorize narrowing source influence. The program preserves these accepted declarations. "
+            "does not authorize narrowing source influence. The program preserves these accepted declarations, "
+            "except that withdrawal of referenced facts invalidates their coverage and dangling impact references. "
             "Do not re-emit unaffected records. Replacements have the original record schema, including "
             "attached scope/guards/participants. A rejected record cannot survive unchanged. Correct the "
             "specific rejected claim, not just its wording. Newly declared facts must use the supplied "
-            "concept policy. If meaning cannot be resolved, mark affected coverage unresolved. No guessing "
+            "concept policy. Under FROZEN, a rejected compound definition cannot be narrowed merely by "
+            "removing an input or changing layer. If no supported replacement exists, withdraw the record "
+            "using delete_record_ids and also repair or withdraw records that reference it. Never erase "
+            "one operand/condition/member from a supported requirement and silently assert the remainder. "
+            "The program retains withdrawn source coverage as unresolved, not absent, and invalidates "
+            "impacts that still name a removed operation. layer denotes generation/runtime, not truth status. "
+            "If meaning cannot be resolved, mark affected coverage unresolved. No guessing "
             "or broad reconstruction. The program merges the patch and deterministically recompiles."),
         concept_policy=request["concept_policy"], known_concepts=request["known_concepts"],
         operation_role_meanings=request['operation_role_meanings'],
@@ -844,10 +875,11 @@ def apply_record_patch(value, patch, *, request, original_request):
         if key not in deleted:
             for claim in request["source_review"]["records"][key]["rejected_claims"]:
                 field = claim.split(".")[0]
-                rejected = _claim_meaning(field, _claims(old[key])[claim])
+                known = original_request['known_concepts']
+                rejected = _claim_meaning(field, _claims(old[key])[claim], known)
                 current = changes[key].get(field)
-                if (rejected in [_claim_meaning(field, v) for v in current] if '.' in claim and isinstance(current, list)
-                    else rejected == _claim_meaning(field, current)):
+                if (rejected in [_claim_meaning(field, v, known) for v in current] if '.' in claim and isinstance(current, list)
+                    else rejected == _claim_meaning(field, current, known)):
                     raise Error(f"patch repeats rejected claim {key}.{claim}")
     result = deepcopy(value)
     for group in ("objects", "operations", "requirements"):
@@ -861,6 +893,26 @@ def apply_record_patch(value, patch, *, request, original_request):
     # review. Only a rejected/incomplete source unit authorizes impact changes.
     result['unit_impacts'].update({key:impact for key,impact in patch['unit_impacts'].items()
         if not request['source_review']['source_units'][key]['complete']})
+    # Retraction does not certify that source content was absent. Keep its
+    # uncertainty, including previously accepted units depending on removed facts.
+    surviving = {r['record_id']: r for r in _records(result)}
+    dangling = {key for row in surviving.values() for key in _record_references(row) if key not in surviving}
+    if dangling:
+        raise Error('patch withdrawal leaves dangling record references: ' + ', '.join(sorted(dangling)))
+    withdrawn_units = {unit for key in deleted for unit in old[key]['fact']['source_units']}
+    withdrawn_units.update(unit for unit, impact in value['unit_impacts'].items()
+                           if set(impact['operations']) & deleted)
+    runtime = {r['record_id'] for r in result['operations'] if r['fact']['layer'] == 'runtime'}
+    for unit in sorted(withdrawn_units):
+        result['coverage'][unit] = dict(status='unresolved',
+            reason='A source assertion or dependency was withdrawn; the source meaning remains unresolved.')
+        # Keep valid old locality as a lower bound. A missing operation cannot
+        # silently disappear from a formerly complete dependency declaration.
+        impact = deepcopy(value['unit_impacts'][unit])
+        if set(impact['operations']) - runtime:
+            impact.update(effect='unresolved', operations=[],
+                reason='A withdrawn operation invalidated the previous source influence declaration.')
+        result['unit_impacts'][unit] = impact
     # Notes cannot erase unresolved coverage; compilation checks that independently.
     result["unresolved_notes"] = list(dict.fromkeys([*value["unresolved_notes"], *patch["unresolved_notes"]]))
     return result

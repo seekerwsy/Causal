@@ -90,6 +90,9 @@ A valid endpoint or declaration alone does not prove
 an independently required action. Cite the exact source text that supports the selected background
 without relying on the target policy, and explain why that text requires this actual coordinate.
 Check the chosen operation_ref itself: a rationale naming a different operation cannot justify it.
+Omitting an input does not narrow the operation's definition. If that definition itself contains a
+disputed participant, guard or order, leave the affected requirement unresolved for development
+source repair; this candidate response cannot rewrite it or reinterpret a frozen concept.
 Account for the operation, EVERY source used_by input to it and EVERY source execution condition in
 component_decisions. For task.root, account for the original binding's subject refs instead of
 inventing root inputs. Each component has its own source quotation and rationale; a source sentence
@@ -953,6 +956,8 @@ def _candidate_catalog(contracts, proposal, design, review):
     fixed = _fixed_template_concepts() if "python" in design["language_scope"] else {}
     definitions = {**proposal["source_definitions"], **{k: v["definition"] for k, v in fixed.items()},
                    **{f["feature_id"]: f["definition"] for f in accepted}}
+    # Action predicates and ground bindings must already be separated in the
+    # development source records. Freezing must not silently rewrite their meaning.
     # Derived factors are source-grounded decompositions, not additional facts
     # retroactively asserted in input graphs. New scopes need fresh extraction.
     catalog = freeze_open_concepts(tuple(contracts), normalization_map=proposal["normalization_map"],

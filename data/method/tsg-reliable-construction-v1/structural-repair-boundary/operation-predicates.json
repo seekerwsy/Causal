@@ -1,0 +1,5 @@
+{
+  "op_take_credentials": "Collect supplied registration data.",
+  "op_hash_password": "Compute a cryptographic hash.",
+  "op_insert_credentials": "Perform a database insertion."
+}

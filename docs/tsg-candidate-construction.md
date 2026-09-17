@@ -126,7 +126,14 @@ remain on `codex/pair-interaction-research`; old Pair bundles are not main input
 
 The accepted definitions enter `prompt_contract.freeze_open_concepts`; source
 concepts and derived factor concepts retain separate provenance. The programme
-generates both ADD and REMOVE `AtomicPolicyKey` records for each accepted factor.
+freezes the supplied source meanings without rewriting them. Operation predicates
+must first be separated from ground participants, guards and order during exposed
+source development. Omitting a candidate input cannot narrow an operation definition
+that still asserts that participant; a disputed bundled definition remains unresolved
+until source repair and a new development freeze. Existing frozen catalogs and
+research-factor meanings are never silently reinterpreted.
+
+The programme generates both ADD and REMOVE `AtomicPolicyKey` records for each accepted factor.
 Development exemplars can all express the requirement: the builder does not claim
 that any other task lacks it or that either operation has natural support.
 

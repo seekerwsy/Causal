@@ -1,0 +1,33 @@
+{
+  "status": "FIXED_BEFORE_VALIDATION",
+  "purpose": "Check the representation/repair contract, not automatic extraction accuracy.",
+  "baseline_commit": "21d925111aee50d05a854808edc5f76767f72059",
+  "boundary": "Already exposed registration and privilege source records plus authored structural controls; no new natural tasks, protected inputs, code outcomes, paper or Pair changes.",
+  "cases": [
+    "Exact saved registration layer-only patch remains rejected.",
+    "Explicit withdrawal preserves unknown and closes requirement/impact dependencies.",
+    "An unaffected privilege pair remains mechanically usable.",
+    "Operation predicate remains identical when participant/guard/independent-order fields change; decoded bindings and graph relations change.",
+    "A normalized open operation can be frozen and its input corrected without changing the predicate or frozen research meaning."
+  ],
+  "acceptance": "All mechanical and preservation invariants pass. Unresolved source interpretations may remain blocked; no requirement that the registration candidate becomes usable.",
+  "fresh_model_calls": 0,
+  "external_provider_calls": 0,
+  "semantic_judgments": "Authored diagnostic controls; no new independent model/human gold judgments.",
+  "tests": "Extend existing representation invariant tests without increasing the default case count; focused checks followed by one clean full reviewer-suite run.",
+  "implementation_scope": "Existing source record compiler/review/patch path only; same call limits and source schema. Frozen prior artifacts retain their exact original source.",
+  "source_identities": {
+    "complete-background-natural/registration/inputs/task.json": "eaf120fcf882aa2aa8002629296c08d94e3af9a99c5055f69c3129f53a16b330",
+    "complete-background-natural/registration/frozen-catalog.json": "6840f80078f71ac5a7c94a7a59e473136b5f468e2f7afb950447d8fc18aeb1e6",
+    "complete-background-natural/registration/present/calls/01/response.json": "8c43f6b2518dc13d1c9b6995edc37862340e4f518f5f32dbd473078afe19e7fa",
+    "complete-background-natural/registration/present/calls/02/response.json": "65efa84c5f05631644bc50c6b0faab003ee96dd1748668d6ad6e09e3e6490da4",
+    "complete-background-natural/registration/present/calls/03/response.json": "9fdcc899bdc722a61d7f9050ab7b865e8bcabefd5a2ba5d9cb270eb0e2d57475",
+    "complete-background-natural/privilege_order/frozen-catalog.json": "79476b282f8448dcffafea3d53cbb56c25e6974ce36d38ce830b1041b69fd27e",
+    "complete-background-natural/privilege_order/present/task.json": "40636d829283fee22dba76ef0be935841f38fb7f0d3916d7c0e3edf11e273ad9",
+    "complete-background-natural/privilege_order/present/calls/01/response.json": "e5b3afa773718bbe6cfaed80d02793440ecf4e41fb1dc96a1f8411749d7c6f7e",
+    "complete-background-natural/privilege_order/present/result.json": "281e57877e2083e8d34a5f0f0d15bf951c11633471cae91a985f0761ca7752d5",
+    "complete-background-natural/privilege_order/removed/task.json": "d9672470e5056aababf2e0d18a2ddfc7b82ebdcaca4c7ef74a2fbf4056ca62c1",
+    "complete-background-natural/privilege_order/removed/calls/01/response.json": "43904460b433a6a399c88928895237bea8e97f16633ddc832c49e5ccaca4f6e8",
+    "complete-background-natural/privilege_order/removed/result.json": "0caab21989ba8ffadc9b533c0673ad2e022443c84de597371e9965b66fe0bd3b"
+  }
+}

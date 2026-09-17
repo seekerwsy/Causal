@@ -1,0 +1,13 @@
+{
+  "automatic_semantic_improvement_established": false,
+  "external_provider_calls": 0,
+  "fresh_model_calls": 0,
+  "frozen_meanings_unchanged": true,
+  "normalized_participant_repair_preserves_hash_order": true,
+  "old_layer_only_patch_rejected": true,
+  "privilege_graphs_preserved": 2,
+  "scientific_claim_allowed": false,
+  "status": "PASSED_AUTHORED_BOUNDARY_CHECK",
+  "withdrawn_candidate_scopes": 0,
+  "withdrawn_graph_compiles_with_unknown": true
+}

@@ -912,6 +912,9 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     assert 'NO per-operation obligation' in check['record_semantics']['task_scope']
     from prompt_mechanism_study.source_records import structural_readback, review_response_format
     assert structural_readback(request,records)['operations']['q']['execution_guard'].startswith('NO DECLARED EXECUTION GUARD:')
+    operation_reading = structural_readback(request, records)['operations']['q']
+    assert operation_reading['predicate_definition_claim'] == 'Execute the source SQL query.'
+    assert check['operation_bindings']['q'] == operation_reading
     readback=structural_readback(request,records)['requirements']['binding']
     assert readback['direct_operation_bindings'][0]['target_operation']=='q'
     assert readback['requirement_guards'][0]['predicate']=='The request is external.'
@@ -960,6 +963,41 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     patch['operations'][0]['inputs'] = []
     merged = apply_record_patch(records, patch, request=repair, original_request=request)
     assert merged['objects'] == records['objects'] and merged['requirements'] == records['requirements']
+    # Freeze a normalized action predicate, then vary its bindings without
+    # reinterpreting that immutable predicate or the research requirements.
+    from prompt_mechanism_study.prompt_contract import freeze_open_concepts, catalog_sha256
+    base_contract = compile_records(records, request=request, task=task, catalog=catalog,
+        annotator_id='authored-normalized-operation', review_status='development_exposed')
+    frozen = freeze_open_concepts((base_contract,), normalization_map={},
+        definitions=base_contract.catalog['semantic_guidance'], queries=[])
+    frozen_identity = catalog_sha256(frozen)
+    frozen_request = record_request(contract_decision_request(task, frozen))
+    by_meaning = {(frozen['semantics'][k], d): k for k,d in frozen['semantic_guidance'].items()}
+    def frozen_facts(value):
+        if isinstance(value, list):
+            return [frozen_facts(v) for v in value]
+        if not isinstance(value, dict):
+            return value
+        row = {k:frozen_facts(v) for k,v in value.items() if k != 'concept'}
+        if 'concept' in value:
+            c = value['concept']
+            row['concept_id'] = by_meaning[c['node_type'], c['definition']]
+        return row
+    frozen_records = frozen_facts(records)
+    altered = deepcopy(frozen_records)
+    altered['operations'][0]['inputs'] = []
+    altered['operations'][0]['execution_conditions'] = deepcopy(altered['requirements'][0]['conditions'])
+    frozen_contracts = [compile_records(v, request=frozen_request, task=task, catalog=frozen,
+        annotator_id='authored-binding-control', review_status='development_exposed') for v in (frozen_records, altered)]
+    readings = [structural_readback(frozen_request,v)['operations']['q'] for v in (frozen_records,altered)]
+    assert readings[0]['predicate_definition_claim'] == readings[1]['predicate_definition_claim']
+    assert readings[0]['inputs'] and not readings[1]['inputs']
+    assert readings[0]['execution_guard'] != readings[1]['execution_guard']
+    assert sum(e['edge_type']=='used_by' for e in frozen_contracts[0].relations) == 1
+    assert not any(e['edge_type']=='used_by' for e in frozen_contracts[1].relations)
+    assert catalog_sha256(frozen) == frozen_identity
+    assert ([f for f in frozen_contracts[0].facts if f['node_type']=='safety_requirement'] ==
+            [f for f in frozen_contracts[1].facts if f['node_type']=='safety_requirement'])
     # Preserve composition and inherited guards at construction; only conjunction
     # entails its declared leaves. This is a synthetic logic boundary, not accuracy.
     from prompt_mechanism_study.prompt_contract import compile_task_context_contract
@@ -1091,7 +1129,8 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     from copy import deepcopy
     from dataclasses import replace
     from annotation_fixture import record_annotation
-    from prompt_mechanism_study.source_records import record_request, compile_records, structural_readback, review_request
+    from prompt_mechanism_study.source_records import (
+        record_request, compile_records, structural_readback, review_request, repair_request, apply_record_patch)
     from prompt_mechanism_study.prompt_contract import compile_task_context_contract
     from prompt_mechanism_study.prompt_tsg import (
         graph_requirement_membership, requirement_binding, requirement_matches_policy,
@@ -1157,6 +1196,35 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     readback = structural_readback(request, records)['requirements']['order']
     assert [r['target_operation'] for r in readback['direct_operation_bindings']] == ['prepare']
     assert readback['owned_relations'][0]['target'] == 'publish'
+    # Retraction must close both semantic references and source influence;
+    # the supported sibling requirement survives without becoming unguarded.
+    retract = deepcopy(records)
+    retract['unit_impacts'][unit]['operations'] = ['prepare', 'publish']
+    review = record_annotation(review_request(request, retract), canonical)
+    review['records']['publish'].update(status='unresolved', rejected_claims=['fact'])
+    repair = repair_request(request, retract, review)
+    patch = dict(objects=[], operations=[], requirements=[], delete_record_ids=['publish'],
+        coverage={u:deepcopy(retract['coverage'][u]) for u in repair['affected_source_units']},
+        unit_impacts={u:deepcopy(retract['unit_impacts'][u]) for u in repair['affected_source_units']},
+        unresolved_notes=[])
+    with pytest.raises(PromptContractExtractionError, match='dangling record references'):
+        apply_record_patch(retract, patch, request=repair, original_request=request)
+    patch['delete_record_ids'].append('order')
+    withdrawn = apply_record_patch(retract, patch, request=repair, original_request=request)
+    assert withdrawn['coverage'][unit]['status'] == 'unresolved'
+    assert withdrawn['unit_impacts'][unit]['effect'] == 'unresolved'
+    assert withdrawn['unit_impacts'][unit]['operations'] == []
+    assert withdrawn['requirements'] == [retract['requirements'][1]]
+    withdrawn_contract, withdrawn_graph = compile_value(withdrawn)
+    assert not withdrawn_graph.requirement_relations
+    assert not withdrawn_contract.source_inventory['unit_impacts'][unit]['complete']
+    # The same predicate text cannot hide a changed order binding.
+    reverse = deepcopy(records)
+    reverse['requirements'][0]['relations'][0].update(source='publish', target='prepare')
+    reverse_contract, reverse_graph = compile_value(reverse)
+    assert reverse['requirements'][0]['fact'] == records['requirements'][0]['fact']
+    assert structural_readback(request, reverse)['requirements']['order']['owned_relations'][0]['source'] == 'publish'
+    assert reverse_graph.requirement_relations[0] == (owned, publish, relation, prepare)
 
     source = candidate_request([task], [contract], input_catalog=catalog)['sources'][0]
     # Keep source semantic IDs for this low-level projection check; normalization

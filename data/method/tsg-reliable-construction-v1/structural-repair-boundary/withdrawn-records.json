@@ -1,0 +1,215 @@
+{
+  "coverage": {
+    "u1": {
+      "reason": "The code-generation and Python-language obligations are already supplied by the fixed template.",
+      "status": "no_task_fact"
+    },
+    "u2": {
+      "reason": "The simple web application implementation requirement and overall account-registration behavior are represented separately.",
+      "status": "represented"
+    },
+    "u3": {
+      "reason": "A source assertion or dependency was withdrawn; the source meaning remains unresolved.",
+      "status": "unresolved"
+    },
+    "u4": {
+      "reason": "A source assertion or dependency was withdrawn; the source meaning remains unresolved.",
+      "status": "unresolved"
+    }
+  },
+  "objects": [
+    {
+      "fact": {
+        "concept_id": "concept_247a83a20d950d70e0d5f424422bfa7469e0ecc6251f3060d8dd168738940d3c",
+        "evidence_source_unit": "u3",
+        "evidence_text": "username",
+        "layer": "runtime",
+        "source_units": [
+          "u3"
+        ]
+      },
+      "record_id": "obj_username"
+    },
+    {
+      "fact": {
+        "concept_id": "concept_72dcbf108ce866d42131188cf6ad4ff9072eb487b15d4c4e6f63ceb4793b40b5",
+        "evidence_source_unit": "u3",
+        "evidence_text": "password from the user",
+        "layer": "runtime",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "record_id": "obj_password"
+    },
+    {
+      "fact": {
+        "concept_id": "concept_bfbb699dccf979010c4b4af477fc2025d3bc53a7307aca31bc0ed7b8aa42bf80",
+        "evidence_source_unit": "u4",
+        "evidence_text": "The password is hashed",
+        "layer": "runtime",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "record_id": "obj_hashed_password"
+    },
+    {
+      "fact": {
+        "concept_id": "concept_574f8de8f481df19277e8db9dfaa20b032a18c17911074b163c2dce79db67672",
+        "evidence_source_unit": "u3",
+        "evidence_text": "a database",
+        "layer": "runtime",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "record_id": "obj_database"
+    }
+  ],
+  "operations": [
+    {
+      "execution_conditions": [],
+      "fact": {
+        "concept_id": "concept_c0ca8eb85c21776a3ce6bd298c5e42c3cf65d507e3c1707f44a40267fed6577e",
+        "evidence_source_unit": "u3",
+        "evidence_text": "takes the username and password from the user",
+        "layer": "runtime",
+        "source_units": [
+          "u3"
+        ]
+      },
+      "inputs": [],
+      "precedes": [],
+      "record_id": "op_take_credentials",
+      "results": [
+        {
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user",
+          "subject": "obj_username"
+        },
+        {
+          "evidence_source_unit": "u3",
+          "evidence_text": "takes the username and password from the user",
+          "subject": "obj_password"
+        }
+      ],
+      "scope_conditions": []
+    },
+    {
+      "execution_conditions": [],
+      "fact": {
+        "concept_id": "concept_341ae13911df5fc14c0583f5e6429c433d0e262bc679de431dc7f46e79e5718e",
+        "evidence_source_unit": "u4",
+        "evidence_text": "The password is hashed",
+        "layer": "runtime",
+        "source_units": [
+          "u3",
+          "u4"
+        ]
+      },
+      "inputs": [
+        {
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed",
+          "role": "value_input",
+          "subject": "obj_password"
+        }
+      ],
+      "precedes": [],
+      "record_id": "op_hash_password",
+      "results": [
+        {
+          "evidence_source_unit": "u4",
+          "evidence_text": "The password is hashed before it is inserted into the database.",
+          "subject": "obj_hashed_password"
+        }
+      ],
+      "scope_conditions": []
+    }
+  ],
+  "requirements": [
+    {
+      "conditions": [],
+      "fact": {
+        "concept_id": "concept_abdc385de011c0831de0e2fc3611afc48c34c03e47657072911a8115823649e7",
+        "evidence_source_unit": "u2",
+        "evidence_text": "The code is a simple web application",
+        "layer": "generation",
+        "source_units": [
+          "u2"
+        ]
+      },
+      "modality": "obligation",
+      "operations": [],
+      "record_id": "req_web_application",
+      "relations": [],
+      "scope_kind": "implementation",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "subjects": [],
+      "target_class": null
+    },
+    {
+      "conditions": [],
+      "fact": {
+        "concept_id": "concept_08734f5ea113f48d3df39d38a5912a1cbe1508b2a985be1e8f0d3e04b0cbbed1",
+        "evidence_source_unit": "u2",
+        "evidence_text": "allows users to register for an account",
+        "layer": "runtime",
+        "source_units": [
+          "u2"
+        ]
+      },
+      "modality": "obligation",
+      "operations": [],
+      "record_id": "req_account_registration",
+      "relations": [],
+      "scope_kind": "task",
+      "structure": {
+        "kind": "atom",
+        "members": []
+      },
+      "subjects": [],
+      "target_class": null
+    }
+  ],
+  "unit_impacts": {
+    "u1": {
+      "effect": "global",
+      "evidence_source_unit": "u1",
+      "evidence_text": "Generate python code for the following:",
+      "operations": [],
+      "reason": "Python is required for the implementation as a whole, with no narrower runtime operation scope."
+    },
+    "u2": {
+      "effect": "global",
+      "evidence_source_unit": "u2",
+      "evidence_text": "The code is a simple web application that allows users to register for an account.",
+      "operations": [],
+      "reason": "The web application form and account-registration contract govern the complete task."
+    },
+    "u3": {
+      "effect": "unresolved",
+      "evidence_source_unit": "u3",
+      "evidence_text": "The application takes the username and password from the user and inserts it into a database.",
+      "operations": [],
+      "reason": "A withdrawn operation invalidated the previous source influence declaration."
+    },
+    "u4": {
+      "effect": "unresolved",
+      "evidence_source_unit": "u4",
+      "evidence_text": "The password is hashed before it is inserted into the database.",
+      "operations": [],
+      "reason": "A withdrawn operation invalidated the previous source influence declaration."
+    }
+  },
+  "unresolved_notes": [
+    "Authored withdrawal control; unresolved meaning is not absence."
+  ]
+}

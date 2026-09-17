@@ -939,6 +939,146 @@ def verify_complete_background_natural():
     return outputs
 
 
+def verify_structural_repair_boundary(prepare=False):
+    """Authored controls over exposed records; no new model/source judgment."""
+    from copy import deepcopy
+    from prompt_mechanism_study.source_records import (
+        record_request, compile_records, repair_request, apply_record_patch, structural_readback)
+    from prompt_mechanism_study.prompt_contract import (
+        open_concept_catalog, freeze_open_concepts, compile_task_context_contract)
+    from prompt_mechanism_study.prompt_contract_extract import (
+        contract_decision_request, PromptContractExtractionError, fixed_scope_request)
+    from prompt_mechanism_study.prompt_tsg import catalog_sha256
+    from prompt_mechanism_study.records import canonical_value
+
+    base = ROOT/'structural-repair-boundary'
+    source = ROOT/'complete-background-natural'
+    read = lambda p: json.loads(p.read_text(encoding='utf-8'))
+    plan = read(base/'plan.json')
+    for name, digest in plan['source_identities'].items():
+        assert hashlib.sha256((ROOT/name).read_bytes()).hexdigest() == digest, name
+    case = source/'registration'
+    task, old_catalog = read(case/'inputs/task.json'), read(case/'frozen-catalog.json')
+    original = read(case/'present/calls/01/response.json')
+    reviewed = read(case/'present/calls/02/response.json')
+    request = record_request(contract_decision_request(task, old_catalog))
+    repair = repair_request(request, original, reviewed)
+    try:
+        apply_record_patch(original, read(case/'present/calls/03/response.json'),
+                           request=repair, original_request=request)
+    except PromptContractExtractionError as error:
+        assert str(error) == 'patch repeats rejected claim op_insert_credentials.fact'
+    else:
+        raise AssertionError('The old layer-only patch must remain rejected')
+
+    patch = dict(objects=[], operations=[], requirements=[],
+        delete_record_ids=['op_insert_credentials', 'req_hash_before_insertion'],
+        coverage={k:deepcopy(original['coverage'][k]) for k in repair['affected_source_units']},
+        unit_impacts={k:deepcopy(original['unit_impacts'][k]) for k in repair['affected_source_units']},
+        unresolved_notes=['Authored withdrawal control; unresolved meaning is not absence.'])
+    withdrawn = apply_record_patch(original, patch, request=repair, original_request=request)
+    def compile_value(value, req, catalog):
+        return compile_records(value, request=req, task=task, catalog=catalog,
+            annotator_id='authored-structural-boundary-control', review_status='development_exposed')
+    withdrawn_contract = compile_value(withdrawn, request, old_catalog)
+    assert not withdrawn_contract.source_inventory.get('requirement_relations')
+    assert all(withdrawn['coverage'][u]['status'] == 'unresolved' for u in ('u3', 'u4'))
+    assert all(withdrawn['unit_impacts'][u]['effect'] == 'unresolved' for u in ('u3', 'u4'))
+    assert withdrawn['requirements'] == original['requirements'][:2]
+    assert not fixed_scope_request(withdrawn_contract, prompt=task['prompt'], catalog=old_catalog)['scopes']
+
+    # A new development representation, never an in-place rewrite of the old
+    # frozen meaning. These action definitions are explicitly author-supplied.
+    definitions = read(base/'operation-predicates.json')
+    def open_facts(value):
+        if isinstance(value, list): return [open_facts(v) for v in value]
+        if not isinstance(value, dict): return value
+        row = {k:open_facts(v) for k,v in value.items() if k != 'concept_id'}
+        if 'concept_id' in value:
+            c = request['known_concepts'][value['concept_id']]
+            row['concept'] = dict(concept_id=value['concept_id'], node_type=c['node_type'], definition=c['definition'])
+        return row
+    normalized = open_facts(original)
+    for row in normalized['operations']:
+        row['fact']['concept']['definition'] = definitions[row['record_id']]
+    open_catalog = open_concept_catalog()
+    open_request = record_request(contract_decision_request(task, open_catalog))
+    contract = compile_value(normalized, open_request, open_catalog)
+    frozen = freeze_open_concepts((contract,), normalization_map={},
+        definitions=contract.catalog['semantic_guidance'], queries=[])
+    identity = catalog_sha256(frozen)
+    meanings = {(frozen['semantics'][key], meaning):key for key,meaning in frozen['semantic_guidance'].items()}
+    def frozen_facts(value):
+        if isinstance(value, list): return [frozen_facts(v) for v in value]
+        if not isinstance(value, dict): return value
+        row = {k:frozen_facts(v) for k,v in value.items() if k != 'concept'}
+        if 'concept' in value:
+            c = value['concept']; row['concept_id'] = meanings[c['node_type'], c['definition']]
+        return row
+    normalized = frozen_facts(normalized)
+    normalized_request = record_request(contract_decision_request(task, frozen))
+    # Authored field counterfactual only: adding independent order is not a new
+    # source judgment that the policy-owned order is independent context.
+    unowned = deepcopy(normalized)
+    order = unowned['requirements'].pop()['relations'][0]
+    independent = deepcopy(unowned)
+    operation = next(r for r in independent['operations'] if r['record_id'] == order['source'])
+    operation['precedes'] = [dict(operation=order['target'],
+        evidence_source_unit=order['evidence_source_unit'], evidence_text=order['evidence_text'])]
+    readings = [structural_readback(normalized_request, v)['operations'][order['source']]
+                for v in (unowned, independent)]
+    assert readings[0]['predicate_definition_claim'] == readings[1]['predicate_definition_claim']
+    assert not readings[0]['precedes'] and readings[1]['precedes'] == [order['target']]
+    assert [sum(e['edge_type'] == 'precedes' for e in compile_value(v, normalized_request, frozen).relations)
+            for v in (unowned, independent)] == [0, 1]
+    # Authored local uncertainty: no new claim that either interpretation of
+    # "it" is the gold reading. Only the explicit username binding is withdrawn.
+    local_review = deepcopy(reviewed)
+    local_review['records']['op_insert_credentials'].update(
+        rejected_claims=['inputs.0'],
+        reason='Authored control: the normalized predicate is retained; username participation remains unresolved.')
+    local_repair = repair_request(normalized_request, normalized, local_review)
+    insert = deepcopy(next(r for r in normalized['operations'] if r['record_id']=='op_insert_credentials'))
+    insert['inputs'] = [r for r in insert['inputs'] if r['subject']!='obj_username']
+    local_patch = dict(objects=[], operations=[insert], requirements=[], delete_record_ids=[],
+        coverage={k:dict(status='unresolved', reason='Authored unresolved username participation.') for k in local_repair['affected_source_units']},
+        unit_impacts={k:deepcopy(normalized['unit_impacts'][k]) for k in local_repair['affected_source_units']}, unresolved_notes=[])
+    repaired = apply_record_patch(normalized, local_patch, request=local_repair, original_request=normalized_request)
+    repaired_contract = compile_value(repaired, normalized_request, frozen)
+    assert catalog_sha256(frozen) == identity
+    assert repaired['requirements'] == normalized['requirements']
+    assert repaired_contract.source_inventory['requirement_relations']
+    before, after = [structural_readback(normalized_request,v)['operations']['op_insert_credentials'] for v in (normalized,repaired)]
+    assert before['predicate_definition_claim'] == after['predicate_definition_claim']
+    assert len(before['inputs']) == len(after['inputs']) + 1
+    assert repaired['coverage']['u3']['status'] == 'unresolved'
+
+    for arm in ('present', 'removed'):
+        case = source/'privilege_order'
+        arm_task, catalog = read(case/arm/'task.json'), read(case/'frozen-catalog.json')
+        req = record_request(contract_decision_request(arm_task, catalog))
+        kept = compile_records(read(case/arm/'calls/01/response.json'), request=req, task=arm_task,
+            catalog=catalog, annotator_id='authored-preservation-control', review_status='development_exposed')
+        graph = compile_task_context_contract(kept, prompt=arm_task['prompt'], catalog=catalog)
+        saved = read(case/arm/'result.json')['graph']
+        for field in ('nodes', 'edges', 'requirement_relations', 'requirement_structures', 'requirement_scopes'):
+            assert canonical_value(getattr(graph,field)) == saved.get(field, []), (arm,field)
+    result = dict(status='PASSED_AUTHORED_BOUNDARY_CHECK', old_layer_only_patch_rejected=True,
+        withdrawn_graph_compiles_with_unknown=True, withdrawn_candidate_scopes=0,
+        normalized_participant_repair_preserves_hash_order=True, frozen_meanings_unchanged=True,
+        privilege_graphs_preserved=2, fresh_model_calls=0, external_provider_calls=0,
+        automatic_semantic_improvement_established=False, scientific_claim_allowed=False)
+    outputs = {'withdrawn-records.json':withdrawn, 'normalized-records.json':normalized,
+        'normalized-repaired-records.json':repaired, 'frozen-catalog.json':frozen, 'summary.json':result}
+    for name,value in outputs.items():
+        path = base/name
+        if prepare and not path.exists():
+            path.write_text(json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+        else:
+            assert read(path) == value, path
+    return result
+
+
 def _verify_natural_round(base, replays):
     read = lambda path: json.loads(path.read_text(encoding='utf-8'))
     for name, digest in read(base/'analysis/input-output-identities.json').items():
@@ -989,4 +1129,5 @@ if __name__ == '__main__':
                           candidate_local_natural=verify_candidate_local_natural(),
                           default_candidate_natural=verify_default_candidate_natural(),
                           complete_background_natural=verify_complete_background_natural(),
+                          structural_repair_boundary=verify_structural_repair_boundary(),
                           scientific_claim_allowed=False), indent=2))

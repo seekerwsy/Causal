@@ -45,8 +45,17 @@ agent workflow executes, but reliable semantic repair is not established.
    files. Generation must use the corresponding input. Recognized fixed system
    requirements are compiled once.
 2. **Extract complete records.** Objects are declared once. Operations contain their
-   required participants, roles, results and explicit execution guards. Each atomic
-   requirement contains its complete predicate, modality, targets and conditions.
+   required participants, roles, results and explicit execution guards. An operation
+   definition names the action predicate with necessary API/mechanism distinctions;
+   its source anchor and record ID distinguish occurrences. Concrete input/result
+   bindings, execution conditions and order belong in their structural fields.
+   The program's operation readback composes those fields with the predicate;
+   omitted arguments cannot be restored from description text. The existing source
+   review checks this discipline; string validation does not certify it. New
+   definitions are normalized during exposed development before freezing. A frozen
+   compound definition keeps its original meaning: deleting a participant edge
+   cannot narrow it. Research-factor definitions and scope rules remain fixed.
+   Each atomic requirement contains its complete predicate, modality, targets and conditions.
    Composite records preserve and/or/compound-not/opaque member structure. Only
    asserted complete requirements can support independent factors; conjunction carries
    its shared guards to members, while alternative/negated members stay non-independent.
@@ -123,8 +132,13 @@ agent workflow executes, but reliable semantic repair is not established.
    source units. Unaffected records are preserved by the program. The same rejected
    claim under a surviving record ID cannot survive merely by changing its citation,
    provisional concept label, another field or list position.
-   The merge preserves `unit_impacts` for source units already reviewed complete;
-   only incomplete/rejected source units authorize changing their influence scope.
+   The merge preserves `unit_impacts` for source units already reviewed complete.
+   Explicit record withdrawal is the narrow exception: affected coverage becomes
+   unresolved, and impacts naming a removed operation become unresolved with no
+   dangling operation IDs. Valid prior locality is retained as a lower bound.
+   Withdrawal also requires repairing or withdrawing dependent records; a remaining
+   reference to a deleted record is rejected. The program never silently trims an
+   accepted requirement's operand or treats withdrawn meaning as absent.
    No second critic or unlimited retries are added. Broad source units can still make
    the permitted repair region large. Changed wording is not mechanically certified
    equivalent; delete/recreate equivalence is not certified, and the model's positive

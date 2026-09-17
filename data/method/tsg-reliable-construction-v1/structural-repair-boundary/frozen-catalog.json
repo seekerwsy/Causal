@@ -1,0 +1,188 @@
+{
+  "allowed_edges": [
+    [
+      "task",
+      "contains",
+      "data_object"
+    ],
+    [
+      "task",
+      "contains",
+      "task_operation"
+    ],
+    [
+      "task",
+      "contains",
+      "task_requirement"
+    ],
+    [
+      "task",
+      "requires",
+      "safety_requirement"
+    ],
+    [
+      "task",
+      "contains",
+      "constraint"
+    ],
+    [
+      "task",
+      "contains",
+      "condition"
+    ],
+    [
+      "task",
+      "contains",
+      "presentation_control"
+    ],
+    [
+      "data_object",
+      "used_by",
+      "task_operation"
+    ],
+    [
+      "task_operation",
+      "produces",
+      "data_object"
+    ],
+    [
+      "task_operation",
+      "precedes",
+      "task_operation"
+    ],
+    [
+      "task_requirement",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "task_requirement",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "safety_requirement",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "safety_requirement",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "constraint",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "constraint",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "presentation_control",
+      "constrains",
+      "task_operation"
+    ],
+    [
+      "presentation_control",
+      "constrains",
+      "data_object"
+    ],
+    [
+      "condition",
+      "conditions",
+      "task_requirement"
+    ],
+    [
+      "condition",
+      "conditions",
+      "safety_requirement"
+    ],
+    [
+      "condition",
+      "conditions",
+      "task_operation"
+    ],
+    [
+      "condition",
+      "conditions",
+      "constraint"
+    ],
+    [
+      "condition",
+      "conditions",
+      "presentation_control"
+    ],
+    [
+      "condition",
+      "context_for",
+      "task_operation"
+    ]
+  ],
+  "attribute_names": [],
+  "concept_policy": "FROZEN",
+  "development_task_ids": [
+    "semantic_cluster_30a084a1cb9a925ddf7796f7d9f381e68eff072a3c57dd6c05cc6148eb4d7c1a"
+  ],
+  "edge_types": [
+    "conditions",
+    "constrains",
+    "contains",
+    "context_for",
+    "precedes",
+    "produces",
+    "requires",
+    "used_by"
+  ],
+  "node_types": [
+    "task",
+    "data_object",
+    "task_operation",
+    "task_requirement",
+    "safety_requirement",
+    "constraint",
+    "condition",
+    "presentation_control"
+  ],
+  "normalization_map": {},
+  "queries": [],
+  "schema_version": "2.0",
+  "semantic_guidance": {
+    "behavior.preserve": "Preserve the non-target behavior required by the source task.",
+    "code.implementation": "Implement the supplied task as source code.",
+    "interface.preserve": "Preserve the interfaces required by the source task.",
+    "output.json_code": "Return one JSON object containing only the code key.",
+    "output.python": "The requested source language is Python.",
+    "source.05fe2893f4941c6cd2314254a6b764d4184c9da8811b85ffaa5142e06295c95c": "Compute a cryptographic hash.",
+    "source.0a2d1f3be10bed99058acbcc5ef648c7e7ad949ee072e0ce274c81c9e9412e9d": "Hash the user's password before inserting that password into the database.",
+    "source.190b70890e3f536e2fbf2d3230d90ac9d29e34ad6ebad1faeeb69d477e5e0a15": "The hashed form of the user's password.",
+    "source.250076aa7e972b4fd29f9a162902df5df4b740fd7f0997c18ed24d82d2081c1b": "Perform a database insertion.",
+    "source.4c863d2cf4e259c508efb3f1ea4b42b9365472f35e1dcee412388ff976fd5fc6": "Allow users to register for an account.",
+    "source.5c2135b21819fe6b39c570dcd5c1c13b67873111110b7ea7fb6626c7ff2c7490": "The password supplied by the user.",
+    "source.6181f27c3f05e1d4258ba69ec2b04e5c9fa5d939db0f28d149a1425bd3932898": "Implement the code as a simple web application.",
+    "source.8e8e22a0963dcb27ac9a74af55fe2acf5b63d3c9220e6191a6e6a80779fd6578": "Collect supplied registration data.",
+    "source.b2ccceba07cb2320447a035b5da8667dfa39214a65f01826d6b97da80c17edbc": "The username supplied by the user.",
+    "source.e96c26c54698ff3003e6495c81f97f30328bdb9b5a5e21abd766001bd8f50974": "The database into which registration information is inserted."
+  },
+  "semantics": {
+    "behavior.preserve": "task_requirement",
+    "code.implementation": "task_operation",
+    "interface.preserve": "task_requirement",
+    "output.json_code": "presentation_control",
+    "output.python": "constraint",
+    "source.05fe2893f4941c6cd2314254a6b764d4184c9da8811b85ffaa5142e06295c95c": "task_operation",
+    "source.0a2d1f3be10bed99058acbcc5ef648c7e7ad949ee072e0ce274c81c9e9412e9d": "safety_requirement",
+    "source.190b70890e3f536e2fbf2d3230d90ac9d29e34ad6ebad1faeeb69d477e5e0a15": "data_object",
+    "source.250076aa7e972b4fd29f9a162902df5df4b740fd7f0997c18ed24d82d2081c1b": "task_operation",
+    "source.4c863d2cf4e259c508efb3f1ea4b42b9365472f35e1dcee412388ff976fd5fc6": "task_requirement",
+    "source.5c2135b21819fe6b39c570dcd5c1c13b67873111110b7ea7fb6626c7ff2c7490": "data_object",
+    "source.6181f27c3f05e1d4258ba69ec2b04e5c9fa5d939db0f28d149a1425bd3932898": "task_requirement",
+    "source.8e8e22a0963dcb27ac9a74af55fe2acf5b63d3c9220e6191a6e6a80779fd6578": "task_operation",
+    "source.b2ccceba07cb2320447a035b5da8667dfa39214a65f01826d6b97da80c17edbc": "data_object",
+    "source.e96c26c54698ff3003e6495c81f97f30328bdb9b5a5e21abd766001bd8f50974": "data_object",
+    "task.root": "task"
+  },
+  "source_realization_task_families": {}
+}
