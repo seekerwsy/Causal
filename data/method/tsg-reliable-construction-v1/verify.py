@@ -39,6 +39,65 @@ for name in ('results.json', 'report.json', 'reuse.json'):
     assert read_json(output/'summary'/name) == read_json(saved/'summary'/name), name
 '''
 
+AGENT_REPAIR_REPLAY = r'''
+import json
+from pathlib import Path
+from prompt_mechanism_study import source_records as sr
+from prompt_mechanism_study.prompt_contract import compile_task_context_contract, task_context_contract_record
+from prompt_mechanism_study.prompt_tsg import prompt_tsg_record
+base = Path(__import__('sys').argv[1])
+read = lambda p: json.loads(p.read_text(encoding='utf-8'))
+for name in read(base/'plan.json')['cases']:
+    saved, case = base.parent/'agent-repeatability'/name, base/name
+    request, original = read(saved/'inputs/request.json'), read(saved/'attempt-1.json')
+    check = sr.review_request(request, original)
+    assert check == read(case/'review-request.json')
+    assert sr.review_response_format(check) == read(case/'review-response-format.json')
+    assert sr.structural_readback(request, original) == read(case/'structural-readback.json')
+    try:
+        review = read(case/'review.json')
+        repair = sr.repair_request(request, original, review)
+    except Exception as error:
+        failure = read(case/'prepare-failure.json')
+        assert failure['error_type'] == type(error).__name__ and failure['error_message'] == str(error)
+        continue
+    assert not (case/'prepare-failure.json').exists()
+    decision = dict(status='PATCH_REQUESTED' if repair else 'NO_PATCH_REQUESTED',
+        record_status_counts={s:sum(x['status']==s for x in review['records'].values()) for s in ['supported','unsupported','unresolved']},
+        incomplete_source_units=[k for k,v in review['source_units'].items() if not v['complete']],
+        rejected_record_ids=repair['rejected_record_ids'] if repair else [],
+        editable_record_ids=repair['editable_record_ids'] if repair else [],
+        semantic_correctness_not_certified=True)
+    assert decision == read(case/'review-decision.json')
+    if repair:
+        assert repair == read(case/'patch-request.json')
+        assert sr.patch_response_format(repair, request) == read(case/'patch-response-format.json')
+    try:
+        merged = sr.apply_record_patch(original,read(case/'patch.json'),request=repair,original_request=request) if repair else original
+        task, catalog = read(saved/'inputs/task.json'), read(saved/'inputs/catalog.json')
+        contract = sr.compile_records(merged,request=request,task=task,catalog=catalog,
+            annotator_id='bounded-codex-source-agent',review_status='development_exposed')
+        graph = compile_task_context_contract(contract,prompt=task['prompt'],catalog=catalog)
+    except Exception as error:
+        failure = read(case/'compile-failure.json')
+        assert failure['error_type'] == type(error).__name__ and failure['error_message'] == str(error)
+        continue
+    assert not (case/'compile-failure.json').exists()
+    prior={r['record_id']:r for group in ('objects','operations','requirements') for r in original[group]}
+    after={r['record_id']:r for group in ('objects','operations','requirements') for r in merged[group]}
+    result=dict(status='PATCH_COMPILED' if repair else 'REVIEW_SUPPORTED_NO_PATCH',
+        changed_record_ids=[k for k in sorted(set(prior)|set(after)) if prior.get(k)!=after.get(k)],
+        unchanged_original_records=sum(prior[k]==after.get(k) for k in prior),
+        original_record_count=len(prior),final_record_count=len(after),
+        unresolved_source_units=[k for k,v in merged['coverage'].items() if v['status']=='unresolved'],
+        semantic_correctness_not_certified=True,provider_calls=0,scientific_claim_allowed=False)
+    for filename, value in {'records.json':merged,'contract.json':task_context_contract_record(contract),
+            'graph.json':prompt_tsg_record(graph),'structural-readback.json':sr.structural_readback(request,merged),
+            'result.json':result}.items():
+        assert value == read(case/'final'/filename), (name, filename)
+print('Retained agent reviews, local patches and final compilations replayed; no semantic certification.')
+'''
+
 
 def verify(base):
     with tempfile.TemporaryDirectory(prefix='tsg-frozen-replay-') as directory:
@@ -161,6 +220,38 @@ def summarize_agent_audit():
                 note='Pandoc wrong_decisive denotes frozen-reference mismatch with source-clause ambiguity; privilege bindings remain unresolved. Counts are correlated within eight tasks.')
 
 
+def verify_agent_repairs():
+    base = ROOT/'agent-repair'
+    plan = json.loads((base/'plan.json').read_text(encoding='utf-8'))
+    archive_path = base/plan['implementation_archive']
+    assert hashlib.sha256(archive_path.read_bytes()).hexdigest() == plan['implementation_archive_sha256']
+    identities = json.loads((base/'input-identities.json').read_text(encoding='utf-8'))
+    for name, digest in identities.items():
+        assert hashlib.sha256((ROOT/name).read_bytes()).hexdigest() == digest, name
+    with tempfile.TemporaryDirectory(prefix='tsg-agent-repair-replay-') as directory:
+        work = Path(directory)
+        with tarfile.open(archive_path) as archive:
+            archive.extractall(work, filter='data')
+        env = {**os.environ, 'PYTHONPATH':str(work/'src'), 'PYTHONUTF8':'1'}
+        subprocess.run([sys.executable, '-c', AGENT_REPAIR_REPLAY, str(base)],
+                       cwd=work, env=env, check=True)
+    audit = json.loads((base/'source-audit.json').read_text(encoding='utf-8'))
+    assert [row['run'] for row in audit['cases']] == plan['cases']
+    judgments = [j for row in audit['cases'] for j in row['reference_assessments']]
+    counts = audit['summary']
+    assert counts['reference_assessments'] == len(judgments)
+    for stage in ('before', 'after'):
+        assert counts[stage] == dict(Counter(j[stage] for j in judgments))
+    assert counts['review_responses'] == sum((base/name/'review.json').exists() for name in plan['cases'])
+    assert counts['patch_responses'] == sum((base/name/'patch.json').exists() for name in plan['cases'])
+    assert counts['final_graphs_compiled'] == sum((base/name/'final/graph.json').exists() for name in plan['cases'])
+    assert counts['critical_wrong_or_unresolved_to_correct'] == sum(j['before'] in {'wrong_decisive','missing_or_unresolved'} and j['after']=='correct_decisive' for j in judgments)
+    for status, key in [('wrong_decisive','correct_reference_to_wrong'), ('missing_or_unresolved','correct_reference_to_unresolved')]:
+        assert counts[key] == sum(j['before']=='correct_decisive' and j['after']==status for j in judgments)
+    return dict(retained_cases_replayed=len(plan['cases']), model_sampling_repeated=False,
+                provider_calls=0, semantic_correctness_not_certified=True)
+
+
 if __name__ == '__main__':
     experiments = ('compact-candidate', 'compact-candidate-v2', 'inventory-pilot',
                    'inventory-v2-deepseek', 'inventory-v2-max')
@@ -173,4 +264,5 @@ if __name__ == '__main__':
                           agent_compilation=verify_agent_graphs(),
                           agent_repetitions=verify_agent_repetitions(),
                           agent_audit_counts=audit,
+                          agent_repairs=verify_agent_repairs(),
                           scientific_claim_allowed=False), indent=2))

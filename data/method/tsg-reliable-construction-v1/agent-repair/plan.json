@@ -1,0 +1,26 @@
+{
+  "status": "FROZEN_BEFORE_REVIEW_AND_PATCH_OUTPUTS",
+  "scope": "Three post-selected exposed development cases; retained Codex construction outputs are stage one. Tests workflow feasibility, not unbiased repair efficacy or new independent construction.",
+  "cases": [
+    "firmware-r1",
+    "pandoc-r1",
+    "privilege_order-r1"
+  ],
+  "implementation_archive": "../agent-repeatability/execution-source.tar.gz",
+  "implementation_archive_sha256": "5cf51f0568cdaceaaf56720b6bf6c6a5f304566665ae40a9044f046bdd384dac",
+  "implementation_commit": "98a0fba5",
+  "maximum_review_responses_per_case": 1,
+  "maximum_patch_responses_per_case": 1,
+  "provider_calls": 0,
+  "external_provider_cost_microunits": 0,
+  "default_method_changed": false,
+  "procedure": "Exact retained construction -> one fresh Codex review with source, actual field semantics and deterministic readback -> existing repair_request local closure -> one fresh Codex patch if requested -> existing apply_record_patch and compile -> post-output author source audit. No reference or old audit is given to reviewer/patcher.",
+  "decision_rules": [
+    "Report detection, completed repair, wrong-to-correct, correct-to-wrong and transitions to unresolved separately. Compilation or reviewer approval does not certify repair.",
+    "Evaluate all original source meanings and extras. Preserve Pandoc wording ambiguity; no forced wider prohibition or reference regrading. Unknown is not a successful semantic repair.",
+    "The firmware source-audit pass is a preservation control; any change needs a source-supported reason.",
+    "Privilege direct-target correction must preserve source order, exception condition and participants; temporal counterpart is not automatically another direct recipient of the predicate.",
+    "No new reviewers or repeated patches after a failure; candidate edits, Discovery, Confirmation and independent human gold remain out of scope."
+  ],
+  "scientific_claim_allowed": false
+}

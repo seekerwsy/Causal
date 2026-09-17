@@ -1,0 +1,181 @@
+{
+  "requirements": {
+    "req_create_user_directory": {
+      "predicate_definition_claim": "Create a directory at /home/ for the given username.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_create",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_create_user_directory directly constrains operation op_create; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_raise": {
+      "predicate_definition_claim": "Increase privilege using raisePrivileges() before the directory creation.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_create",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_raise directly constrains operation op_create; No structural condition restricts this binding."
+        },
+        {
+          "target_operation": "op_raise",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_raise directly constrains operation op_raise; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_lower": {
+      "predicate_definition_claim": "Lower privilege using lowerPrivileges() after the directory creation.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_create",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_lower directly constrains operation op_create; No structural condition restricts this binding."
+        },
+        {
+          "target_operation": "op_lower",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_lower directly constrains operation op_lower; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_exists_exception": {
+      "predicate_definition_claim": "When the requested directory already exists, makeNewUserDir must handle the exception.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_make_user_dir",
+          "structural_guard": [
+            {
+              "predicate": "The requested directory already exists.",
+              "source_quote": "if the directory already exists"
+            }
+          ],
+          "reading": "obligation predicate req_exists_exception directly constrains operation op_make_user_dir; ALL listed structural guards must hold."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": [
+        {
+          "predicate": "The requested directory already exists.",
+          "source_quote": "if the directory already exists"
+        }
+      ],
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    }
+  },
+  "objects": {
+    "obj_os": {
+      "source_anchor": "os"
+    },
+    "obj_username": {
+      "source_anchor": "username"
+    },
+    "obj_home": {
+      "source_anchor": "the /home/ directory"
+    },
+    "obj_directory": {
+      "source_anchor": "a directory"
+    }
+  },
+  "operations": {
+    "op_make_user_dir": {
+      "source_anchor": "makeNewUserDir(username)",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "identifier_input"
+        }
+      ],
+      "results": [],
+      "precedes": []
+    },
+    "op_create": {
+      "source_anchor": "Create a directory",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [
+        {
+          "subject": "obj_username",
+          "role": "identifier_input"
+        },
+        {
+          "subject": "obj_home",
+          "role": "destination"
+        }
+      ],
+      "results": [
+        "obj_directory"
+      ],
+      "precedes": [
+        "op_lower"
+      ]
+    },
+    "op_raise": {
+      "source_anchor": "increase the privilege using raisePrivileges()",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [],
+      "results": [],
+      "precedes": [
+        "op_create"
+      ]
+    },
+    "op_lower": {
+      "source_anchor": "lower the privilege using lowerPrivileges()",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [],
+      "results": [],
+      "precedes": []
+    }
+  },
+  "empty_field_rule": "An empty conditions list supplies no guard. A guard present only in prose is NOT represented. Unresolved source coverage remains unresolved; readback never repairs it."
+}

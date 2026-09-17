@@ -1,0 +1,24 @@
+{
+  "objects": [],
+  "operations": [],
+  "requirements": [],
+  "coverage": {
+    "u1": {
+      "status": "unresolved",
+      "reason": "The imported os module is retained as an available object, but the source does not determine which runtime operations use it. Its runtime impact remains unresolved."
+    }
+  },
+  "unit_impacts": {
+    "u1": {
+      "effect": "unresolved",
+      "operations": [],
+      "reason": "The source makes os available but does not specify which runtime operation uses it.",
+      "evidence_source_unit": "u1",
+      "evidence_text": "import os"
+    }
+  },
+  "unresolved_notes": [
+    "u1: import os establishes module availability, but the supplied source does not establish required use by any named runtime operation, global runtime influence, or absence of runtime influence. The accepted obj_os record is preserved and impact remains unresolved."
+  ],
+  "delete_record_ids": []
+}

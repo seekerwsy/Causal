@@ -1,0 +1,1269 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "source_record_review",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "type": "object",
+          "properties": {
+            "obj_markdown_path": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_pdf_path": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_markdown": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_pdf": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_pandoc": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_logger": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_logging": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_subprocess": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_os": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_none": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_function": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "inputs.0",
+                      "inputs.1",
+                      "results",
+                      "results.0",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_conversion": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "inputs.0",
+                      "inputs.1",
+                      "inputs.2",
+                      "inputs.3",
+                      "results",
+                      "results.0",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_logging": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "inputs.0",
+                      "results",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_function_name": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_markdown_string": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "subjects.0",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_pdf_string": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "subjects.0",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_return_none": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_missing_raises": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "conditions.0",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_error_logging": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "conditions.0",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_other_exceptions": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_shell_policy": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_os_system": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_subprocess_shell": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_logger_setup": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "subjects",
+                      "subjects.0",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "obj_markdown_path",
+            "obj_pdf_path",
+            "obj_markdown",
+            "obj_pdf",
+            "obj_pandoc",
+            "obj_logger",
+            "obj_logging",
+            "obj_subprocess",
+            "obj_os",
+            "obj_none",
+            "op_function",
+            "op_conversion",
+            "op_logging",
+            "req_function_name",
+            "req_markdown_string",
+            "req_pdf_string",
+            "req_return_none",
+            "req_missing_raises",
+            "req_error_logging",
+            "req_other_exceptions",
+            "req_shell_policy",
+            "req_os_system",
+            "req_subprocess_shell",
+            "req_logger_setup"
+          ],
+          "additionalProperties": false
+        },
+        "source_units": {
+          "type": "object",
+          "properties": {
+            "u1": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u10": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u11": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u12": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u13": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u14": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u15": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u16": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u17": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u18": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u19": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u2": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u20": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u21": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u3": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u4": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u5": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u6": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u7": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u8": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u9": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "u1",
+            "u10",
+            "u11",
+            "u12",
+            "u13",
+            "u14",
+            "u15",
+            "u16",
+            "u17",
+            "u18",
+            "u19",
+            "u2",
+            "u20",
+            "u21",
+            "u3",
+            "u4",
+            "u5",
+            "u6",
+            "u7",
+            "u8",
+            "u9"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "records",
+        "source_units"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

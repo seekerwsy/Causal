@@ -1,0 +1,210 @@
+{
+  "records": {
+    "obj_markdown_path": {
+      "status": "supported",
+      "reason": "u7 explicitly specifies the string argument markdown_path and the source file it identifies; the record adds no validation or producer claim.",
+      "rejected_claims": []
+    },
+    "obj_pdf_path": {
+      "status": "supported",
+      "reason": "u8 explicitly specifies the string argument pdf_path as the PDF destination; the path remains distinct from the output file.",
+      "rejected_claims": []
+    },
+    "obj_markdown": {
+      "status": "supported",
+      "reason": "u2, u7 and u10 support the markdown source file identified by markdown_path. Declaring that object does not assert that the file always exists.",
+      "rejected_claims": []
+    },
+    "obj_pdf": {
+      "status": "supported",
+      "reason": "u2 and u8 require the output PDF file; no unstated origin or additional format is claimed.",
+      "rejected_claims": []
+    },
+    "obj_pandoc": {
+      "status": "supported",
+      "reason": "u3 explicitly names pandoc as the command-line conversion facility.",
+      "rejected_claims": []
+    },
+    "obj_logger": {
+      "status": "supported",
+      "reason": "u4 supplies a global logging.Logger instance, and u18 provides its initialization.",
+      "rejected_claims": []
+    },
+    "obj_logging": {
+      "status": "supported",
+      "reason": "u5 and u16 establish the available standard logging module without requiring any particular API invocation.",
+      "rejected_claims": []
+    },
+    "obj_subprocess": {
+      "status": "supported",
+      "reason": "u6 describes the available subprocess module and its stated process, pipe and return-code capabilities; u17 imports it. The definition does not require using all those capabilities.",
+      "rejected_claims": []
+    },
+    "obj_os": {
+      "status": "supported",
+      "reason": "u15 supplies the imported os module; no os.system call or other particular use is inferred.",
+      "rejected_claims": []
+    },
+    "obj_none": {
+      "status": "supported",
+      "reason": "u9 explicitly specifies the Python return value None.",
+      "rejected_claims": []
+    },
+    "op_function": {
+      "status": "supported",
+      "reason": "The aggregate function and its two path arguments are source-supported. Their identifier-input and destination roles preserve the interface, and None preserves its normal return contract. No operation-wide guard, independent context or ordering is required by the source.",
+      "rejected_claims": []
+    },
+    "op_conversion": {
+      "status": "supported",
+      "reason": "The conversion uses the markdown source file and pandoc as resources, with the source locator and output destination specified by u7 and u8. The PDF is its required result. No particular subprocess API, extra execution guard or implementation order is inferred.",
+      "rejected_claims": []
+    },
+    "op_logging": {
+      "status": "supported",
+      "reason": "u4 establishes message logging through logger, and u11 requires error messages when conversion fails. Logger is the supported facility input. General logging need not be gated entirely on failure; the error-message obligation has its own structural guard. No separately returned log object, independent context or universal order is stated.",
+      "rejected_claims": []
+    },
+    "req_function_name": {
+      "status": "supported",
+      "reason": "The exact required name targets the source-named aggregate function, not its internal operations.",
+      "rejected_claims": []
+    },
+    "req_markdown_string": {
+      "status": "supported",
+      "reason": "u7 specifies an expected string domain for markdown_path. Assumption modality and the direct object target preserve this without inventing validation or rejection behavior.",
+      "rejected_claims": []
+    },
+    "req_pdf_string": {
+      "status": "supported",
+      "reason": "u8 specifies an expected string domain for pdf_path. The assumption targets that argument without inventing runtime validation.",
+      "rejected_claims": []
+    },
+    "req_return_none": {
+      "status": "supported",
+      "reason": "u9 prescribes the aggregate function's normal return value. This return contract does not override its separately represented FileNotFoundError behavior, and no additional guard is stated.",
+      "rejected_claims": []
+    },
+    "req_missing_raises": {
+      "status": "supported",
+      "reason": "u10 requires FileNotFoundError under the explicit missing-markdown-file condition, and u7 resolves the file to markdown_path. The guard is structurally present and the aggregate function is the correct direct target.",
+      "rejected_claims": []
+    },
+    "req_error_logging": {
+      "status": "supported",
+      "reason": "u11 requires error messages on conversion failure, using the logger identified in u4. The requirement directly targets op_logging with the explicit failure guard; it does not narrow failure to a guessed exit-code test or gate all logging.",
+      "rejected_claims": []
+    },
+    "req_other_exceptions": {
+      "status": "supported",
+      "reason": "The independent clause in u11 prohibits directly raising other exceptions, with the specified FileNotFoundError identified by u10. The function-level negative obligation preserves 'directly' and does not invent suppression of all incidental exceptions or restrict the clause to the preceding logging condition.",
+      "rejected_claims": []
+    },
+    "req_shell_policy": {
+      "status": "supported",
+      "reason": "The source prohibits either unsafe command-execution form. A conjunction of the two negative obligations preserves that meaning; it does not merely prohibit their simultaneous occurrence. Composite scope adds no duplicate target obligation.",
+      "rejected_claims": []
+    },
+    "req_os_system": {
+      "status": "supported",
+      "reason": "The complete negative predicate preserves user-controlled input, os.system and the arbitrary-code-execution qualification. The runtime task boundary is supported, with no invented os.system operation or conversion-only restriction.",
+      "rejected_claims": []
+    },
+    "req_subprocess_shell": {
+      "status": "supported",
+      "reason": "The complete negative predicate preserves user-controlled input, subprocess.run, shell=True and the arbitrary-code-execution qualification. Task scope applies without requiring this API to be invoked.",
+      "rejected_claims": []
+    },
+    "req_logger_setup": {
+      "status": "supported",
+      "reason": "u18 supplies the exact logging.getLogger(__name__) initialization. The assumption about obj_logger preserves that setup without creating a runtime validation obligation.",
+      "rejected_claims": []
+    }
+  },
+  "source_units": {
+    "u1": {
+      "complete": true,
+      "reason": "The exact function name is represented by op_function and its naming obligation. Local impact on the aggregate interface is supported."
+    },
+    "u2": {
+      "complete": true,
+      "reason": "The markdown source, PDF result and conversion are represented; local impacts include the aggregate function and conversion. This sentence adds no independent logging predicate."
+    },
+    "u3": {
+      "complete": true,
+      "reason": "Pandoc is a required conversion participant. The aggregate-function and conversion impacts are retained, without inventing a particular subprocess API."
+    },
+    "u4": {
+      "complete": true,
+      "reason": "The global logger identity and required logging use are represented. Impacts include the aggregate function and logging; the source does not require logger to be an input of conversion itself."
+    },
+    "u5": {
+      "complete": true,
+      "reason": "The available logging module is retained with global shared-context impact. Its generic purpose does not require extra calls."
+    },
+    "u6": {
+      "complete": true,
+      "reason": "The subprocess module and all described capabilities are retained. Global shared-context impact is supported; pipe handling and return-code collection are not separately required implementation steps."
+    },
+    "u7": {
+      "complete": true,
+      "reason": "The exact argument name, expected string domain, selected source file and identifier bindings are preserved. Local impacts include the aggregate interface and conversion."
+    },
+    "u8": {
+      "complete": true,
+      "reason": "The exact argument name, expected string domain, destination bindings and output PDF are preserved. Local impacts include the aggregate interface and conversion."
+    },
+    "u9": {
+      "complete": true,
+      "reason": "None is preserved as the aggregate function's result and return contract, distinct from the PDF produced by conversion. Function-local impact is supported."
+    },
+    "u10": {
+      "complete": true,
+      "reason": "The required FileNotFoundError and missing-file guard are explicitly represented. Local impacts cover the aggregate function and conversion handling; no particular absence-detection method is inferred."
+    },
+    "u11": {
+      "complete": true,
+      "reason": "Failure-conditioned error logging and the independent no-other-direct-exceptions clause are both represented. Impacts cover the function, conversion and logging. Exact messages, failure-detection methods and catch-all handling remain unspecified."
+    },
+    "u12": {
+      "complete": true,
+      "reason": "Both qualified prohibitions are retained as negative members of a conjunction at the runtime task boundary, with global impact. No unsafe API use is assumed to occur."
+    },
+    "u13": {
+      "complete": true,
+      "reason": "The setup heading adds no independent task predicate or runtime effect beyond the separately represented setup statements."
+    },
+    "u14": {
+      "complete": true,
+      "reason": "The opening fence labels the supplied setup as Python; fixed language coverage preserves this without requiring a separate runtime fact."
+    },
+    "u15": {
+      "complete": true,
+      "reason": "The os import is retained as global available context, without requiring a particular os API."
+    },
+    "u16": {
+      "complete": true,
+      "reason": "The logging import is retained as global shared context; logger initialization is separately represented."
+    },
+    "u17": {
+      "complete": true,
+      "reason": "The subprocess import is retained as global available context, without requiring a particular invocation."
+    },
+    "u18": {
+      "complete": true,
+      "reason": "The exact provided logger initialization and its logging-module context are represented. Local impacts include the aggregate function and its logging behavior."
+    },
+    "u19": {
+      "complete": true,
+      "reason": "The closing setup fence adds no independent task predicate or runtime effect."
+    },
+    "u20": {
+      "complete": true,
+      "reason": "The generic implementation request is covered by the fixed implementation obligation, with its substantive description and setup represented separately. Global impact preserves whole-task reach."
+    },
+    "u21": {
+      "complete": true,
+      "reason": "The user-level Markdown-fence instruction is overridden by the source system's exact JSON response contract. Python is covered by the fixed language fact; no additional runtime effect is asserted."
+    }
+  }
+}

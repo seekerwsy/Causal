@@ -153,6 +153,40 @@ summary are in `agent-repeatability`. The constructor never received the referen
 or another output. Its inherited model/runtime differ from the provider checks,
 so the result cannot isolate the benefit of an agent procedure from model choice.
 
+## Continuing Codex constructions through review and local repair
+
+At the owner's request, three retained constructions were continued through the
+existing source-review and local-patch interfaces using fresh Codex agents. The
+post-selected development cases were firmware as a preservation control, Pandoc
+and privilege ordering. Reviewers saw the source, actual record semantics/schema
+and deterministic readback, without references or old audits. Each case allowed
+one review and at most one patch. No default method or compiler changed.
+
+All three reviews completed. Two patches merged and compiled; Pandoc was approved
+without a patch. The existing local-closure restriction, accepted-impact
+preservation and compiler were exercised successfully. Exact saved responses,
+requests, merges and graphs replay offline. This establishes execution feasibility
+for the agent-driven workflow, not reliable semantic repair.
+
+The fixed-reference judgments stayed at 19/23 correct, two Pandoc predicate
+mismatches and two unresolved privilege bindings. The reviewer did not surface
+Pandoc's source-clause ambiguity or the privilege direct-target problem. Firmware
+changed `blob_name` from a selector to a validation value and made the successful
+return guard explicit. The reference already allowed its original normal-return
+boundary, so the latter is not a wrong-to-correct repair. Privilege's patch only
+aligned `u1` coverage with its already-unresolved impact; all source records stayed
+unchanged. No correct fixed requirement became wrong or unresolved in this small
+author audit, but no critical semantic recovery was established either.
+
+`agent-repair` retains the frozen plan, three reviews, two patches and post-output
+author audit. These continue earlier constructions, not three new full extraction
+samples. They cost zero external-provider budget; exact Codex model snapshot and
+seed remain unavailable. Candidate judgments and actual prompt edits were not
+tested. Moving model steps into agents can execute the existing workflow, but it
+does not by itself resolve disagreements about return boundaries, direct targets
+and relational participants. Those meanings need consistent definitions before
+another bounded comparison; adding reviewers is not justified by this result.
+
 ## Object policy projection
 
 The existing candidate selector now accepts `scope_kind=objects`: one exact set

@@ -1,0 +1,38 @@
+{
+  "status": "PATCH_REQUESTED",
+  "record_status_counts": {
+    "supported": 18,
+    "unsupported": 1,
+    "unresolved": 1
+  },
+  "incomplete_source_units": [
+    "u1",
+    "u8"
+  ],
+  "rejected_record_ids": [
+    "op_save",
+    "req_return"
+  ],
+  "editable_record_ids": [
+    "obj_bytes",
+    "obj_dir",
+    "obj_message",
+    "obj_name",
+    "obj_path",
+    "op_save",
+    "req_bytes_all",
+    "req_bytes_size",
+    "req_bytes_type",
+    "req_example_ordinary",
+    "req_example_traversal",
+    "req_extension",
+    "req_interface",
+    "req_magic",
+    "req_name_all",
+    "req_name_nonempty",
+    "req_name_type",
+    "req_path",
+    "req_return"
+  ],
+  "semantic_correctness_not_certified": true
+}

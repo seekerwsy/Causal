@@ -1,0 +1,12 @@
+{
+  "status": "NO_PATCH_REQUESTED",
+  "record_status_counts": {
+    "supported": 24,
+    "unsupported": 0,
+    "unresolved": 0
+  },
+  "incomplete_source_units": [],
+  "rejected_record_ids": [],
+  "editable_record_ids": [],
+  "semantic_correctness_not_certified": true
+}

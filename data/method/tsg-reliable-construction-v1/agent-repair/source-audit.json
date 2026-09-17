@@ -1,0 +1,402 @@
+{
+  "status": "WORKFLOW_EXECUTED_NO_CRITICAL_SEMANTIC_REPAIR_ESTABLISHED",
+  "scope": "Post-selected exposed-source three-case development diagnostic; stage-one construction retained from previous agent run.",
+  "cases": [
+    {
+      "run": "firmware-r1",
+      "mechanical": {
+        "changed_record_ids": [
+          "op_save",
+          "req_return"
+        ],
+        "final_record_count": 20,
+        "original_record_count": 20,
+        "provider_calls": 0,
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "PATCH_COMPILED",
+        "unchanged_original_records": 18,
+        "unresolved_source_units": []
+      },
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "store",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "name_type",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "extension",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "byte_type",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "size",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "magic",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "containment",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "return",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "The final return predicate still targets op_save and now has an explicit successful-completion guard supported by the complementary source failure clause. The frozen reference already permits the original normal-return function boundary without that guard; this is an equivalent clarification, not a wrong-to-correct repair.",
+          "changed_binding_evidence": {
+            "asserted_as_standalone": true,
+            "composition": {
+              "kind": "atom",
+              "members": []
+            },
+            "direct_operation_bindings": [
+              {
+                "reading": "obligation predicate req_return directly constrains operation op_save; ALL listed structural guards must hold.",
+                "structural_guard": [
+                  {
+                    "predicate": "The save_firmware_blob invocation completes the firmware storage task successfully.",
+                    "source_quote": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+                  }
+                ],
+                "target_operation": "op_save"
+              }
+            ],
+            "direct_subject_targets": [],
+            "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+            "modality": "obligation",
+            "predicate_definition_claim": "The save_firmware_blob function must return the string \"Firmware stored at <full_path>\", with <full_path> denoting the saved firmware full path.",
+            "requirement_guards": [
+              {
+                "predicate": "The save_firmware_blob invocation completes the firmware storage task successfully.",
+                "source_quote": "Note: The implementation should raise an appropriate exception when it cannot complete the task successfully."
+              }
+            ],
+            "retained_scope": null,
+            "scope_kind": "targets",
+            "structural_leaf_only": true
+          }
+        },
+        {
+          "reference_id": "failure",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        }
+      ],
+      "source_metadata_changes": {
+        "coverage": [
+          "u1",
+          "u8"
+        ],
+        "unit_impacts": []
+      },
+      "extra_notes": {
+        "input_role": "blob_name changes from a structural-target selector to a required validation value. The source explicitly requires validation but not use of the supplied name as the stored filename. This avoids an unnecessary role claim; no candidate benefit measured.",
+        "return_review": "The reviewer rejected an original return representation explicitly permitted by the frozen reference; do not count the added success guard as a semantic repair."
+      }
+    },
+    {
+      "run": "pandoc-r1",
+      "mechanical": {
+        "changed_record_ids": [],
+        "final_record_count": 24,
+        "original_record_count": 24,
+        "provider_calls": 0,
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "REVIEW_SUPPORTED_NO_PATCH",
+        "unchanged_original_records": 24,
+        "unresolved_source_units": []
+      },
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "conversion",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "return",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "missing",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "failure_log",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "other_exception",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "os_system",
+          "before": "wrong_decisive",
+          "after": "wrong_decisive",
+          "reason": "Reviewer approved the restrictive exploit-capability qualifier without raising the explanatory-versus-restrictive source ambiguity. No patch ran. The frozen-reference mismatch remains; it is not independently adjudicated as an unambiguous source error.",
+          "changed_binding_evidence": {
+            "asserted_as_standalone": true,
+            "composition": {
+              "kind": "atom",
+              "members": []
+            },
+            "direct_operation_bindings": [],
+            "direct_subject_targets": [],
+            "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+            "modality": "obligation",
+            "predicate_definition_claim": "Do not pass user-controlled input to os.system in a manner that can cause arbitrary code execution anywhere in the runtime task.",
+            "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+            "retained_scope": {
+              "boundaries": [
+                "TASK_RUNTIME_BOUNDARY"
+              ],
+              "expansion": "NONE: no complete instance set is asserted",
+              "kind": "task",
+              "target_class": null
+            },
+            "scope_kind": "task",
+            "structural_leaf_only": true
+          }
+        },
+        {
+          "reference_id": "shell_run",
+          "before": "wrong_decisive",
+          "after": "wrong_decisive",
+          "reason": "Reviewer approved the restrictive exploit-capability qualifier without raising the explanatory-versus-restrictive source ambiguity. No patch ran. The frozen-reference mismatch remains; it is not independently adjudicated as an unambiguous source error.",
+          "changed_binding_evidence": {
+            "asserted_as_standalone": true,
+            "composition": {
+              "kind": "atom",
+              "members": []
+            },
+            "direct_operation_bindings": [],
+            "direct_subject_targets": [],
+            "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+            "modality": "obligation",
+            "predicate_definition_claim": "Do not pass user-controlled input to subprocess.run with shell=True in a manner that can cause arbitrary code execution anywhere in the runtime task.",
+            "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+            "retained_scope": {
+              "boundaries": [
+                "TASK_RUNTIME_BOUNDARY"
+              ],
+              "expansion": "NONE: no complete instance set is asserted",
+              "kind": "task",
+              "target_class": null
+            },
+            "scope_kind": "task",
+            "structural_leaf_only": true
+          }
+        }
+      ],
+      "source_metadata_changes": {
+        "coverage": [],
+        "unit_impacts": []
+      },
+      "extra_notes": {}
+    },
+    {
+      "run": "privilege_order-r1",
+      "mechanical": {
+        "changed_record_ids": [],
+        "final_record_count": 12,
+        "original_record_count": 12,
+        "provider_calls": 0,
+        "scientific_claim_allowed": false,
+        "semantic_correctness_not_certified": true,
+        "status": "PATCH_COMPILED",
+        "unchanged_original_records": 12,
+        "unresolved_source_units": [
+          "u1"
+        ]
+      },
+      "reference_assessments": [
+        {
+          "reference_id": "interface",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "mkdir",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        },
+        {
+          "reference_id": "raise_before",
+          "before": "missing_or_unresolved",
+          "after": "missing_or_unresolved",
+          "reason": "Original direct-target ambiguity remains: the full imperative still directly constrains both its performing action and op_create. Correct source precedes edges remain. The reviewer approved this record and the patch did not change it.",
+          "changed_binding_evidence": {
+            "asserted_as_standalone": true,
+            "composition": {
+              "kind": "atom",
+              "members": []
+            },
+            "direct_operation_bindings": [
+              {
+                "reading": "obligation predicate req_raise directly constrains operation op_create; No structural condition restricts this binding.",
+                "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                "target_operation": "op_create"
+              },
+              {
+                "reading": "obligation predicate req_raise directly constrains operation op_raise; No structural condition restricts this binding.",
+                "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                "target_operation": "op_raise"
+              }
+            ],
+            "direct_subject_targets": [],
+            "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+            "modality": "obligation",
+            "predicate_definition_claim": "Increase privilege using raisePrivileges() before the directory creation.",
+            "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+            "retained_scope": null,
+            "scope_kind": "targets",
+            "structural_leaf_only": true
+          }
+        },
+        {
+          "reference_id": "lower_after",
+          "before": "missing_or_unresolved",
+          "after": "missing_or_unresolved",
+          "reason": "Original direct-target ambiguity remains: the full imperative still directly constrains both its performing action and op_create. Correct source precedes edges remain. The reviewer approved this record and the patch did not change it.",
+          "changed_binding_evidence": {
+            "asserted_as_standalone": true,
+            "composition": {
+              "kind": "atom",
+              "members": []
+            },
+            "direct_operation_bindings": [
+              {
+                "reading": "obligation predicate req_lower directly constrains operation op_create; No structural condition restricts this binding.",
+                "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                "target_operation": "op_create"
+              },
+              {
+                "reading": "obligation predicate req_lower directly constrains operation op_lower; No structural condition restricts this binding.",
+                "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+                "target_operation": "op_lower"
+              }
+            ],
+            "direct_subject_targets": [],
+            "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.",
+            "modality": "obligation",
+            "predicate_definition_claim": "Lower privilege using lowerPrivileges() after the directory creation.",
+            "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+            "retained_scope": null,
+            "scope_kind": "targets",
+            "structural_leaf_only": true
+          }
+        },
+        {
+          "reference_id": "exists",
+          "before": "correct_decisive",
+          "after": "correct_decisive",
+          "reason": "Original fixed-reference judgment retained: relevant records unchanged, and compilation replay confirms final structure.",
+          "changed_binding_evidence": {}
+        }
+      ],
+      "source_metadata_changes": {
+        "coverage": [
+          "u1"
+        ],
+        "unit_impacts": []
+      },
+      "extra_notes": {
+        "locality": "u1 coverage becomes unresolved, matching its already-unresolved unit_impacts. Object availability and all operations/requirements remain unchanged; not a recovery of missing source meaning."
+      }
+    }
+  ],
+  "summary": {
+    "review_responses": 3,
+    "patch_responses": 2,
+    "final_graphs_compiled": 3,
+    "reference_assessments": 23,
+    "before": {
+      "correct_decisive": 19,
+      "wrong_decisive": 2,
+      "missing_or_unresolved": 2
+    },
+    "after": {
+      "correct_decisive": 19,
+      "wrong_decisive": 2,
+      "missing_or_unresolved": 2
+    },
+    "critical_wrong_or_unresolved_to_correct": 0,
+    "correct_reference_to_wrong": 0,
+    "correct_reference_to_unresolved": 0
+  },
+  "provider_calls": 0,
+  "external_provider_cost_microunits": 0,
+  "remaining_external_budget_microunits": 33226719,
+  "default_workflow_changed": false,
+  "scientific_claim_allowed": false,
+  "limitations": [
+    "Root author audit reuses prior fixed judgments for unchanged source structures and inspects changed fields/compiled readbacks. It is not independent human gold.",
+    "All calls use inherited Codex model/runtime; exact provider snapshot and seed unavailable. No DeepSeek/Qwen or agent-versus-API causal comparison.",
+    "Pandoc source ambiguity and privilege target-role ambiguity remain; model approval is not certification.",
+    "Natural candidate assessment, actual prompt interventions and formal qualification were not run."
+  ]
+}

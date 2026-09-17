@@ -1,0 +1,347 @@
+{
+  "requirements": {
+    "req_function_name": {
+      "predicate_definition_claim": "The required function is named convert_markdown_to_pdf.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_function",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_function_name directly constrains operation op_function; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_markdown_string": {
+      "predicate_definition_claim": "The markdown_path argument is specified to be a string.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "assumption",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [],
+      "retained_scope": null,
+      "direct_subject_targets": [
+        "obj_markdown_path"
+      ],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_pdf_string": {
+      "predicate_definition_claim": "The pdf_path argument is specified to be a string.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "assumption",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [],
+      "retained_scope": null,
+      "direct_subject_targets": [
+        "obj_pdf_path"
+      ],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_return_none": {
+      "predicate_definition_claim": "The convert_markdown_to_pdf function returns None.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_function",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_return_none directly constrains operation op_function; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_missing_raises": {
+      "predicate_definition_claim": "The convert_markdown_to_pdf function raises FileNotFoundError when the markdown file identified by markdown_path does not exist.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_function",
+          "structural_guard": [
+            {
+              "predicate": "The markdown file identified by markdown_path does not exist.",
+              "source_quote": "if the markdown file does not exist"
+            }
+          ],
+          "reading": "obligation predicate req_missing_raises directly constrains operation op_function; ALL listed structural guards must hold."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": [
+        {
+          "predicate": "The markdown file identified by markdown_path does not exist.",
+          "source_quote": "if the markdown file does not exist"
+        }
+      ],
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_error_logging": {
+      "predicate_definition_claim": "When the conversion fails, the logging performed by the function must log error messages.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_logging",
+          "structural_guard": [
+            {
+              "predicate": "The markdown-to-PDF conversion fails.",
+              "source_quote": "if the conversion fails"
+            }
+          ],
+          "reading": "obligation predicate req_error_logging directly constrains operation op_logging; ALL listed structural guards must hold."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": [
+        {
+          "predicate": "The markdown-to-PDF conversion fails.",
+          "source_quote": "if the conversion fails"
+        }
+      ],
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_other_exceptions": {
+      "predicate_definition_claim": "The convert_markdown_to_pdf function does not directly raise exceptions other than the specified FileNotFoundError.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [
+        {
+          "target_operation": "op_function",
+          "structural_guard": "UNCONDITIONAL: no guard is declared for this binding",
+          "reading": "obligation predicate req_other_exceptions directly constrains operation op_function; No structural condition restricts this binding."
+        }
+      ],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_shell_policy": {
+      "predicate_definition_claim": "Both prohibited user-controlled-input command-execution forms are forbidden: passing such input to os.system in a manner that can cause arbitrary code execution, and passing such input to subprocess.run with shell=True in a manner that can cause arbitrary code execution.",
+      "composition": {
+        "kind": "and",
+        "members": [
+          "req_os_system",
+          "req_subprocess_shell"
+        ]
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": false,
+      "modality": "obligation",
+      "scope_kind": "composite",
+      "direct_operation_bindings": [],
+      "retained_scope": null,
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_os_system": {
+      "predicate_definition_claim": "Do not pass user-controlled input to os.system in a manner that can cause arbitrary code execution anywhere in the runtime task.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "task",
+      "direct_operation_bindings": [],
+      "retained_scope": {
+        "kind": "task",
+        "boundaries": [
+          "TASK_RUNTIME_BOUNDARY"
+        ],
+        "target_class": null,
+        "expansion": "NONE: no complete instance set is asserted"
+      },
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_subprocess_shell": {
+      "predicate_definition_claim": "Do not pass user-controlled input to subprocess.run with shell=True in a manner that can cause arbitrary code execution anywhere in the runtime task.",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "obligation",
+      "scope_kind": "task",
+      "direct_operation_bindings": [],
+      "retained_scope": {
+        "kind": "task",
+        "boundaries": [
+          "TASK_RUNTIME_BOUNDARY"
+        ],
+        "target_class": null,
+        "expansion": "NONE: no complete instance set is asserted"
+      },
+      "direct_subject_targets": [],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    },
+    "req_logger_setup": {
+      "predicate_definition_claim": "The provided global logger is initialized as logging.getLogger(__name__).",
+      "composition": {
+        "kind": "atom",
+        "members": []
+      },
+      "asserted_as_standalone": true,
+      "structural_leaf_only": true,
+      "modality": "assumption",
+      "scope_kind": "targets",
+      "direct_operation_bindings": [],
+      "retained_scope": null,
+      "direct_subject_targets": [
+        "obj_logger"
+      ],
+      "requirement_guards": "UNCONDITIONAL: no requirement guard declared",
+      "interpretation": "The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted."
+    }
+  },
+  "objects": {
+    "obj_markdown_path": {
+      "source_anchor": "Arguments: - markdown_path (str): The path to the markdown file to be converted."
+    },
+    "obj_pdf_path": {
+      "source_anchor": "- pdf_path (str): The path where the output PDF should be saved."
+    },
+    "obj_markdown": {
+      "source_anchor": "a markdown file"
+    },
+    "obj_pdf": {
+      "source_anchor": "output PDF"
+    },
+    "obj_pandoc": {
+      "source_anchor": "'pandoc' command-line tool"
+    },
+    "obj_logger": {
+      "source_anchor": "Context (global variables and imported packages): - logger: an instance of a logging.Logger that is used for logging messages throughout the code."
+    },
+    "obj_logging": {
+      "source_anchor": "- logging: a Python standard logging module to log messages."
+    },
+    "obj_subprocess": {
+      "source_anchor": "- subprocess: a Python module to spawn new processes, connect to their input/output/error pipes, and obtain their return codes."
+    },
+    "obj_os": {
+      "source_anchor": "import os"
+    },
+    "obj_none": {
+      "source_anchor": "None"
+    }
+  },
+  "operations": {
+    "op_function": {
+      "source_anchor": "Function Name: convert_markdown_to_pdf",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [
+        {
+          "subject": "obj_markdown_path",
+          "role": "identifier_input"
+        },
+        {
+          "subject": "obj_pdf_path",
+          "role": "destination"
+        }
+      ],
+      "results": [
+        "obj_none"
+      ],
+      "precedes": []
+    },
+    "op_conversion": {
+      "source_anchor": "Description: This function converts a markdown file to a PDF using an external tool.",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [
+        {
+          "subject": "obj_markdown",
+          "role": "resource"
+        },
+        {
+          "subject": "obj_markdown_path",
+          "role": "identifier_input"
+        },
+        {
+          "subject": "obj_pdf_path",
+          "role": "destination"
+        },
+        {
+          "subject": "obj_pandoc",
+          "role": "resource"
+        }
+      ],
+      "results": [
+        "obj_pdf"
+      ],
+      "precedes": []
+    },
+    "op_logging": {
+      "source_anchor": "Context (global variables and imported packages): - logger: an instance of a logging.Logger that is used for logging messages throughout the code.",
+      "execution_guard": "NO DECLARED EXECUTION GUARD: operation presence does not assert execution on every path",
+      "non_gating_contexts": [],
+      "inputs": [
+        {
+          "subject": "obj_logger",
+          "role": "resource"
+        }
+      ],
+      "results": [],
+      "precedes": []
+    }
+  },
+  "empty_field_rule": "An empty conditions list supplies no guard. A guard present only in prose is NOT represented. Unresolved source coverage remains unresolved; readback never repairs it."
+}

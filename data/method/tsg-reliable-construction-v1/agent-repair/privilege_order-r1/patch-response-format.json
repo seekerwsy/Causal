@@ -1,0 +1,918 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "source_record_patch",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "objects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string",
+                "description": "Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."
+              },
+              "fact": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_source_unit": {
+                    "type": "string",
+                    "enum": [
+                      "u1",
+                      "u10",
+                      "u11",
+                      "u12",
+                      "u2",
+                      "u3",
+                      "u4",
+                      "u5",
+                      "u6",
+                      "u7",
+                      "u8",
+                      "u9"
+                    ]
+                  },
+                  "evidence_text": {
+                    "type": "string",
+                    "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                  },
+                  "source_units": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    }
+                  },
+                  "layer": {
+                    "type": "string",
+                    "enum": [
+                      "generation",
+                      "runtime",
+                      "unresolved"
+                    ]
+                  },
+                  "concept": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "concept_id": {
+                        "type": "string"
+                      },
+                      "node_type": {
+                        "type": "string",
+                        "enum": [
+                          "data_object"
+                        ]
+                      },
+                      "definition": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "concept_id",
+                      "node_type",
+                      "definition"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence_source_unit",
+                  "evidence_text",
+                  "source_units",
+                  "layer",
+                  "concept"
+                ]
+              }
+            },
+            "required": [
+              "record_id",
+              "fact"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string",
+                "description": "Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."
+              },
+              "fact": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_source_unit": {
+                    "type": "string",
+                    "enum": [
+                      "u1",
+                      "u10",
+                      "u11",
+                      "u12",
+                      "u2",
+                      "u3",
+                      "u4",
+                      "u5",
+                      "u6",
+                      "u7",
+                      "u8",
+                      "u9"
+                    ]
+                  },
+                  "evidence_text": {
+                    "type": "string",
+                    "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                  },
+                  "source_units": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    }
+                  },
+                  "layer": {
+                    "type": "string",
+                    "enum": [
+                      "generation",
+                      "runtime",
+                      "unresolved"
+                    ]
+                  },
+                  "concept": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "concept_id": {
+                        "type": "string"
+                      },
+                      "node_type": {
+                        "type": "string",
+                        "enum": [
+                          "task_operation"
+                        ]
+                      },
+                      "definition": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "concept_id",
+                      "node_type",
+                      "definition"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence_source_unit",
+                  "evidence_text",
+                  "source_units",
+                  "layer",
+                  "concept"
+                ]
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "description": "Exact record_id of an objects entry, e.g. obj_form, never a new name or quotation."
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "value_input",
+                        "identifier_input",
+                        "resource",
+                        "destination",
+                        "input_unspecified"
+                      ]
+                    },
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    }
+                  },
+                  "required": [
+                    "subject",
+                    "role",
+                    "evidence_source_unit",
+                    "evidence_text"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "description": "Exact record_id of an objects entry."
+                    },
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    }
+                  },
+                  "required": [
+                    "subject",
+                    "evidence_source_unit",
+                    "evidence_text"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "execution_conditions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    },
+                    "source_units": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "u1",
+                          "u10",
+                          "u11",
+                          "u12",
+                          "u2",
+                          "u3",
+                          "u4",
+                          "u5",
+                          "u6",
+                          "u7",
+                          "u8",
+                          "u9"
+                        ]
+                      }
+                    },
+                    "layer": {
+                      "type": "string",
+                      "enum": [
+                        "generation",
+                        "runtime",
+                        "unresolved"
+                      ]
+                    },
+                    "concept": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "concept_id": {
+                          "type": "string"
+                        },
+                        "node_type": {
+                          "type": "string",
+                          "enum": [
+                            "condition"
+                          ]
+                        },
+                        "definition": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "concept_id",
+                        "node_type",
+                        "definition"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "evidence_source_unit",
+                    "evidence_text",
+                    "source_units",
+                    "layer",
+                    "concept"
+                  ]
+                }
+              },
+              "scope_conditions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    },
+                    "source_units": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "u1",
+                          "u10",
+                          "u11",
+                          "u12",
+                          "u2",
+                          "u3",
+                          "u4",
+                          "u5",
+                          "u6",
+                          "u7",
+                          "u8",
+                          "u9"
+                        ]
+                      }
+                    },
+                    "layer": {
+                      "type": "string",
+                      "enum": [
+                        "generation",
+                        "runtime",
+                        "unresolved"
+                      ]
+                    },
+                    "concept": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "concept_id": {
+                          "type": "string"
+                        },
+                        "node_type": {
+                          "type": "string",
+                          "enum": [
+                            "condition"
+                          ]
+                        },
+                        "definition": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "concept_id",
+                        "node_type",
+                        "definition"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "evidence_source_unit",
+                    "evidence_text",
+                    "source_units",
+                    "layer",
+                    "concept"
+                  ]
+                }
+              },
+              "precedes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "type": "string",
+                      "description": "Exact record_id of another operation."
+                    },
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "evidence_source_unit",
+                    "evidence_text"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "record_id",
+              "fact",
+              "inputs",
+              "results",
+              "execution_conditions",
+              "scope_conditions",
+              "precedes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string",
+                "description": "Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."
+              },
+              "modality": {
+                "type": "string",
+                "enum": [
+                  "obligation",
+                  "assumption",
+                  "unresolved"
+                ]
+              },
+              "structure": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "atom",
+                      "and",
+                      "or",
+                      "not",
+                      "opaque"
+                    ]
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Exact requirement record IDs. atom/opaque: none; and/or: at least two; not: exactly one."
+                  }
+                },
+                "required": [
+                  "kind",
+                  "members"
+                ],
+                "additionalProperties": false
+              },
+              "scope_kind": {
+                "type": "string",
+                "enum": [
+                  "task",
+                  "targets",
+                  "implementation",
+                  "each",
+                  "composite"
+                ],
+                "description": "task: overall runtime-task boundary, NEVER all operations. targets: direct bindings. each: universal class rule within the task or one enclosing operation. composite: logical container, members carry bindings. implementation: generated artifact."
+              },
+              "operations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Exact direct targets; for each, zero or one enclosing runtime operation. Empty for task/implementation/composite."
+              },
+              "subjects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Exact direct object targets; empty except for targets scope."
+              },
+              "target_class": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "For each only: complete source-supported target class, not an instance list. Otherwise null."
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence_source_unit": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    },
+                    "evidence_text": {
+                      "type": "string",
+                      "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                    },
+                    "source_units": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "u1",
+                          "u10",
+                          "u11",
+                          "u12",
+                          "u2",
+                          "u3",
+                          "u4",
+                          "u5",
+                          "u6",
+                          "u7",
+                          "u8",
+                          "u9"
+                        ]
+                      }
+                    },
+                    "layer": {
+                      "type": "string",
+                      "enum": [
+                        "generation",
+                        "runtime",
+                        "unresolved"
+                      ]
+                    },
+                    "concept": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "concept_id": {
+                          "type": "string"
+                        },
+                        "node_type": {
+                          "type": "string",
+                          "enum": [
+                            "condition"
+                          ]
+                        },
+                        "definition": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "concept_id",
+                        "node_type",
+                        "definition"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "evidence_source_unit",
+                    "evidence_text",
+                    "source_units",
+                    "layer",
+                    "concept"
+                  ]
+                }
+              },
+              "fact": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_source_unit": {
+                    "type": "string",
+                    "enum": [
+                      "u1",
+                      "u10",
+                      "u11",
+                      "u12",
+                      "u2",
+                      "u3",
+                      "u4",
+                      "u5",
+                      "u6",
+                      "u7",
+                      "u8",
+                      "u9"
+                    ]
+                  },
+                  "evidence_text": {
+                    "type": "string",
+                    "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                  },
+                  "source_units": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "u1",
+                        "u10",
+                        "u11",
+                        "u12",
+                        "u2",
+                        "u3",
+                        "u4",
+                        "u5",
+                        "u6",
+                        "u7",
+                        "u8",
+                        "u9"
+                      ]
+                    }
+                  },
+                  "layer": {
+                    "type": "string",
+                    "enum": [
+                      "generation",
+                      "runtime",
+                      "unresolved"
+                    ]
+                  },
+                  "concept": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "concept_id": {
+                        "type": "string",
+                        "description": "Complete source meaning, preserving values/names/negation/thresholds. An atom is one consequent; a composite declares its structure and members. Keep guards in conditions and never disguise a compound meaning as an atom."
+                      },
+                      "node_type": {
+                        "type": "string",
+                        "enum": [
+                          "constraint",
+                          "presentation_control",
+                          "safety_requirement",
+                          "task_requirement"
+                        ]
+                      },
+                      "definition": {
+                        "type": "string",
+                        "description": "Complete source meaning, preserving values/names/negation/thresholds. An atom is one consequent; a composite declares its structure and members. Keep guards in conditions and never disguise a compound meaning as an atom."
+                      }
+                    },
+                    "required": [
+                      "concept_id",
+                      "node_type",
+                      "definition"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence_source_unit",
+                  "evidence_text",
+                  "source_units",
+                  "layer",
+                  "concept"
+                ]
+              }
+            },
+            "required": [
+              "record_id",
+              "modality",
+              "structure",
+              "scope_kind",
+              "operations",
+              "subjects",
+              "target_class",
+              "conditions",
+              "fact"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "u1": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "represented",
+                    "unresolved",
+                    "no_task_fact"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Short source-specific coverage or missing-meaning statement."
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "u1"
+          ]
+        },
+        "unit_impacts": {
+          "type": "object",
+          "properties": {
+            "u1": {
+              "type": "object",
+              "properties": {
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "local",
+                    "global",
+                    "unresolved",
+                    "no_runtime_effect"
+                  ]
+                },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "ALL affected runtime operation record IDs for local; empty otherwise."
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "evidence_source_unit": {
+                  "type": "string",
+                  "enum": [
+                    "u1",
+                    "u10",
+                    "u11",
+                    "u12",
+                    "u2",
+                    "u3",
+                    "u4",
+                    "u5",
+                    "u6",
+                    "u7",
+                    "u8",
+                    "u9"
+                  ]
+                },
+                "evidence_text": {
+                  "type": "string",
+                  "description": "Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."
+                }
+              },
+              "required": [
+                "effect",
+                "operations",
+                "reason",
+                "evidence_source_unit",
+                "evidence_text"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "u1"
+          ],
+          "additionalProperties": false
+        },
+        "unresolved_notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "delete_record_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "obj_os"
+            ]
+          }
+        }
+      },
+      "required": [
+        "objects",
+        "operations",
+        "requirements",
+        "coverage",
+        "unit_impacts",
+        "unresolved_notes",
+        "delete_record_ids"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

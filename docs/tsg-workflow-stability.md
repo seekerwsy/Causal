@@ -33,6 +33,11 @@ failed. Four Pandoc policy mismatches retain a source-clause ambiguity, and four
 privilege requirements have unresolved direct targets despite correct order edges.
 This is not independent human gold, untouched transfer, or evidence of candidate
 editability. No default constructor/reviewer change follows from that batch.
+Continuing three of those constructions through fresh Codex reviews and the
+existing local-patch interface completed all reviews, two patches and all three
+final graphs. Fixed-reference correctness remained 19/23: neither the two Pandoc
+predicate mismatches nor the two privilege binding ambiguities improved. The
+agent workflow executes, but reliable semantic repair is not established.
 
 1. **Prepare exact input.** `task_input.py` combines actual system/user messages and
    declared language. The program indexes source units; users do not manually number

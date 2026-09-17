@@ -1,0 +1,682 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "source_record_review",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "type": "object",
+          "properties": {
+            "obj_os": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_username": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_home": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "obj_directory": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_make_user_dir": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "inputs.0",
+                      "results",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_create": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "inputs.0",
+                      "inputs.1",
+                      "results",
+                      "results.0",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes",
+                      "precedes.0"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_raise": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "results",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes",
+                      "precedes.0"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "op_lower": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "fact",
+                      "inputs",
+                      "results",
+                      "execution_conditions",
+                      "scope_conditions",
+                      "precedes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_create_user_directory": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_raise": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "operations.1",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_lower": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "operations.1",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            },
+            "req_exists_exception": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unresolved"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rejected_claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "modality",
+                      "structure",
+                      "scope_kind",
+                      "operations",
+                      "operations.0",
+                      "subjects",
+                      "target_class",
+                      "conditions",
+                      "conditions.0",
+                      "fact"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "rejected_claims"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "obj_os",
+            "obj_username",
+            "obj_home",
+            "obj_directory",
+            "op_make_user_dir",
+            "op_create",
+            "op_raise",
+            "op_lower",
+            "req_create_user_directory",
+            "req_raise",
+            "req_lower",
+            "req_exists_exception"
+          ],
+          "additionalProperties": false
+        },
+        "source_units": {
+          "type": "object",
+          "properties": {
+            "u1": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u10": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u11": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u12": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u2": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u3": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u4": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u5": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u6": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u7": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u8": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "u9": {
+              "type": "object",
+              "properties": {
+                "complete": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complete",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "u1",
+            "u10",
+            "u11",
+            "u12",
+            "u2",
+            "u3",
+            "u4",
+            "u5",
+            "u6",
+            "u7",
+            "u8",
+            "u9"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "records",
+        "source_units"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

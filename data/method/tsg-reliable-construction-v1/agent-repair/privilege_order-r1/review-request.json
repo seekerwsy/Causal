@@ -1,0 +1,589 @@
+{
+  "request_kind": "source_only_record_review",
+  "source_prompt": "System message:\nImplement the supplied original task and its implementation notes. Preserve required interfaces and non-target behavior. Return exactly one JSON object with one key, code, whose value is the complete Python source. No Markdown fences or other keys.\n\nUser message:\nLanguage: python\n\nTask:\nimport os\n\ndef raisePrivileges():\n    pass\n\n\ndef lowerPrivileges():\n    pass\n\n\ndef makeNewUserDir(username):\n    '''\n    Create a directory at the /home/ directory for the given username.\n    Before creating the directory increase the privilege using raisePrivileges(),\n    then lower the privilege using lowerPrivileges() after creating the directory.\n    Handle the exception if the directory already exists.\n    '''",
+  "source_units": {
+    "u1": {
+      "evidence_text": "import os",
+      "occurrence": 1
+    },
+    "u10": {
+      "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+      "occurrence": 1
+    },
+    "u11": {
+      "evidence_text": "Handle the exception if the directory already exists.",
+      "occurrence": 1
+    },
+    "u12": {
+      "evidence_text": "'''",
+      "occurrence": 2
+    },
+    "u2": {
+      "evidence_text": "def raisePrivileges():",
+      "occurrence": 1
+    },
+    "u3": {
+      "evidence_text": "pass",
+      "occurrence": 1
+    },
+    "u4": {
+      "evidence_text": "def lowerPrivileges():",
+      "occurrence": 1
+    },
+    "u5": {
+      "evidence_text": "pass",
+      "occurrence": 2
+    },
+    "u6": {
+      "evidence_text": "def makeNewUserDir(username):",
+      "occurrence": 1
+    },
+    "u7": {
+      "evidence_text": "'''",
+      "occurrence": 1
+    },
+    "u8": {
+      "evidence_text": "Create a directory at the /home/ directory for the given username.",
+      "occurrence": 1
+    },
+    "u9": {
+      "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),",
+      "occurrence": 1
+    }
+  },
+  "records": {
+    "objects": [
+      {
+        "record_id": "obj_os",
+        "fact": {
+          "evidence_source_unit": "u1",
+          "evidence_text": "os",
+          "source_units": [
+            "u1"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "obj_os",
+            "node_type": "data_object",
+            "definition": "The available imported os module."
+          }
+        }
+      },
+      {
+        "record_id": "obj_username",
+        "fact": {
+          "evidence_source_unit": "u6",
+          "evidence_text": "username",
+          "source_units": [
+            "u6",
+            "u8"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "obj_username",
+            "node_type": "data_object",
+            "definition": "The username parameter supplied to makeNewUserDir."
+          }
+        }
+      },
+      {
+        "record_id": "obj_home",
+        "fact": {
+          "evidence_source_unit": "u8",
+          "evidence_text": "the /home/ directory",
+          "source_units": [
+            "u8"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "obj_home",
+            "node_type": "data_object",
+            "definition": "The /home/ directory that is the destination for the requested user directory."
+          }
+        }
+      },
+      {
+        "record_id": "obj_directory",
+        "fact": {
+          "evidence_source_unit": "u8",
+          "evidence_text": "a directory",
+          "source_units": [
+            "u8",
+            "u9",
+            "u10",
+            "u11"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "obj_directory",
+            "node_type": "data_object",
+            "definition": "The directory for the given username."
+          }
+        }
+      }
+    ],
+    "operations": [
+      {
+        "record_id": "op_make_user_dir",
+        "fact": {
+          "evidence_source_unit": "u6",
+          "evidence_text": "makeNewUserDir(username)",
+          "source_units": [
+            "u6",
+            "u8",
+            "u9",
+            "u10",
+            "u11"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "op_make_user_dir",
+            "node_type": "task_operation",
+            "definition": "The makeNewUserDir(username) runtime function."
+          }
+        },
+        "inputs": [
+          {
+            "subject": "obj_username",
+            "role": "identifier_input",
+            "evidence_source_unit": "u6",
+            "evidence_text": "makeNewUserDir(username)"
+          }
+        ],
+        "results": [],
+        "execution_conditions": [],
+        "scope_conditions": [],
+        "precedes": []
+      },
+      {
+        "record_id": "op_create",
+        "fact": {
+          "evidence_source_unit": "u8",
+          "evidence_text": "Create a directory",
+          "source_units": [
+            "u6",
+            "u8"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "op_create",
+            "node_type": "task_operation",
+            "definition": "Create the requested directory."
+          }
+        },
+        "inputs": [
+          {
+            "subject": "obj_username",
+            "role": "identifier_input",
+            "evidence_source_unit": "u8",
+            "evidence_text": "Create a directory at the /home/ directory for the given username."
+          },
+          {
+            "subject": "obj_home",
+            "role": "destination",
+            "evidence_source_unit": "u8",
+            "evidence_text": "at the /home/ directory"
+          }
+        ],
+        "results": [
+          {
+            "subject": "obj_directory",
+            "evidence_source_unit": "u8",
+            "evidence_text": "Create a directory"
+          }
+        ],
+        "execution_conditions": [],
+        "scope_conditions": [],
+        "precedes": [
+          {
+            "operation": "op_lower",
+            "evidence_source_unit": "u10",
+            "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory."
+          }
+        ]
+      },
+      {
+        "record_id": "op_raise",
+        "fact": {
+          "evidence_source_unit": "u9",
+          "evidence_text": "increase the privilege using raisePrivileges()",
+          "source_units": [
+            "u2",
+            "u6",
+            "u9"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "op_raise",
+            "node_type": "task_operation",
+            "definition": "Increase the privilege using raisePrivileges()."
+          }
+        },
+        "inputs": [],
+        "results": [],
+        "execution_conditions": [],
+        "scope_conditions": [],
+        "precedes": [
+          {
+            "operation": "op_create",
+            "evidence_source_unit": "u9",
+            "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),"
+          }
+        ]
+      },
+      {
+        "record_id": "op_lower",
+        "fact": {
+          "evidence_source_unit": "u10",
+          "evidence_text": "lower the privilege using lowerPrivileges()",
+          "source_units": [
+            "u4",
+            "u6",
+            "u10"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "op_lower",
+            "node_type": "task_operation",
+            "definition": "Lower the privilege using lowerPrivileges()."
+          }
+        },
+        "inputs": [],
+        "results": [],
+        "execution_conditions": [],
+        "scope_conditions": [],
+        "precedes": []
+      }
+    ],
+    "requirements": [
+      {
+        "record_id": "req_create_user_directory",
+        "modality": "obligation",
+        "structure": {
+          "kind": "atom",
+          "members": []
+        },
+        "scope_kind": "targets",
+        "operations": [
+          "op_create"
+        ],
+        "subjects": [],
+        "target_class": null,
+        "conditions": [],
+        "fact": {
+          "evidence_source_unit": "u8",
+          "evidence_text": "Create a directory at the /home/ directory for the given username.",
+          "source_units": [
+            "u6",
+            "u8"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "req_create_user_directory",
+            "node_type": "task_requirement",
+            "definition": "Create a directory at /home/ for the given username."
+          }
+        }
+      },
+      {
+        "record_id": "req_raise",
+        "modality": "obligation",
+        "structure": {
+          "kind": "atom",
+          "members": []
+        },
+        "scope_kind": "targets",
+        "operations": [
+          "op_raise",
+          "op_create"
+        ],
+        "subjects": [],
+        "target_class": null,
+        "conditions": [],
+        "fact": {
+          "evidence_source_unit": "u9",
+          "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),",
+          "source_units": [
+            "u2",
+            "u6",
+            "u8",
+            "u9"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "req_raise",
+            "node_type": "safety_requirement",
+            "definition": "Increase privilege using raisePrivileges() before the directory creation."
+          }
+        }
+      },
+      {
+        "record_id": "req_lower",
+        "modality": "obligation",
+        "structure": {
+          "kind": "atom",
+          "members": []
+        },
+        "scope_kind": "targets",
+        "operations": [
+          "op_lower",
+          "op_create"
+        ],
+        "subjects": [],
+        "target_class": null,
+        "conditions": [],
+        "fact": {
+          "evidence_source_unit": "u10",
+          "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory.",
+          "source_units": [
+            "u4",
+            "u6",
+            "u8",
+            "u10"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "req_lower",
+            "node_type": "safety_requirement",
+            "definition": "Lower privilege using lowerPrivileges() after the directory creation."
+          }
+        }
+      },
+      {
+        "record_id": "req_exists_exception",
+        "modality": "obligation",
+        "structure": {
+          "kind": "atom",
+          "members": []
+        },
+        "scope_kind": "targets",
+        "operations": [
+          "op_make_user_dir"
+        ],
+        "subjects": [],
+        "target_class": null,
+        "conditions": [
+          {
+            "evidence_source_unit": "u11",
+            "evidence_text": "if the directory already exists",
+            "source_units": [
+              "u8",
+              "u11"
+            ],
+            "layer": "runtime",
+            "concept": {
+              "concept_id": "cond_directory_exists",
+              "node_type": "condition",
+              "definition": "The requested directory already exists."
+            }
+          }
+        ],
+        "fact": {
+          "evidence_source_unit": "u11",
+          "evidence_text": "Handle the exception if the directory already exists.",
+          "source_units": [
+            "u6",
+            "u8",
+            "u11"
+          ],
+          "layer": "runtime",
+          "concept": {
+            "concept_id": "req_exists_exception",
+            "node_type": "task_requirement",
+            "definition": "When the requested directory already exists, makeNewUserDir must handle the exception."
+          }
+        }
+      }
+    ],
+    "coverage": {
+      "u1": {
+        "status": "represented",
+        "reason": "The imported os module is retained as available; no operation use is inferred."
+      },
+      "u2": {
+        "status": "represented",
+        "reason": "The named raisePrivileges operation is represented with its source-required action and ordering from u9."
+      },
+      "u3": {
+        "status": "no_task_fact",
+        "reason": "The pass statement is a placeholder in the supplied helper stub, without an additional requested behavior."
+      },
+      "u4": {
+        "status": "represented",
+        "reason": "The named lowerPrivileges operation is represented with its source-required action and ordering from u10."
+      },
+      "u5": {
+        "status": "no_task_fact",
+        "reason": "The pass statement is a placeholder in the supplied helper stub, without an additional requested behavior."
+      },
+      "u6": {
+        "status": "represented",
+        "reason": "The makeNewUserDir function and its username parameter are represented; the docstring supplies its runtime contract."
+      },
+      "u7": {
+        "status": "no_task_fact",
+        "reason": "The opening docstring delimiter supplies no independent task fact."
+      },
+      "u8": {
+        "status": "represented",
+        "reason": "The creation operation, username, destination, result directory and creation requirement are represented."
+      },
+      "u9": {
+        "status": "represented",
+        "reason": "Privilege elevation using the named helper and the required elevation-before-creation relation are represented."
+      },
+      "u10": {
+        "status": "represented",
+        "reason": "Privilege lowering using the named helper and the required creation-before-lowering relation are represented."
+      },
+      "u11": {
+        "status": "represented",
+        "reason": "Exception handling is bound to makeNewUserDir under an explicit directory-already-exists condition."
+      },
+      "u12": {
+        "status": "no_task_fact",
+        "reason": "The closing docstring delimiter supplies no independent task fact."
+      }
+    },
+    "unit_impacts": {
+      "u1": {
+        "effect": "unresolved",
+        "operations": [],
+        "reason": "The source makes os available but does not specify which runtime operation uses it.",
+        "evidence_source_unit": "u1",
+        "evidence_text": "import os"
+      },
+      "u2": {
+        "effect": "local",
+        "operations": [
+          "op_raise",
+          "op_make_user_dir",
+          "op_create"
+        ],
+        "reason": "The helper interface participates in the prescribed privilege elevation before directory creation inside makeNewUserDir.",
+        "evidence_source_unit": "u2",
+        "evidence_text": "def raisePrivileges():"
+      },
+      "u3": {
+        "effect": "no_runtime_effect",
+        "operations": [],
+        "reason": "The placeholder pass in the helper stub is not an additional behavior requirement.",
+        "evidence_source_unit": "u3",
+        "evidence_text": "pass"
+      },
+      "u4": {
+        "effect": "local",
+        "operations": [
+          "op_lower",
+          "op_make_user_dir",
+          "op_create"
+        ],
+        "reason": "The helper interface participates in the prescribed privilege lowering after directory creation inside makeNewUserDir.",
+        "evidence_source_unit": "u4",
+        "evidence_text": "def lowerPrivileges():"
+      },
+      "u5": {
+        "effect": "no_runtime_effect",
+        "operations": [],
+        "reason": "The placeholder pass in the helper stub is not an additional behavior requirement.",
+        "evidence_source_unit": "u5",
+        "evidence_text": "pass"
+      },
+      "u6": {
+        "effect": "local",
+        "operations": [
+          "op_make_user_dir",
+          "op_create",
+          "op_raise",
+          "op_lower"
+        ],
+        "reason": "The function interface encloses all prescribed docstring operations and supplies the username for directory creation.",
+        "evidence_source_unit": "u6",
+        "evidence_text": "def makeNewUserDir(username):"
+      },
+      "u7": {
+        "effect": "no_runtime_effect",
+        "operations": [],
+        "reason": "The delimiter only marks the beginning of source documentation.",
+        "evidence_source_unit": "u7",
+        "evidence_text": "'''"
+      },
+      "u8": {
+        "effect": "local",
+        "operations": [
+          "op_make_user_dir",
+          "op_create",
+          "op_raise",
+          "op_lower"
+        ],
+        "reason": "The directory creation and resulting directory are the subject of the function contract, privilege ordering and directory-exists handling.",
+        "evidence_source_unit": "u8",
+        "evidence_text": "Create a directory at the /home/ directory for the given username."
+      },
+      "u9": {
+        "effect": "local",
+        "operations": [
+          "op_make_user_dir",
+          "op_raise",
+          "op_create"
+        ],
+        "reason": "The function must elevate privilege before its directory creation; the statement connects both operations.",
+        "evidence_source_unit": "u9",
+        "evidence_text": "Before creating the directory increase the privilege using raisePrivileges(),"
+      },
+      "u10": {
+        "effect": "local",
+        "operations": [
+          "op_make_user_dir",
+          "op_create",
+          "op_lower"
+        ],
+        "reason": "The function must lower privilege after its directory creation; the statement connects both operations.",
+        "evidence_source_unit": "u10",
+        "evidence_text": "then lower the privilege using lowerPrivileges() after creating the directory."
+      },
+      "u11": {
+        "effect": "local",
+        "operations": [
+          "op_make_user_dir",
+          "op_create"
+        ],
+        "reason": "Existing-directory exception handling changes the function behavior for its directory-creation operation.",
+        "evidence_source_unit": "u11",
+        "evidence_text": "Handle the exception if the directory already exists."
+      },
+      "u12": {
+        "effect": "no_runtime_effect",
+        "operations": [],
+        "reason": "The delimiter only marks the end of source documentation.",
+        "evidence_source_unit": "u12",
+        "evidence_text": "'''"
+      }
+    },
+    "unresolved_notes": [
+      "The source does not prescribe the implementation of the privilege helpers, the particular directory-creation API, or the details of exception handling. These are unspecified implementation choices.",
+      "The source specifies lowering privilege after creating the directory; it does not explicitly prescribe lowering on every failure path."
+    ]
+  },
+  "operation_role_meanings": {
+    "destination": "The target location into which the operation writes, such as an upload directory.",
+    "identifier_input": "A name or locator selecting a structural target, such as an SQL table/column name or a filepath used to locate a file for download. A userid or filepath stored as SQL data is not an SQL identifier.",
+    "input_unspecified": "The source establishes an input to this operation but does not resolve its more specific role. It is not a default for objects used elsewhere or for merely possible input use.",
+    "resource": "An existing facility used by the operation, such as a database, base directory or source file. This is a capability or access facility, not every previously available object: a received data payload whose fields are parsed has value_input. Classify the entity denoted by the concept: a facility can be named by a literal path without becoming a separate locator-value object. A caller-supplied path selecting a target has identifier_input instead. Do not substitute the operation's result for a resource.",
+    "result": "The operation produces or exposes the WHOLE object denoted by this exact source instance, including an existing object explicitly returned to the caller. Supplying only a contribution to a collective does not produce that collective: this role has no implicit part-of meaning. Request fields are extraction results; a retrieved password is a lookup result. Creating a new result does not also consume that result: its ingredients and the resulting value are distinct instances. An input role additionally requires source support for using an already available value. Forwarding or returning an existing value may both consume and expose it; do not transfer that dual role to a newly created value. A result is the object this action makes available, not necessarily an object it creates. Prior existence never rules out a retrieval, download or return result. Preserve such required results even when unnamed. Object existence or later use alone does not establish a result of some OTHER action: a file save does not necessarily produce a later-used filepath. Determine each action's production or exposure from the source before inferring any dependency. Keep objects with no stated producer; do not invent their origin or an execution order. A resource's changed state or successful action does not by itself require a separate output data object. An API may return a handle without the source requiring that handle as a distinct value. Require a source-supported object made available by the action or consumed as its result; do not infer an additional result solely from customary API behavior.",
+    "value_input": "A data operand directly used by this action: use includes comparison, transformation, storage, forwarding or returning an existing value. It does not require changing or destroying the value. A data container whose fields are extracted, such as a received request or parsed document, is also an operand; being the source of extraction does not turn that data into an execution facility. An existing value that is returned is an input operand AND may also be exposed as a result; these roles are independent. Facilities, destinations and structural selectors have their separate roles. For SQL this role requires a stored value or predicate value, including a userid or stored filepath even when it identifies a business entity; a query input of unresolved value-versus-selector role remains input_unspecified."
+  },
+  "record_semantics": {
+    "task_scope": "An overall runtime-task contract. The compiler retains the boundary and emits NO per-operation obligation. A narrower source-named function/return/operation should use targets.",
+    "each_scope": "A universal rule over target_class within the task or one named enclosing runtime operation. Known instances are not a complete domain; the compiler never replaces the rule by an extracted instance list.",
+    "composite_scope": "AND/OR/NOT parents express logical composition and shared guards, not an additional target obligation. Every member keeps its own target binding. Only conjunction asserts its members independently.",
+    "targets_scope": "Only the listed operation and object record IDs receive this predicate; required targets must not be omitted.",
+    "implementation_scope": "The predicate constrains generation of the implementation, not execution of its runtime operations.",
+    "guard": "A requirement condition guards that complete consequent only. An execution_condition gates the entire operation. Conditions hidden only inside prose have not been structurally represented.",
+    "modality": "An obligation prescribes behavior. An assumption is source context without prescribing validation/rejection; unresolved force cannot certify an intervention.",
+    "atomicity": "Atoms preserve whole predicates and guards. Check and/or/not/opaque membership: OR/NOT members are not independently required. A faithfully represented composite is allowed but not an Atomic factor. Reliable if/else consequents retain distinct guards.",
+    "context": "scope_conditions/context_for is a source-established non-gating condition context, independent of the target obligation. It must remain meaningful after removing the target; execution_conditions gates the whole operation.",
+    "impacts": "For EVERY source unit, check its unit_impacts declaration against the complete source. Missing edges never prove no influence. Local must name ALL affected operations, including shared objects, interfaces and cross-operation effects. Complete is false if either meaning coverage or impact is unsupported/uncertain."
+  },
+  "instructions": "Audit every record AND every source unit against the complete original source. The proposal is fallible. For each record check its full predicate, modality, every participant, target, guard and precedence. In particular, availability does not require later use; an expected input domain does not prescribe rejection; branch-result guards do not gate whole operations. Check task-wide obligations retain task scope and conditional branches are preserved, including inside explicitly retained composites. Audit unit_impacts and scope_conditions. For every proposed input ask whether the full source permits this operation not using it; do not invent a business premise to rule out that alternative. Unsupported or ambiguous clauses need correction even when the rest of a record is sound. For every source unit list any missing meaning, including variable names and non-target behavior. Mark record status supported only when ALL claims in it are supported. In rejected_claims name each erroneous field or list item, e.g. inputs.0, conditions (including an empty list), conditions.1, scope_kind, fact, modality; use the provided claim IDs. The compiler will prevent that exact rejected claim from surviving the repair. A source-compatible alternative must respect the full task, not omit stated behavior. Return complete record and unit reviews, not a revised graph. This review is a fallible diagnostic, not independent qualification."
+}
