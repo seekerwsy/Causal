@@ -1,0 +1,5 @@
+{
+  "decision": "unresolved",
+  "applicability_scope": null,
+  "rationale": "The original binding targets the password-hashing operation tsg_node_cf15b4f2dfd2012052c863d820b189be5563c9283a3c252796f111b4d6c806cc. That operation is supported only by the named complete policy sentence requiring hashing before database insertion. The remaining source independently supports registration, collecting credentials, and inserting registration information, but does not independently require hashing. Database insertion is the temporal endpoint of the owned ordering relation, not the original direct target; substituting it would change the supplied binding. Independent applicability for the original scope is therefore unresolved."
+}

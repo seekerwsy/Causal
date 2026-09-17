@@ -412,6 +412,57 @@ No fresh LLM steps or external API spending occurred. Main remains Atomic-only a
 analysis changed. Fresh source-based attribution and actual natural edit validation
 under these fixed interfaces are still needed before claiming an automatic gain.
 
+## Natural model-driven background check
+
+The next bounded run scheduled the two previous natural tasks for candidate review,
+fresh original/deleted-source construction under one vocabulary, scope assessment,
+model-authored local support and actual REMOVE/inverse ADD. The implementation
+`585a895e` and stop rules were frozen before model outputs. All source material was
+already exposed; no new natural task units or protected evaluation were consumed.
+
+Both tasks stopped before any candidate catalogue could be accepted:
+
+| Task | Actual model output | Gate result |
+| --- | --- | --- |
+| Privilege lowering | Explanation identifies independent directory creation, but the returned background coordinate is the lowering invocation | Existing semantic review detects the mismatch and rejects context independence |
+| Registration hashing | Returns unknown because insertion differs from the policy's direct hashing target, despite describing the independent insertion task | No proposed candidate; dependent review and construction not reached |
+
+The first case is a concrete field/explanation inconsistency. Retaining the helper
+definition does not independently require its invocation. The second output has
+not operationalized the distinction between the preserved direct target and a
+separate comparison background. Neither output establishes a usable background.
+The reviewer caught the one proposed wrong coordinate; one detection is not a
+review-reliability estimate.
+
+This run made **three fresh Codex steps**: two proposals and one ordinary candidate
+semantic review. Zero candidates passed. Per the prospective stop rule, **zero new
+graphs, scope assessments, local support reviews or actual edits ran**. These are
+unexecuted stages, not measured failures of extraction or editing. In particular,
+the authored ADD/REMOVE implementation results above cannot fill this evidence gap.
+
+The experimental proposal request explicitly asks for independent background but
+also says to preserve/use the original binding as scope. That wording may have
+contributed to the confusion; the two outputs cannot isolate model capability from
+the request interface. There was no alternative prompt, coordinate correction or
+semantic retry. A local setup attempt initially omitted required design family
+labels; filling the declared database/filesystem and registration/directory labels
+resolved that validation error before reviewer dispatch, without altering model
+responses or their coordinates. Support thresholds were not evaluated.
+
+`candidate-local-natural` retains the plan, source archive, exact requests, outputs,
+compiled candidate decision and author audit. Its new replay verifies the submitted
+coordinates were copied unchanged, reproduces review rejection and unknown status,
+and accounts for every downstream stage as unexecuted. Prior unaffected production
+code and the already verified 105-test suite are reused; no full suite was repeated
+for this data-only model check. External API calls/cost are zero; exact Codex model
+snapshot and seed remain unavailable. Main, paper and formal study scope are unchanged.
+
+The next request revision should display the existing policy coordinate as immutable
+and ask separately for the comparison background. It must be frozen before a new
+bounded run; these negative results remain under their original request. Adding
+reviewers or treating model explanation as the returned coordinate would not fix
+the demonstrated delivery inconsistency.
+
 ## Reproduction and boundaries
 
 Artifact root: `data/method/tsg-reliable-construction-v1`. Each provider experiment
@@ -437,3 +488,5 @@ It also replays the complete repair round through the frozen `attempt_graph`,
 recompiles the two actual deleted-source responses and reproduces both edit
 rejections. The new effective-impact review view is tested in the current suite;
 old model requests retain their original implementation and interpretation.
+The natural candidate-local run also replays its two proposal decisions and single
+candidate review. Its planned later stages have no responses to replay.

@@ -1,0 +1,9 @@
+{
+  "decision": "proposed",
+  "applicability_scope": {
+    "operation_node_id": "tsg_node_0b0b72b64504762e6eaca5051dd59367cbd0122805d5161085e6e9d9fbf134a5",
+    "subject_node_ids": [],
+    "condition_node_ids": []
+  },
+  "rationale": "The separate source sentence \"Create a directory at the /home/ directory for the given username\" independently requires directory creation at tsg_node_6b95a71ed80fbf2dca260be62e8b14367724b981842fc0da41f90a29d52f1827 even without the named lowering policy. That operation is an endpoint of the precedence relation owned by this policy, so it supplies an allowed independent applicability anchor. The returned scope preserves the original direct target, lowerPrivileges() at tsg_node_0b0b72b64504762e6eaca5051dd59367cbd0122805d5161085e6e9d9fbf134a5, and leaves the complete obligation to lower privileges after directory creation unchanged. Directory creation is used as the owned-order endpoint, not substituted as the direct target; no condition or input scope is added, and no implementation protection is assumed."
+}

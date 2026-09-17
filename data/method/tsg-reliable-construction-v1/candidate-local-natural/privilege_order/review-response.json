@@ -1,0 +1,18 @@
+{
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "context_independent": false,
+      "decision": "reject",
+      "feature_id": "feature_9b17c8e87419de5f3f4b10c7756f226734a53cab3eecb1e680ab701b3c6e2dcb",
+      "normalization_valid": true,
+      "rationale": "The source explicitly requires lowering privileges with lowerPrivileges() after directory creation, and the proposal retains that complete single requirement, its direct lowerPrivileges() target, and its owned directory-creation-before-lowering relation. The normalized concepts preserve those source meanings, and this full policy scope does not absorb directory creation, privilege raising, or existing-directory exception handling as editable requirements. However, the actual applicability_scope.operation_node_id is tsg_node_0b0b72b64504762e6eaca5051dd59367cbd0122805d5161085e6e9d9fbf134a5, the invocation of lowerPrivileges(), rather than the independently required directory-creation operation cited in the explanation. Removing the whole lowering policy leaves a lowerPrivileges() function declaration, but no independent source obligation to invoke it. The separate directory-creation requirement supports a different operation and cannot establish independence for the selected background coordinate. The explanation therefore does not justify context_independent for the exact submitted fields. No coordinate correction or inferred implementation protection is used in this judgment.",
+      "scope_preserves_task": true,
+      "single_requirement": true,
+      "source_supported": true
+    }
+  ],
+  "request_sha256": "de103a0a000dc8ff787a41a83afb0ec6d20d8741db7827acbfe2e2bcfe19ac06",
+  "response_sha256": "302b153dc1b1e387d48515efa3ff7fb5ae56d3a1e621023734dcb9aa876a176c",
+  "reviewer_id": "fresh-source-only-natural-candidate-review-privilege-order"
+}

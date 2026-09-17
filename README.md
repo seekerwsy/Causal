@@ -66,6 +66,11 @@ reviewed applicability background from the complete policy signature and permits
 reviewed policy-only facts to change during an edit. Authored ADD/REMOVE controls
 pass; automatic support judgments and natural edit qualification remain unproved.
 TSG construction itself gains no global ownership gate or extra reviewer.
+The first natural check of the new background interface stopped at candidate
+selection: one proposed background still named the policy action and was rejected;
+the other proposal remained unresolved. Three model steps ran, with no fresh
+construction or actual edit. Automatic delivery of the separate background remains
+unproved; the request's scope-preservation wording also needs clarification.
 
 Complete conditional, whole-task and universal requirements can now enter Atomic
 candidate construction at their original boundary. Policy-internal conditions

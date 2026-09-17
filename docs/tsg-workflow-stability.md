@@ -170,6 +170,11 @@ agent workflow executes, but reliable semantic repair is not established.
    ownership field, extraction gate, second graph or reviewer. Authored controls
    demonstrate the mechanical ADD/REMOVE boundary, not automatic attribution accuracy
    or qualification of the two historical natural edits.
+   The first natural model-driven background check proposed a policy-dependent
+   coordinate for privilege lowering (caught by candidate review) and returned
+   unresolved for registration. No candidate passed, so its planned construction
+   and edit steps did not run. The request's original-scope preservation wording
+   may also contribute to the confusion; this result does not isolate model ability.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.

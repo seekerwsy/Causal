@@ -454,6 +454,75 @@ def verify_owned_relations():
                 source_audit_not_independently_certified=True)
 
 
+def replay_candidate_local_natural():
+    """Replay the bounded natural proposal gates, including unexecuted downstream stages."""
+    base = ROOT/'candidate-local-natural'
+    code = r'''
+import json,sys
+from pathlib import Path
+from prompt_mechanism_study.artifact_io import read_json
+from prompt_mechanism_study.candidate_construction import candidate_request,compile_candidate_proposal
+from prompt_mechanism_study.prompt_contract import task_context_contract_from_record
+from prompt_mechanism_study.records import content_hash
+base=Path(sys.argv[1]);plan=read_json(base/'protocol/plan.json');rows=[]
+for name in ('privilege_order','registration'):
+    case=base/name;source=read_json(case/'proposal-inputs/request.json')
+    task=read_json(case/'proposal-inputs/task.json')
+    expected=candidate_request([task],[task_context_contract_from_record(read_json(case/'proposal-inputs/contract.json'))],input_catalog=read_json(case/'proposal-inputs/catalog.json'))
+    assert source['source_request']==expected
+    answer=read_json(case/'proposal-response.json')
+    assert set(answer)=={'decision','applicability_scope','rationale'} and answer['decision'] in {'proposed','unresolved'}
+    calls=1;selected=None;review_decision=None
+    if answer['decision']=='unresolved':
+        assert answer['applicability_scope'] is None
+        result=dict(status='BLOCKED_PROPOSAL_UNRESOLVED',reason=answer['rationale'],scientific_claim_allowed=False)
+        assert not (case/'review-response.json').exists()
+    else:
+        req=read_json(case/'review-inputs/request.json');response=read_json(case/'review-inputs/candidate-response.json');design=read_json(case/'review-inputs/design.json')
+        assert req['source_request']==expected and req['proposal_response']==response
+        occurrence,=response['factors'][0]['occurrences']
+        original,=source['original_complete_bindings']
+        assert {k:v for k,v in occurrence.items() if k!='applicability_scope'}==original
+        assert occurrence['applicability_scope']==answer['applicability_scope']
+        selected=next(n['definition'] for n in expected['sources'][0]['nodes'] if n['node_id']==occurrence['applicability_scope']['operation_node_id'])
+        draft=compile_candidate_proposal(expected,response,design)
+        assert draft==read_json(case/'review-inputs/draft.json')==req['compiled_proposal']
+        review=read_json(case/'review-response.json');calls+=1
+        checked=compile_candidate_proposal(expected,response,design,review)
+        assert checked==read_json(case/'candidate-decision/proposal.json')
+        accepted=sum(f['review_decision']=='accept' for f in checked['factors'])
+        review_decision=review['decisions'][0]['decision']
+        result=dict(status='ACCEPTED_FOR_FRESH_EXTRACTION' if accepted else 'BLOCKED_CANDIDATE_REVIEW',accepted_candidates=accepted,scientific_claim_allowed=False)
+    assert result==read_json(case/'candidate-decision/result.json')
+    assert result['status'].startswith('BLOCKED_'),'This retained round stopped at the proposal gates.'
+    rows.append(dict(base_task=name,proposal_decision=answer['decision'],selected_background_meaning=selected,candidate_review_decision=review_decision,status=result['status'],fresh_model_steps=calls,fresh_constructions=0,scope_assessments=0,local_support_reviews=0,remove_executed=False,add_executed=False))
+for item in plan['cases']:
+    p=(base.parent/'owned-relations'/(item['base_task']+'-r1')/'inputs/task.json' if item['arm']=='present' else base.parent/'complete-repair-round'/item['run']/'inputs/task.json')
+    task=read_json(p)
+    assert task['task_id']==item['task_id'] and content_hash(task['prompt'])==item['prompt_sha256']
+    assert not (base/item['run']).exists(),'No dependent construction input or response was created.'
+print(json.dumps(dict(status='COMPLETED_BOUNDED_CHECK_BLOCKED_AT_CANDIDATES',base_tasks=2,accepted_candidates=0,fresh_model_steps=sum(r['fresh_model_steps'] for r in rows),external_provider_calls=0,actual_edits_executed=0,scientific_claim_allowed=False,cases=rows)))
+'''
+    with tempfile.TemporaryDirectory(prefix='tsg-natural-local-replay-') as directory:
+        work=Path(directory);archive=base/'execution-source.tar.gz'
+        plan=json.loads((base/'protocol/plan.json').read_text(encoding='utf-8'))
+        assert hashlib.sha256(archive.read_bytes()).hexdigest()==plan['execution_source_sha256']
+        with tarfile.open(archive) as source:
+            source.extractall(work,filter='data')
+        env={**os.environ,'PYTHONPATH':str(work/'src'),'PYTHONUTF8':'1'}
+        return json.loads(subprocess.check_output([sys.executable,'-c',code,str(base)],cwd=work,env=env,text=True))
+
+
+def verify_candidate_local_natural():
+    base=ROOT/'candidate-local-natural'
+    read=lambda path:json.loads(path.read_text(encoding='utf-8'))
+    for name,digest in read(base/'analysis/input-output-identities.json').items():
+        assert hashlib.sha256((base/name).read_bytes()).hexdigest()==digest,name
+    result=replay_candidate_local_natural()
+    assert result==read(base/'analysis/summary.json')
+    return result
+
+
 if __name__ == '__main__':
     experiments = ('compact-candidate', 'compact-candidate-v2', 'inventory-pilot',
                    'inventory-v2-deepseek', 'inventory-v2-max')
@@ -469,4 +538,5 @@ if __name__ == '__main__':
                           agent_repairs=verify_agent_repairs(),
                           owned_relations=verify_owned_relations(),
                           complete_repair_round=verify_complete_repair_round(),
+                          candidate_local_natural=verify_candidate_local_natural(),
                           scientific_claim_allowed=False), indent=2))
