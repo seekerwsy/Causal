@@ -207,6 +207,69 @@ No natural ADD/REMOVE, factor eligibility or improved downstream effect is claim
 clean exported reviewer suite passed all 103 tests in 29.019 seconds. Six relevant
 contrasts were consolidated into an existing test, with no new test function.
 
+## Repairing ownership of temporal requirements
+
+The source interface previously used `operations/subjects` for direct recipients
+of the whole predicate, while constructors and reviewers sometimes read them as
+participants. Required order also lived in ordinary operation edges without its
+requirement owner. This was an interface defect with a downstream consequence:
+removing the requirement could leave its order asserted as independent context.
+
+The current source schema gives runtime atomic requirements a `relations` list.
+Only `precedes` is supported here. The compiler preserves owner, operands, guards
+and composition in `requirement_relations`; it emits neither extra direct-target
+edges nor ordinary precedence edges for these rows. Extraction, review, patch and
+readback share the same binding definitions. Existing direct targets may still be
+plural when the entire predicate really applies to each. Independent order needs
+separate source support and remains protected during an edit.
+
+Candidate projection freezes direction and operands as `policy_relations`.
+Applicability requires unique source endpoints, not the order's prior presence.
+Positive expression must match the full binding. Source dependency checks include
+the endpoints. A reviewed removal can drop its target owner's order but must retain
+other owners and independent ordinary order, including separate support for the
+same pair. No new reviewer, model round, Pair analysis or causal variable was added.
+
+Two previously exposed tasks were reconstructed in fresh Codex contexts under a
+frozen implementation and request. Constructors saw no earlier response or
+reference. Each allowed one compiler-only repair; both first drafts compiled,
+so no repair or model review ran in this batch.
+
+| Task | Fixed source-reference audit | Owned order | Extra direct-target error |
+| --- | ---: | --- | --- |
+| Privilege ordering | 5/5 correct | Raise before create; create before lower, each with its own requirement | Not observed |
+| Registration | 4/4 correct | Password hashing before insertion, owned by the hashing requirement | Not observed |
+
+The root Codex author audit read all records and actual compiled bindings. It is
+not independent human gold. The nine prior reference meanings were retained;
+the two privilege bindings previously unresolved are correct in this fresh sample.
+This is not a model-matched causal comparison, and one output per task cannot
+establish stability or population accuracy. Pandoc's source ambiguity was not
+retested or relabelled.
+
+All three actual order requirements produced one complete candidate binding.
+With description text held fixed, deleting or reversing the owned relation failed
+positive matching. Keeping the source operation nodes while removing the owner
+preserved the scope and context query. These are structural mutations, **not
+natural prompt edits**: a policy can itself introduce an operation or hashed-result
+participant, and removing the full natural requirement can remove those anchors or
+change non-target obligations. Actual ADD/REMOVE eligibility remains untested.
+The three projections are not three approved research factors.
+
+One concentrated ownership test was added and the existing edit-preservation test
+was extended. The clean exported reviewer suite passed **104 tests** in 33.60 seconds,
+including the existing end-to-end smoke and independent result verifier. Guarded
+AND/OR/NOT ownership and separately supported same-pair relations were checked on
+authored controls. OR/NOT with different member relation envelopes remains in the
+graph but unprojected; the change does not establish general relation expressiveness.
+
+`owned-relations` retains the prospective plan, unchanged reference subset, exact
+source archive, requests, first drafts, compiled graphs, source audit and projection
+results. Both drafts and all three projections replay offline through `verify.py`.
+The batch used zero external API calls. The exact Codex model snapshot and seed are
+unavailable. The main path remains Atomic-only and `SPECIFIED_DRAFT`; no manuscript,
+Discovery, Confirmation, security generation or effect estimate changed.
+
 ## Reproduction and boundaries
 
 Artifact root: `data/method/tsg-reliable-construction-v1`. Each provider experiment
@@ -226,3 +289,5 @@ the saved author-audit totals against the fixed reference IDs. All saved calls a
 graphs replayed; the audit recount passed separately after adding its summary.
 The verifier does not resample agents or certify the author's semantic judgments.
 Implementation checks do not compensate for the observed semantic limitations.
+It also replays the two owned-relation constructions and their three structural
+candidate projections, then recounts the retained nine source-audit judgments.

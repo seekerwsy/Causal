@@ -1087,6 +1087,116 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
         _occurrence(source, dict(task_id=task['task_id'], requirement_node_ids=[assumption['node_id']], scope={}), {})
 
 
+def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope():
+    from copy import deepcopy
+    from dataclasses import replace
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.source_records import record_request, compile_records, structural_readback
+    from prompt_mechanism_study.prompt_contract import compile_task_context_contract
+    from prompt_mechanism_study.prompt_tsg import (
+        graph_requirement_membership, requirement_binding, requirement_matches_policy,
+        requirement_policy_relations, prompt_tsg_record, prompt_tsg_from_record, query_context,
+    )
+    from prompt_mechanism_study.candidate_construction import (
+        candidate_request, _occurrence, _query, choose_candidate_scope,
+    )
+    sentence = 'When ready, prepare before publish and enable strict mode during preparation.'
+    task = prepare_task_input(dict(task_id='authored-owned-order-boundary', language='python', prompt=sentence))
+    catalog = open_concept_catalog()
+    meanings = [
+        ('prepare', 'task_operation', 'The preparation operation.', 'prepare'),
+        ('publish', 'task_operation', 'The publication operation.', 'publish'),
+        ('ready', 'condition', 'The task is ready.', 'When ready'),
+        ('order', 'safety_requirement', 'Prepare before publication.', 'prepare before publish'),
+        ('strict', 'safety_requirement', 'Enable strict mode during preparation.', 'enable strict mode during preparation'),
+    ]
+    canonical = dict(concepts=[dict(concept_id=k, node_type=t, definition=d) for k,t,d,_ in meanings],
+        nodes=[dict(local_id=k, concept_id=k, evidence_text=q, occurrence=1) for k,_,_,q in meanings],
+        edges=[dict(source_node_local_id=a, edge_type=r, target_node_local_id=b,
+                    evidence_text=sentence, occurrence=1) for a,r,b in [
+            ('order','constrains','prepare'), ('strict','constrains','prepare'),
+            ('ready','conditions','order'), ('ready','conditions','strict')]], unresolved_notes=[])
+    request = record_request(contract_decision_request(task, catalog))
+    records = record_annotation(request, canonical)
+    owner = records['requirements'][0]
+    owner['relations'] = [dict(source='prepare', edge_type='precedes', target='publish',
+        evidence_source_unit=owner['fact']['evidence_source_unit'], evidence_text=owner['fact']['evidence_text'])]
+
+    def compile_value(value):
+        contract = compile_records(value, request=request, task=task, catalog=catalog,
+            annotator_id='authored-offline-boundary', review_status='development_exposed')
+        return contract, compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
+
+    contract, graph = compile_value(records)
+    owned, prepare, relation, publish = graph.requirement_relations[0]
+    guard = next(n.node_id for n in graph.nodes if n.node_type == 'condition')
+    links = {(e.source_id,e.edge_type,e.target_id) for e in graph.edges}
+    assert relation == 'precedes' and (owned,'constrains',prepare) in links
+    assert (owned,'constrains',publish) not in links and not any(r == 'precedes' for _,r,_ in links)
+    assert (guard,'conditions',owned) in links and (guard,'conditions',prepare) not in links
+    assert requirement_policy_relations(graph, owned) == ((prepare,'precedes',publish),)
+    assert prompt_tsg_from_record(prompt_tsg_record(graph)) == graph
+    readback = structural_readback(request, records)['requirements']['order']
+    assert [r['target_operation'] for r in readback['direct_operation_bindings']] == ['prepare']
+    assert readback['owned_relations'][0]['target'] == 'publish'
+
+    source = candidate_request([task], [contract], input_catalog=catalog)['sources'][0]
+    # Keep source semantic IDs for this low-level projection check; normalization
+    # has its own maintained candidate test and is not repeated here.
+    aliases = {n['node_type']+'::'+n['concept_id']:n['concept_id'] for n in source['nodes']}
+    occurrence = dict(task_id=task['task_id'], requirement_node_ids=[owned],
+        scope=dict(operation_node_id=prepare,subject_node_ids=[],condition_node_ids=[guard]))
+    selector, _ = _occurrence(source, occurrence, aliases)
+    semantics = {n.node_id:n.semantic_id for n in graph.nodes}
+    assert selector['policy_relations'] == [[semantics[prepare],'precedes',semantics[publish]]]
+    query = _query(selector, semantics[owned])
+    assert query['required_relations'] == [] and set(query['required_semantics']) == {semantics[prepare],semantics[publish]}
+    scope = choose_candidate_scope(graph, selector)
+    assert scope is not None and requirement_matches_policy(graph, owned, scope, selector)
+    reversed_order = replace(graph, requirement_relations=((owned,publish,'precedes',prepare),))
+    assert choose_candidate_scope(reversed_order, selector) == scope
+    assert not requirement_matches_policy(reversed_order, owned, scope, selector)
+    # This is a structural counterfactual, not a claim of an executable prompt edit.
+    removed = replace(graph, nodes=tuple(n for n in graph.nodes if n.node_id != owned),
+        edges=tuple(e for e in graph.edges if owned not in {e.source_id,e.target_id}),
+        requirement_structures=tuple(r for r in graph.requirement_structures if r[0] != owned),
+        requirement_relations=())
+    assert choose_candidate_scope(removed, selector) == scope
+    assert query_context(graph,query=query,cwe='',task_family='').state.value == 'present'
+    assert query_context(removed,query=query,cwe='',task_family='').state.value == 'present'
+
+    # Composites are authored structural controls, not model-accuracy samples.
+    # Their guard stays with the owner expression; OR/NOT do not assert leaves.
+    for kind in ('and','or','not'):
+        value = deepcopy(records)
+        parent = deepcopy(value['requirements'][0])
+        parent.update(record_id='policy',scope_kind='composite',operations=[],subjects=[],relations=[],
+            structure=dict(kind=kind,members=['order'] if kind == 'not' else ['order','strict']))
+        parent['fact']['concept'].update(concept_id='policy',definition=f'Authored {kind} policy expression.')
+        for leaf in value['requirements']:
+            if leaf['record_id'] in parent['structure']['members']:
+                leaf['conditions'] = []
+        value['requirements'].append(parent)
+        composite_contract, composite = compile_value(value)
+        assert composite.requirement_relations == graph.requirement_relations
+        assert prompt_tsg_from_record(prompt_tsg_record(composite)) == composite
+        c_links = {(e.source_id,e.edge_type,e.target_id) for e in composite.edges}
+        assert (guard,'conditions',owned) in c_links
+        asserted, _ = graph_requirement_membership(composite)
+        assert (owned in asserted) == (kind == 'and')
+        if kind != 'and':
+            c_source = candidate_request([task], [composite_contract], input_catalog=catalog)['sources'][0]
+            with pytest.raises(ValueError,match='existing source requirement'):
+                _occurrence(c_source, occurrence, aliases)
+        if kind == 'or':
+            parent_id = next(k for k,t,_ in composite.requirement_structures if t == 'or')
+            assert requirement_policy_relations(composite,parent_id) == ((prepare,'precedes',publish),)
+            assert requirement_binding(parent_id,links=c_links,
+                node_types={n.node_id:n.node_type for n in composite.nodes},
+                structures=composite.requirement_structures,retained_scopes=composite.requirement_scopes,
+                owned_relations=composite.requirement_relations) is None
+
+
 def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider():
     task, catalog, canonical, _, _ = _source_fixture()
     calls = []

@@ -72,8 +72,10 @@ into different meanings. Repeated source expressions must be treated together: d
 repetition cannot make a requirement absent while another remains. Read the entire source,
 including unparsed text and system instructions, to identify non-target behavior and repetitions.
 Applicability needs source support; neither policy presence nor an empty quantified class proves it.
-Requirement-only guards stay inside the policy, never become task-selection gates. Describe prompt
-requirements without predicting code security. Missing prompt text is not missing software protection.
+Requirement-only guards stay inside the policy, never become task-selection gates. Preserve
+all owned policy_relations: the order belongs to that requirement,
+not to an independent task context. Relation endpoints are operands, not extra direct targets.
+Describe requirements without predicting code security. Missing prompt text is not missing software protection.
 Return only {decisions: {node_ref: {status, label, definition, rationale}, ...}}. The schema names
 every required decision key. Use exactly those keys, once each, including non-actionable units.
 status is include, not_actionable or unresolved. For include, label and definition normalize only
@@ -121,7 +123,9 @@ def candidate_request(tasks: Sequence[dict], contracts: Sequence[OpenTaskContrac
                             prompt_sha256=graph.prompt_sha256, prompt_tsg_id=graph.tsg_id,
                             nodes=nodes, edges=canonical_value(sorted(graph.edges, key=lambda e: e.edge_id)),
                             requirement_structures=canonical_value(graph.requirement_structures),
-                            retained_requirement_scopes=canonical_value(graph.requirement_scopes)))
+                            retained_requirement_scopes=canonical_value(graph.requirement_scopes),
+                            **({"requirement_relations": canonical_value(graph.requirement_relations)}
+                               if graph.requirement_relations else {})))
     return dict(request_kind="source_graph_requirement_candidates", sources=sources,
                 missing_graph_task_ids=sorted(set(by_task) - seen), arms_or_outcomes_used=False,
                 requirement_granularity="complete_single_requirement")
@@ -156,7 +160,8 @@ def _candidate_units(request):
                 continue
             envelope = requirement_binding(key, links=links, node_types=types,
                 structures=source.get("requirement_structures", []),
-                retained_scopes=source.get("retained_requirement_scopes", []))
+                retained_scopes=source.get("retained_requirement_scopes", []),
+                owned_relations=source.get("requirement_relations", []))
             if envelope is None:
                 continue
             object_bound = envelope["kind"] == "targets" and not envelope["operations"] and bool(envelope["subjects"])
@@ -177,7 +182,9 @@ def _candidate_units(request):
                     operation_ref=refs[operation], subject_refs=[refs[n] for n in scope["subject_node_ids"]],
                     execution_condition_refs=[refs[n] for n in sorted(execution)],
                     policy_condition_refs=[refs[n] for n in sorted(envelope["conditions"] - execution)],
-                    scope_kind="objects" if object_bound else envelope["kind"], target_class=envelope["target_class"]))
+                    scope_kind="objects" if object_bound else envelope["kind"], target_class=envelope["target_class"],
+                    **({"policy_relations": [[refs[a], rel, refs[b]] for a, rel, b in sorted(envelope["relations"])]}
+                       if envelope["relations"] else {})))
         sources.append(dict(source_ref=task_ref, source_prompt=source["source_prompt"],
             nodes=[dict(node_ref=refs[key], **{k: v for k, v in node.items() if k not in {"node_id", "concept_id"}},
                         **({"complete_bindings": short_bindings[refs[key]]} if key in ids else {}))
@@ -188,7 +195,10 @@ def _candidate_units(request):
             requirement_structures=[[refs[key], kind, [refs[n] for n in members]]
                                     for key, kind, members in source.get("requirement_structures", [])],
             retained_requirement_scopes=[[refs[key], kind, [refs[n] for n in boundaries], target_class]
-                                        for key, kind, boundaries, target_class in source.get("retained_requirement_scopes", [])]))
+                                        for key, kind, boundaries, target_class in source.get("retained_requirement_scopes", [])],
+            **({"requirement_relations": [[refs[owner], refs[a], rel, refs[b]]
+                for owner, a, rel, b in source["requirement_relations"]]}
+               if source.get("requirement_relations") else {})))
     return requirements, bindings, sources
 
 
@@ -298,7 +308,8 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         envelope = requirement_binding(requirement, links=links,
             node_types={key: node["node_type"] for key, node in nodes.items()},
             structures=source.get("requirement_structures", []),
-            retained_scopes=source.get("retained_requirement_scopes", []))
+            retained_scopes=source.get("retained_requirement_scopes", []),
+            owned_relations=source.get("requirement_relations", []))
         object_bound = (envelope is not None and envelope["kind"] == "targets"
                         and not envelope["operations"] and bool(envelope["subjects"]))
         if (envelope is None or (not object_bound and op not in envelope["operations"])
@@ -310,7 +321,8 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         if set(conditions) != actual_conditions:
             raise ValueError("candidate scope cannot discard or invent source conditions")
         envelopes.append(("objects" if object_bound else envelope["kind"],
-                          envelope["target_class"], forms.get(requirement, "atom")))
+                          envelope["target_class"], forms.get(requirement, "atom"),
+                          tuple(sorted(envelope["relations"]))))
     if len(set(envelopes)) != 1:
         raise ValueError("normalization must preserve the whole scope and composition")
     requirement_types = {nodes[key]["node_type"] for key in requirements}
@@ -323,7 +335,7 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
         if node["concept_id"] == "task.root":
             return "task.root"
         return aliases[node["node_type"] + "::" + node["concept_id"]]
-    kind, target_class, requirement_kind = envelopes[0]
+    kind, target_class, requirement_kind, policy_relations = envelopes[0]
     selector = dict(operation_semantic_id=semantic(op),
                     subject_semantic_ids=sorted(semantic(key) for key in subjects),
                     condition_semantic_ids=sorted(semantic(key) for key in execution),
@@ -331,6 +343,8 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
                     policy_condition_semantic_ids=sorted(semantic(key) for key in set(conditions) - execution),
                     scope_kind=kind, target_class=target_class, requirement_kind=requirement_kind,
                     match_rule="unique_source_geometry_match")
+    if policy_relations:
+        selector["policy_relations"] = sorted([semantic(a), rel, semantic(b)] for a, rel, b in policy_relations)
     evidence = dict(task_id=source["task_id"], prompt_tsg_id=source["prompt_tsg_id"],
                     requirement_node_ids=sorted(requirements), requirement_type=next(iter(requirement_types)),
                     scope=canonical_value(scope))
@@ -340,9 +354,10 @@ def _occurrence(source: dict, occurrence: dict, aliases: dict) -> tuple[dict, di
 def _query(selector: dict, feature_id: str) -> dict:
     op = selector["operation_semantic_id"]
     subjects, conditions = selector["subject_semantic_ids"], selector["condition_semantic_ids"]
-    semantics = sorted({op, *subjects, *conditions})
-    # Policy-internal guards are frozen with the factor, not required by this
-    # feature-independent task query.
+    endpoints = {key for a, _, b in selector.get("policy_relations", []) for key in (a, b)}
+    semantics = sorted({op, *subjects, *conditions, *endpoints})
+    # Operands must exist independently, but neither the policy's order nor its
+    # internal guards are prerequisites of this feature-independent task query.
     execution = set(selector.get('execution_condition_semantic_ids', conditions))
     relations = sorted({(s, "used_by", op) for s in subjects if selector["scope_kind"] != "objects"}
                        | {(c, "conditions" if c in execution else "context_for", op) for c in conditions})

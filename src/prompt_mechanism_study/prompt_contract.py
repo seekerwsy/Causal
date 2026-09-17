@@ -634,7 +634,7 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
     if inventory is None:
         return
     if (not isinstance(inventory, dict)
-        or set(inventory) - {"unit_impacts", "statement_kinds", "requirement_structures", "requirement_scopes"} != {"source_units", "coverage", "layers", "operation_roles"}
+        or set(inventory) - {"unit_impacts", "statement_kinds", "requirement_structures", "requirement_scopes", "requirement_relations"} != {"source_units", "coverage", "layers", "operation_roles"}
         or any(not isinstance(inventory[key], dict) for key in ("source_units", "coverage", "layers"))
         or not isinstance(inventory["operation_roles"], list)):
         raise PromptTSGError("source inventory fields are invalid")
@@ -645,6 +645,29 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
         raise PromptTSGError("source requirement structures are invalid")
     requirement_membership([(key, row["kind"], row["members"]) for key, row in structures.items()],
         {key for key, fact in by_local.items() if fact["node_type"] in REQUIREMENT_TYPES})
+    owned_relations = inventory.get("requirement_relations", {})
+    if not isinstance(owned_relations, dict):
+        raise PromptTSGError("owned requirement relations must be keyed by owner")
+    for owner, rows in owned_relations.items():
+        if (owner not in by_local or by_local[owner]['node_type'] not in REQUIREMENT_TYPES
+            or layers.get(owner) != 'runtime' or not isinstance(rows, list) or not rows
+            or structures.get(owner, {}).get('kind', 'atom') != 'atom'):
+            raise PromptTSGError("owned relation needs a runtime requirement leaf")
+        seen = set()
+        for row in rows:
+            if (not isinstance(row, dict)
+                or set(row) != {'source', 'target', 'edge_type', 'evidence_text', 'occurrence'}
+                or any(not isinstance(row[key], str) for key in ('source', 'target', 'edge_type', 'evidence_text'))
+                or not row['evidence_text'].strip() or type(row['occurrence']) is not int
+                or row['occurrence'] < 1):
+                raise PromptTSGError("owned relation fields are invalid")
+            source, kind, target = row['source'], row['edge_type'], row['target']
+            if (kind != 'precedes' or source == target or (source, kind, target) in seen
+                or any(key not in by_local or by_local[key]['node_type'] != 'task_operation'
+                       or layers.get(key) != 'runtime' for key in (source, target))):
+                raise PromptTSGError("owned relation endpoints or type are invalid")
+            _occurrence_span(prompt, row['evidence_text'], row['occurrence'])
+            seen.add((source, kind, target))
     modalities = inventory.get('statement_kinds', {})
     for key, row in inventory.get('requirement_scopes', {}).items():
         if (key not in by_local or by_local[key]['node_type'] not in REQUIREMENT_TYPES
@@ -824,7 +847,8 @@ def compile_open_task_contract(
         absent_semantics=sorted(absent), unresolved_semantics=sorted(unresolved),
         feature_assessments=features, scoped_feature_assessments=scoped_features,
         requirement_structures=(contract.source_inventory or {}).get("requirement_structures", {}),
-        requirement_scopes=(contract.source_inventory or {}).get("requirement_scopes", {}))
+        requirement_scopes=(contract.source_inventory or {}).get("requirement_scopes", {}),
+        requirement_relations=(contract.source_inventory or {}).get("requirement_relations", {}))
 
 
 def freeze_open_concepts(

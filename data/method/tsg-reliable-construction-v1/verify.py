@@ -142,10 +142,63 @@ def verify_agent_graphs():
                 semantic_correctness_not_certified=True)
 
 
-def verify_agent_repetitions():
-    base = ROOT/'agent-repeatability'
+def project_owned_requirements():
+    """Probe saved natural bindings; mutations are not natural prompt interventions."""
+    base = ROOT/'owned-relations'
+    code = r'''
+import json, sys
+from dataclasses import replace
+from pathlib import Path
+from prompt_mechanism_study.artifact_io import read_json
+from prompt_mechanism_study.prompt_contract import task_context_contract_from_record
+from prompt_mechanism_study.prompt_tsg import prompt_tsg_from_record, requirement_matches_policy, query_context
+from prompt_mechanism_study.candidate_construction import candidate_request, _candidate_units, _occurrence, _query, choose_candidate_scope
+base=Path(sys.argv[1]); results=[]
+for case in read_json(base/'protocol/plan.json')['cases']:
+    saved=base/case['run']; checks=sorted((saved/'checks').glob('attempt-*'))[-1]
+    if not (checks/'graph.json').exists():
+        results.append(dict(run=case['run'],status='NO_COMPILED_GRAPH',policies=[])); continue
+    graph=prompt_tsg_from_record(read_json(checks/'graph.json'))
+    contract=task_context_contract_from_record(read_json(checks/'contract.json'))
+    request=candidate_request([read_json(saved/'inputs/task.json')],[contract],input_catalog=read_json(saved/'inputs/catalog.json'))
+    ids,bindings,_=_candidate_units(request); source=request['sources'][0]
+    aliases={n['node_type']+'::'+n['concept_id']:n['concept_id'] for n in source['nodes']}
+    policies=[]
+    for owner in sorted({row[0] for row in graph.requirement_relations}):
+        key=next(k for k,(_,node) in ids.items() if node==owner)
+        observations=[]
+        for occurrence in bindings[key]:
+            selector,_=_occurrence(source,occurrence,aliases); scope=choose_candidate_scope(graph,selector)
+            query=_query(selector,next(n.semantic_id for n in graph.nodes if n.node_id==owner))
+            reverse=replace(graph,requirement_relations=tuple(sorted((r,b,k,a) if r==owner else (r,a,k,b) for r,a,k,b in graph.requirement_relations)))
+            removed=replace(graph,nodes=tuple(n for n in graph.nodes if n.node_id!=owner),edges=tuple(e for e in graph.edges if owner not in {e.source_id,e.target_id}),requirement_structures=tuple(r for r in graph.requirement_structures if r[0]!=owner),requirement_relations=tuple(r for r in graph.requirement_relations if r[0]!=owner))
+            stripped=replace(graph,requirement_relations=removed.requirement_relations)
+            observations.append(dict(selector=selector,original_positive=scope is not None and requirement_matches_policy(graph,owner,scope,selector),
+                reversal_rejected=scope is not None and not requirement_matches_policy(reverse,owner,scope,selector),
+                missing_order_rejected=scope is not None and not requirement_matches_policy(stripped,owner,scope,selector),
+                source_geometry_survives_owner_removal=scope is not None and choose_candidate_scope(removed,selector)==scope,
+                query_has_no_precedence_prerequisite=not any(r[1]=='precedes' for r in query['required_relations']),
+                context_before=query_context(graph,query=query,cwe='',task_family='').state.value,
+                context_after_structural_removal=query_context(removed,query=query,cwe='',task_family='').state.value))
+        policies.append(dict(requirement_node_id=owner,complete_bindings=observations))
+    results.append(dict(run=case['run'],status='PROJECTED',policies=policies))
+print(json.dumps(dict(cases=results,structural_mutations_only=True,natural_editability_tested=False,semantic_eligibility_not_certified=True,provider_calls=0)))
+'''
+    with tempfile.TemporaryDirectory(prefix='tsg-owned-projection-') as directory:
+        work = Path(directory)
+        archive = base/'execution-source.tar.gz'
+        plan = json.loads((base/'protocol/plan.json').read_text(encoding='utf-8'))
+        assert hashlib.sha256(archive.read_bytes()).hexdigest() == plan['execution_source_sha256']
+        with tarfile.open(archive) as source:
+            source.extractall(work, filter='data')
+        env = {**os.environ, 'PYTHONPATH':str(work/'src'), 'PYTHONUTF8':'1'}
+        return json.loads(subprocess.check_output([sys.executable,'-c',code,str(base)],cwd=work,env=env,text=True))
+
+
+def verify_agent_repetitions(name='agent-repeatability', expected_runs=16):
+    base = ROOT/name
     plan = json.loads((base/'protocol/plan.json').read_text(encoding='utf-8'))
-    assert len(plan['cases']) == 16
+    assert len(plan['cases']) == expected_runs
     successful = attempts = 0
     with tempfile.TemporaryDirectory(prefix='tsg-agent-repetitions-') as directory:
         work = Path(directory)
@@ -252,6 +305,33 @@ def verify_agent_repairs():
                 provider_calls=0, semantic_correctness_not_certified=True)
 
 
+def verify_owned_relations():
+    base = ROOT/'owned-relations'
+    read = lambda path: json.loads(path.read_text(encoding='utf-8'))
+    identities = read(base/'analysis/input-output-identities.json')
+    for name, digest in identities.items():
+        assert hashlib.sha256((base/name).read_bytes()).hexdigest() == digest, name
+    replay = verify_agent_repetitions('owned-relations', expected_runs=2)
+    projection = project_owned_requirements()
+    assert projection == read(base/'analysis/projection.json')
+    audit = read(base/'analysis/source-audit.json')
+    refs = {row['case_id']:row for row in read(base/'protocol/references.json')['cases']}
+    for case in audit['cases']:
+        expected = refs[case['run'].removesuffix('-r1')]['requirements']
+        assert Counter(row['reference_id'] for row in case['reference_assessments']) == Counter(row['reference_id'] for row in expected)
+    judgments = [r for case in audit['cases'] for r in case['reference_assessments']]
+    summary = audit['summary']
+    assert summary['reference_assessments'] == len(judgments)
+    assert summary['base_tasks'] == len(audit['cases']) == replay['retained_runs_replayed']
+    assert summary['compiled_graphs'] == replay['compiled_runs']
+    assert summary['retained_attempts'] == replay['retained_attempts_replayed']
+    for status in ('correct_decisive','missing_or_unresolved','wrong_decisive'):
+        assert summary[status] == sum(row['status']==status for row in judgments)
+    assert summary['owned_order_requirements'] == sum(len(row['policies']) for row in projection['cases'])
+    return dict(replay=replay,source_audit_counts=summary,projection_replayed=True,
+                source_audit_not_independently_certified=True)
+
+
 if __name__ == '__main__':
     experiments = ('compact-candidate', 'compact-candidate-v2', 'inventory-pilot',
                    'inventory-v2-deepseek', 'inventory-v2-max')
@@ -265,4 +345,5 @@ if __name__ == '__main__':
                           agent_repetitions=verify_agent_repetitions(),
                           agent_audit_counts=audit,
                           agent_repairs=verify_agent_repairs(),
+                          owned_relations=verify_owned_relations(),
                           scientific_claim_allowed=False), indent=2))

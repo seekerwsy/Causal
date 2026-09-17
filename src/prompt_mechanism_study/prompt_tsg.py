@@ -98,6 +98,8 @@ class PromptTSG:
     requirement_structures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     # Whole-task and universal contracts remain explicit, never inferred local edges.
     requirement_scopes: tuple[tuple[str, str, tuple[str, ...], str | None], ...] = ()
+    # A policy's relation operands are not direct targets or independent context.
+    requirement_relations: tuple[tuple[str, str, str, str], ...] = ()
 
     @property
     def tsg_id(self) -> str:
@@ -108,6 +110,8 @@ class PromptTSG:
             payload.pop("requirement_structures")
         if not self.requirement_scopes:
             payload.pop("requirement_scopes")
+        if not self.requirement_relations:
+            payload.pop("requirement_relations")
         if self.schema_version != "3.0":
             payload.pop("absent_semantics")
             payload.pop("feature_assessments")
@@ -179,7 +183,7 @@ def graph_requirement_membership(graph):
         {n.node_id for n in graph.nodes if n.node_type in REQUIREMENT_TYPES})
 
 
-def requirement_binding(requirement, *, links, node_types, structures=(), retained_scopes=()):
+def requirement_binding(requirement, *, links, node_types, structures=(), retained_scopes=(), owned_relations=()):
     """Read a whole expression's binding, without distributing OR/NOT or quantifiers.
 
     A compound choice/prohibition has a usable envelope only when every member
@@ -189,6 +193,9 @@ def requirement_binding(requirement, *, links, node_types, structures=(), retain
     forms = {key: (kind, members) for key, kind, members in structures}
     retained = {key: (kind, boundaries, target_class)
                 for key, kind, boundaries, target_class in retained_scopes}
+    relations = {}
+    for owner, source, kind, target in owned_relations:
+        relations.setdefault(owner, set()).add((source, kind, target))
 
     def read(key, *, nested=False):
         kind, members = forms.get(key, ("atom", ()))
@@ -206,13 +213,47 @@ def requirement_binding(requirement, *, links, node_types, structures=(), retain
         if key in retained:
             scope_kind, boundaries, target_class = retained[key]
             return dict(kind=scope_kind, operations=set(boundaries), subjects=set(),
-                        conditions=guards, target_class=target_class)
+                        conditions=guards, target_class=target_class, relations=relations.get(key, set()))
         return dict(kind="targets", target_class=None, conditions=guards,
+                    relations=relations.get(key, set()),
                     operations={b for a, rel, b in links if a == key and rel == "constrains"
                                 and node_types.get(b) == "task_operation"},
                     subjects={b for a, rel, b in links if a == key and rel == "constrains"
                               and node_types.get(b) == "data_object"})
     return read(requirement)
+
+
+def requirement_policy_relations(graph, requirement):
+    """Return retained relation operands for a whole expression, not asserted edges.
+
+    This closure preserves an OR/NOT policy for inspection. Candidate use still
+    requires requirement_binding's common envelope; differing alternatives do
+    not become one unconditional relation set.
+    """
+    members = {key: children for key, _, children in graph.requirement_structures}
+    owners, pending = set(), [requirement]
+    while pending:
+        owner = pending.pop()
+        if owner not in owners:
+            owners.add(owner)
+            pending.extend(members.get(owner, ()))
+    return tuple(sorted({(source, kind, target)
+        for owner, source, kind, target in graph.requirement_relations if owner in owners}))
+
+
+def select_policy_relation_endpoints(graph, selector):
+    """Resolve operands from source entities alone; policy presence cannot choose them."""
+    relation_semantics = {key for source, _, target in selector.get("policy_relations", ())
+                          for key in (source, target)}
+    resolved = {}
+    for semantic in relation_semantics:
+        choices = [node.node_id for node in graph.nodes
+                   if node.node_type == "task_operation" and node.semantic_id == semantic]
+        if len(choices) != 1:
+            return None
+        resolved[semantic] = choices[0]
+    return tuple(sorted((resolved[source], kind, resolved[target])
+                        for source, kind, target in selector.get("policy_relations", ())))
 
 
 def requirement_matches_policy(graph, requirement, scope, selector):
@@ -221,10 +262,12 @@ def requirement_matches_policy(graph, requirement, scope, selector):
     links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
     binding = requirement_binding(requirement, links=links,
         node_types={key: node.node_type for key, node in nodes.items()},
-        structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
+        structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes,
+        owned_relations=graph.requirement_relations)
     kind = {key: kind for key, kind, _ in graph.requirement_structures}.get(requirement, "atom")
     execution = {a for a, rel, b in links if rel == "conditions" and b == scope.operation_node_id}
-    if binding is None:
+    relation_endpoints = select_policy_relation_endpoints(graph, selector)
+    if binding is None or relation_endpoints is None:
         return False
     boundary_matches = (binding["kind"] == selector["scope_kind"]
                         and scope.operation_node_id in binding["operations"])
@@ -236,6 +279,7 @@ def requirement_matches_policy(graph, requirement, scope, selector):
             and boundary_matches
             and binding["target_class"] == selector["target_class"]
             and binding["subjects"] == set(scope.subject_node_ids)
+            and binding["relations"] == set(relation_endpoints)
             and set(scope.condition_node_ids) == execution
             and sorted(nodes[key].semantic_id for key in binding["conditions"] - execution)
                 == selector["policy_condition_semantic_ids"])
@@ -407,7 +451,7 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
             fields = {"operation_semantic_id", "subject_semantic_ids", "condition_semantic_ids",
                       "execution_condition_semantic_ids", "match_rule", "scope_kind", "target_class",
                       "policy_condition_semantic_ids", "requirement_kind"}
-            if (not isinstance(selector, dict) or set(selector) != fields
+            if (not isinstance(selector, dict) or set(selector) - {"policy_relations"} != fields
                 or selector["scope_kind"] not in {"targets", "task", "each", "objects"}
                 or selector["requirement_kind"] not in {"atom", "or", "not"}
                 or selector["match_rule"] != "unique_source_geometry_match"
@@ -432,6 +476,16 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
                     raise PromptTSGError("candidate scope concepts must preserve their declared roles")
             if selector["execution_condition_semantic_ids"] != selector["condition_semantic_ids"]:
                 raise PromptTSGError("policy guards must not be used as task-selection conditions")
+            if "policy_relations" in selector:
+                rows = selector["policy_relations"]
+                if (not isinstance(rows, list) or not rows
+                    or any(not isinstance(row, list) or len(row) != 3
+                           or any(not isinstance(item, str) for item in row)
+                           or row[1] != "precedes" or row[0] == row[2]
+                           or any(semantics.get(row[i]) != "task_operation" for i in (0, 2))
+                           for row in rows)
+                    or rows != [list(row) for row in sorted(set(map(tuple, rows)))]):
+                    raise PromptTSGError("policy relation operands must be sorted unique operation meanings")
     if "feature_role_domains" in value:
         rules = value["feature_role_domains"]
         callers = _unique_strings(value["caller_supplied_concepts"], "caller-supplied concepts")
@@ -488,6 +542,8 @@ def prompt_tsg_record(graph: PromptTSG) -> dict[str, Any]:
         payload.pop("requirement_structures")
     if not graph.requirement_scopes:
         payload.pop("requirement_scopes")
+    if not graph.requirement_relations:
+        payload.pop("requirement_relations")
     if graph.schema_version != "3.0":
         payload.pop("absent_semantics")
         payload.pop("feature_assessments")
@@ -522,6 +578,8 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
             expected.add("requirement_structures")
         if "requirement_scopes" in value:
             expected.add("requirement_scopes")
+        if "requirement_relations" in value:
+            expected.add("requirement_relations")
     if set(value) != expected:
         raise PromptTSGError("Prompt TSG serialized fields are invalid")
     try:
@@ -586,6 +644,7 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
             tuple((key, kind, tuple(members)) for key, kind, members in value.get("requirement_structures", ())),
             tuple((key, kind, tuple(boundaries), target_class)
                   for key, kind, boundaries, target_class in value.get("requirement_scopes", ())),
+            tuple(tuple(row) for row in value.get("requirement_relations", ())),
         )
     except (KeyError, TypeError, ValueError):
         raise PromptTSGError("Prompt TSG serialized values are invalid") from None
@@ -610,6 +669,7 @@ def build_prompt_tsg(
     scoped_feature_assessments: Sequence[Mapping[str, Any]] = (),
     requirement_structures: Mapping[str, Mapping[str, Any]] | None = None,
     requirement_scopes: Mapping[str, Mapping[str, Any]] | None = None,
+    requirement_relations: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
 ) -> PromptTSG:
     """Validate evidence-bound facts and deterministically commit one Prompt TSG."""
 
@@ -744,6 +804,15 @@ def build_prompt_tsg(
         raise PromptTSGError("Prompt TSG schema cannot represent unresolved relations")
     ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
     ordered_edges = tuple(sorted(edges, key=lambda item: item.edge_id))
+    policy_relations = requirement_relations or {}
+    if (not isinstance(policy_relations, Mapping)
+        or any(owner not in local_nodes or not isinstance(rows, (list, tuple))
+               or any(not isinstance(row, Mapping)
+                      or not {'source', 'edge_type', 'target'} <= set(row)
+                      or row['source'] not in local_nodes or row['target'] not in local_nodes
+                      for row in rows)
+               for owner, rows in policy_relations.items())):
+        raise PromptTSGError("owned relation coordinates are outside the graph")
     graph = PromptTSG(
         schema_version,
         task_id,
@@ -770,6 +839,9 @@ def build_prompt_tsg(
         tuple(sorted((local_nodes[key].node_id, row['kind'],
             tuple(sorted(local_nodes[k].node_id for k in row['boundaries'])) or (root.node_id,),
             row['target_class']) for key, row in (requirement_scopes or {}).items())),
+        tuple(sorted((local_nodes[owner].node_id, local_nodes[row['source']].node_id,
+                      row['edge_type'], local_nodes[row['target']].node_id)
+                     for owner, rows in policy_relations.items() for row in rows)),
     )
     validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
     return graph
@@ -782,7 +854,7 @@ def validate_prompt_tsg(
 
     if (
         graph.schema_version not in {"1.0", "2.0", "3.0"}
-        or (graph.schema_version != "3.0" and (graph.absent_semantics or graph.feature_assessments or graph.scoped_feature_assessments))
+        or (graph.schema_version != "3.0" and (graph.absent_semantics or graph.feature_assessments or graph.scoped_feature_assessments or graph.requirement_relations))
         or (graph.schema_version == "1.0" and graph.unresolved_relations)
         or graph.prompt_sha256 != content_hash(prompt)
         or graph.catalog_sha256 != catalog_sha256(catalog)
@@ -830,6 +902,18 @@ def validate_prompt_tsg(
         raise PromptTSGError('retained requirement scopes must be ordered')
     if graph.requirement_structures != tuple(sorted(graph.requirement_structures)):
         raise PromptTSGError("requirement structures must be ordered")
+    forms = {key: kind for key, kind, _ in graph.requirement_structures}
+    if (any(not isinstance(row, tuple) or len(row) != 4
+            or any(not isinstance(item, str) for item in row) for row in graph.requirement_relations)
+        or graph.requirement_relations != tuple(sorted(set(graph.requirement_relations)))):
+        raise PromptTSGError("owned requirement relations must be canonical and unique")
+    for owner, source, kind, target in graph.requirement_relations:
+        if (owner not in node_by_id or node_by_id[owner].node_type not in REQUIREMENT_TYPES
+            or forms.get(owner, 'atom') != 'atom'
+            or source == target or kind != 'precedes'
+            or any(key not in node_by_id or node_by_id[key].node_type != 'task_operation'
+                   for key in (source, target))):
+            raise PromptTSGError("owned relation has invalid owner or endpoint roles")
     guard_owners = {}
     for edge in graph.edges:
         if edge.edge_type == 'conditions':
@@ -906,7 +990,8 @@ def validate_prompt_tsg(
                             continue
                         envelope = requirement_binding(node.node_id, links=links,
                             node_types={k: n.node_type for k, n in node_by_id.items()},
-                            structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes)
+                            structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes,
+                            owned_relations=graph.requirement_relations)
                         if (envelope is None or item.scope.operation_node_id in envelope["operations"]
                             or roots[0].node_id in envelope["operations"]
                             or selector["scope_kind"] == "objects" and (
@@ -1044,6 +1129,8 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
     Conditions use execution guards or non-gating source contexts, never target state.
     """
     nodes = {n.node_id: n for n in graph.nodes}
+    if select_policy_relation_endpoints(graph, selector) is None:
+        return None
     links = {(e.source_id, e.edge_type, e.target_id) for e in graph.edges}
     matches = []
     for op in sorted(graph.nodes, key=lambda n: n.node_id):

@@ -55,6 +55,12 @@ review and at most one local semantic patch; detailed binding review was not
 promoted after its cross-task diagnostic. Candidate-local unknown handling helps
 limit unusable comparisons but does not prove semantic accuracy.
 
+The current binding repair separates direct targets from requirement-owned order.
+Owned relations retain their requirement, guards and operands through compilation,
+candidate matching and edit checks. A [two-task development check](docs/experiments/2026-09-17-tsg-reliable-construction.md#repairing-ownership-of-temporal-requirements)
+retained all nine fixed source meanings and three order bindings; one sample per
+task does not establish stability, and natural policy editability remains untested.
+
 Complete conditional, whole-task and universal requirements can now enter Atomic
 candidate construction at their original boundary. Policy-internal conditions
 are separate from task-selection context. The [bounded projection check](docs/experiments/2026-09-17-complete-policy-projection.md)

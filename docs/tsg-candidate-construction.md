@@ -133,6 +133,11 @@ New requests declare `requirement_granularity=complete_single_requirement`.
 Prepare a fresh request rather than changing the interpretation of a frozen one.
 The catalogue stores `feature_scope_selectors`: boundary kind, quantified class,
 expression kind, internal policy conditions and independent execution context.
+Order requirements additionally freeze `policy_relations` with exact direction and
+operation operands. These relations belong to the requirement; operands are not
+extra direct targets. Scope selection requires unique independent endpoints,
+not an already expressed order. Positive evidence must match the complete relation
+envelope. Different OR/NOT member envelopes remain represented but unprojected.
 Scope selection reads only task/operation identity, input-use bindings and execution
 conditions, or the exact source-object identities for an object policy. It never
 reads the requirement or its state; ambiguity returns `null`.
@@ -148,6 +153,9 @@ in its identity. No extra covariates, FCI variables or interaction analysis are
 automatically introduced. A root-bound policy reads the whole effective input.
 Independent source review includes retained scope assertions. Reviewed edits check
 non-target composition and whole/universal scopes as well as ordinary edges.
+They also preserve each non-target owner's relations, even when another owner
+names the same pair. Removing a target may remove its own relations, while
+independently supported ordinary order and other owners' relations must survive.
 Only expression members and exclusively used guards inside the target citation can
 belong to its edit; shared context, operation and object evidence remains protected.
 Projecting an object requirement does not certify editability. A size requirement

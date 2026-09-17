@@ -9,7 +9,7 @@ This document describes development within representation, not formal qualificat
 
 ```text
 actual system/user input
-  -> source records with participants, requirement composition, guards and scope
+  -> source records with participants, requirement composition, guards, scope and owned relations
   -> one ordinary source review and at most one local patch
   -> deterministic TSG compilation
   -> separate candidate applicability/expression assessment
@@ -61,6 +61,14 @@ agent workflow executes, but reliable semantic repair is not established.
    instances as the complete domain. `implementation` binds generation requirements.
    AND/OR/NOT parents use `composite`, carry shared guards and preserve member
    structure without adding a separate target obligation. Leaves retain exact targets.
+   Every listed target receives the whole predicate; a temporal counterpart is not
+   another direct target. A runtime atom's `relations` list owns its required
+   `precedes` operands. These rows inherit the owner's modality, guards and composition.
+   Contract and graph `requirement_relations` retain ownership; they never become
+   unconditional ordinary edges. Composite parents cannot add their own relations.
+   Operation `precedes` is reserved for independently supported context. Separate
+   source statements may support the same pair, but one declaration cannot be copied
+   into both locations. Removing a policy must preserve separately supported context.
    Whole-task/universal scopes survive in contract and graph `requirement_scopes`.
    They may support a whole-boundary policy after semantic review, without a local
    instance projection. They cannot certify an unrelated local candidate or local
@@ -71,6 +79,9 @@ agent workflow executes, but reliable semantic repair is not established.
    An absent operation execution guard is not a claim that the operation executes on
    every path. Prompt TSG is not an execution trace. In contrast, a requirement's
    empty guard supplies no conditional restriction on that requirement's binding.
+   A function's outward return contract concerns normal returns, not exceptional
+   exits; exceptions do not alone require an extra success guard. Explicit business
+   branches such as found/not-found still require distinct structural conditions.
    Source-supported `scope_conditions` instead produce non-gating `context_for` edges;
    independent context cannot be inferred merely from a target requirement's guard.
 3. **Distinguish modality.** `obligation` prescribes behavior. `assumption` records an
@@ -85,6 +96,8 @@ agent workflow executes, but reliable semantic repair is not established.
    One model review checks every record and every source unit. It identifies precise
    rejected fields/list items and omissions. Review and patch receive the same role
    definitions and exact scope/guard interpretation used during extraction/compilation.
+   Extraction, review, patch and readback share `source_records.record_semantics`,
+   including the distinction between direct targets and owned relation operands.
    The program first decodes actual bindings with `structural_readback`. Guards and
    targets come exclusively from their fields, with empty guards shown as unconditional.
    Correct definition text cannot supply missing structure. Readback is retained in
@@ -110,7 +123,8 @@ agent workflow executes, but reliable semantic repair is not established.
    equivalent; delete/recreate equivalence is not certified, and the model's positive
    verdict is not an independent guarantee.
 5. **Compile without another semantic interpretation.** Record references produce
-   input/output edges, requirement targets, owned guards and stated precedence.
+   input/output edges, requirement targets, owned guards and separately retained
+   requirement relations. Only independent context produces ordinary precedence edges.
    Task-wide scope is never broadcast. Preview compilation checks the draft;
    only the completed graph attempt can reach downstream assessment. Repair or review
    failure retains the failed task and any partial graph, without assessing its scopes.
@@ -123,6 +137,14 @@ agent workflow executes, but reliable semantic repair is not established.
    Frozen `feature_scope_selectors` retain scope kind, universal class, expression
    kind and policy-internal guards. Task matching reads only independent geometry;
    a policy-only guard does not become an additional source-context prerequisite.
+   An order policy also freezes exact `policy_relations`. Its endpoints must resolve
+   independently and uniquely, but the order need not already hold for applicability.
+   Positive expression must match direction, endpoints and the complete binding.
+   OR/NOT members with different relation envelopes remain represented but unresolved
+   for candidate projection; they are not flattened into simultaneous obligations.
+   Source dependencies and edit checks include both operands. Removing a target
+   owner may remove its relations; other owners and independent ordinary relations
+   remain non-target invariants. This preserves semantics, not proof of editability.
    The `objects` selector preserves an exact direct object boundary without requiring
    an invented operation target. Root is only its coordinate anchor; object uses
    do not broaden it. Object identity and relevant dependencies must be decisive.

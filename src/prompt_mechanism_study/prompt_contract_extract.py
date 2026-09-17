@@ -1955,6 +1955,10 @@ def _represented_unit_operations(contract: OpenTaskContract) -> dict[str, set[st
         # Influence is not a direct obligation: an unprojected global rule can
         # still affect local edits and must not disappear from unknown handling.
         links[key].update(scope['boundaries'] or operations)
+    for owner, rows in inventory.get('requirement_relations', {}).items():
+        if owner in runtime:
+            links[owner].update(endpoint for row in rows for endpoint in (row['source'], row['target'])
+                                if endpoint in runtime)
     for key, expression in inventory.get('requirement_structures', {}).items():
         if key in runtime:
             links[key].update(member for member in expression['members'] if member in runtime)
@@ -2067,7 +2071,7 @@ def fixed_scope_request(
     """
     graph = compile_task_context_contract(contract, prompt=prompt, catalog=catalog)
     facts = {row["local_id"]: row for row in contract.facts}
-    from .prompt_tsg import requirement_membership, REQUIREMENT_TYPES
+    from .prompt_tsg import requirement_membership, select_policy_relation_endpoints, REQUIREMENT_TYPES
     structures = (contract.source_inventory or {}).get('requirement_structures', {})
     asserted_requirements, atomic_requirements = requirement_membership(
         [(key, row['kind'], row['members']) for key,row in structures.items()],
@@ -2141,6 +2145,9 @@ def fixed_scope_request(
             scope["policy_scope"] = selector
             scope["policy_conditions"] = [dict(concept_id=key, definition=catalog["semantic_guidance"][key])
                                            for key in selector["policy_condition_semantic_ids"]]
+            if selector.get("policy_relations"):
+                scope["policy_relations"] = [dict(source=node_to_local[a], edge_type=relation, target=node_to_local[b])
+                    for a, relation, b in select_policy_relation_endpoints(graph, selector)]
             scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
                 if fact["semantic_id"] == scope["concept_id"] and key in asserted_requirements
                 and (contract.source_inventory or {}).get("statement_kinds", {}).get(key, "obligation") == "obligation"
@@ -2149,6 +2156,7 @@ def fixed_scope_request(
             scope["admissible_positive_requirements"] = sorted(key for key, fact in facts.items()
             if fact["semantic_id"] == scope["concept_id"]
             and key in atomic_requirements
+            and not (contract.source_inventory or {}).get("requirement_relations", {}).get(key)
             and (contract.source_inventory or {}).get("statement_kinds", {}).get(key, "obligation") == "obligation"
             and requirement_covers_scope(key, scope["target"], scope["subjects"], scope["conditions"],
                 links=links, node_types={k: f["node_type"] for k, f in facts.items()}))
@@ -2167,6 +2175,8 @@ def fixed_scope_request(
         objects = row.get("policy_scope", {}).get("scope_kind") == "objects"
         targets = ([fact_id for fact_id, fact in facts.items() if fact["node_type"] == "task_operation"]
                    if row["target"] == "task.root" and not objects else [row["target"]])
+        targets = set(targets) | {endpoint for relation in row.get("policy_relations", [])
+                                  for endpoint in (relation["source"], relation["target"])}
         blockers[key] = sorted({reason for target in targets for reason in _scope_blockers(
             contract, inventory_status, target, object_subjects=tuple(row["subjects"]) if objects else ())})
     for key, row in scopes.items():
@@ -2175,6 +2185,9 @@ def fixed_scope_request(
         blockers[key] += ['unprojected_requirement:'+fact_id
             for fact_id in (contract.source_inventory or {}).get('requirement_scopes', {})
             if facts[fact_id]['semantic_id']==row['concept_id']]
+        blockers[key] += ['unprojected_requirement_relation:'+fact_id
+            for fact_id, relations in (contract.source_inventory or {}).get('requirement_relations', {}).items()
+            if relations and facts[fact_id]['semantic_id']==row['concept_id']]
         # A mentioned alternative is neither an independently expressed factor nor
         # evidence of its absence. Keep these coordinates explicitly withheld.
         if not row['admissible_positive_requirements']:
@@ -2209,7 +2222,11 @@ def fixed_scope_request(
             "incidence or result relation is inferred; object applicability still needs source support. "
             "policy_conditions are internal to the policy, not additional task-selection facts; "
             "their absence from the source is not by itself an unresolved context. They must be "
-            "preserved in a positive requirement's structural guards. task means one overall runtime "
+            "preserved in a positive requirement's structural guards. policy_relations likewise "
+            "belong to the requirement: preserve their exact "
+            "direction and endpoints in positive evidence. Their endpoints must independently exist; "
+            "the order itself is not an applicability prerequisite and is never inferred from free text. "
+            "An endpoint is an operand, not an additional direct target. task means one overall runtime "
             "contract; each means a universal rule over target_class, never a finite instance list. "
             "Verify from the unchanged task that the policy is meaningful and feasible. A root node, "
             "the policy's presence, or a vacuously empty class proves no applicability. Relevant "
@@ -2259,6 +2276,8 @@ def fixed_scope_request(
         "withheld_scopes": withheld,
         "scope_blockers": {key: reasons for key, reasons in blockers.items() if reasons},
         "retained_requirement_scopes": (contract.source_inventory or {}).get('requirement_scopes', {}),
+        **({"requirement_relations": contract.source_inventory["requirement_relations"]}
+           if (contract.source_inventory or {}).get("requirement_relations") else {}),
         "unit_impacts": {} if contract.source_inventory is None else contract.source_inventory.get("unit_impacts", {}),
         "source_inventory_status": inventory_status,
         "operation_roles": [] if contract.source_inventory is None else contract.source_inventory["operation_roles"],

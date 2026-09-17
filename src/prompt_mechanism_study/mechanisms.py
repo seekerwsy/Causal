@@ -12,6 +12,7 @@ from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     FeatureScope,
     requirement_owned_nodes,
+    requirement_policy_relations,
     PromptTSGError,
     QueryState,
     feature_state,
@@ -193,6 +194,9 @@ def bind_task_hypothesis(
         )
     target_requirements = requirement_owned_nodes(graph, target_requirements)
     nodes |= target_requirements
+    nodes.update(endpoint for requirement in target_requirements
+                 for source, _, target in requirement_policy_relations(graph, requirement)
+                 for endpoint in (source, target))
     if factor_scopes:
         edges |= {
             edge.edge_id
@@ -453,6 +457,16 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
                   for key, kind, boundaries, target_class in target.requirement_scopes if key in retained}
     if old_structures != new_structures or old_scopes != new_scopes:
         raise MechanismRegistryError("neutral rewrite changed non-target composition or scope")
+    # Ownership makes the edited policy's relation disappear with its owner,
+    # while independently supported order and other owners remain invariant.
+    old_owned_relations = {(node_map[owner], boundary_map[source], kind, boundary_map[target])
+                          for owner, source, kind, target in graph.requirement_relations
+                          if owner in preserved}
+    new_owned_relations = {(owner, source, kind, target)
+                          for owner, source, kind, target in target.requirement_relations
+                          if owner in retained}
+    if old_owned_relations != new_owned_relations:
+        raise MechanismRegistryError("neutral rewrite changed another requirement's owned relation")
 
     def mapped_scope(scope):
         return FeatureScope(

@@ -714,6 +714,8 @@ def open_graph_assertions(graph: dict | None, *, contract: dict | None = None) -
     statements += [("requirement_scope", dict(requirement=key, kind=kind,
                     boundaries=boundaries, target_class=target_class))
                    for key, kind, boundaries, target_class in graph.get("requirement_scopes", [])]
+    statements += [("requirement_relation", dict(requirement=owner, source=a, edge_type=kind, target=b))
+                   for owner, a, kind, b in graph.get("requirement_relations", [])]
     if contract is not None:
         if (contract.get("task_id") != graph["task_id"]
             or contract.get("prompt_sha256") != graph["prompt_sha256"]):
@@ -848,6 +850,9 @@ def evaluate_open_semantic_case(graph: dict | None, *, prompt: str, expected: di
             for parent, _, members in (graph or {}).get('requirement_structures', []):
                 if {parent,*members} & needed_nodes:
                     needed_nodes.update((parent,*members))
+            for owner, source, _, target in (graph or {}).get('requirement_relations', []):
+                if {owner, source, target} & needed_nodes:
+                    needed_nodes.update((owner, source, target))
             needed_nodes.update(e['source_id'] for e in links
                 if e['edge_type']=='conditions' and e['target_id'] in needed_nodes)
             changed = before != needed_nodes

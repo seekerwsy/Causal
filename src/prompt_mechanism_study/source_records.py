@@ -18,13 +18,32 @@ def _array(item):
     return dict(type="array", items=item)
 
 
+def record_semantics():
+    """One binding contract shared by extraction, review, patch and readback."""
+    return dict(
+        task_scope='An overall runtime-task contract. The compiler retains the boundary and emits NO per-operation obligation. A narrower source-named function/return/operation should use targets.',
+        each_scope='A universal rule over target_class within the task or one named enclosing runtime operation. Known instances are not a complete domain; the compiler never replaces the rule by an extracted instance list.',
+        composite_scope='AND/OR/NOT parents express logical composition and shared guards, not an additional target obligation. Every member keeps its own binding and owned relations. Only conjunction asserts members independently.',
+        targets_scope='Each listed operation/object independently receives the ENTIRE predicate. This is not a list of participants or relation endpoints. Being the other endpoint of a before/after relation does not make an operation perform the required action. Several direct targets are legal only when the source independently constrains each with the full predicate.',
+        owned_relations='A requirement relations list gives that complete requirement its typed relation arguments. source/target name relation endpoints, NOT extra direct targets. Each relation inherits its owner modality, conditions and composition position. The compiler retains owner and operands, never promotes owned order into unconditional independent operation context. AND/OR/NOT containers have no extra relations of their own.',
+        independent_order='Operation precedes is reserved for independently source-supported context that still holds after removing the target requirement. A source order requirement belongs in that requirement relations, not duplicated into operation precedes. Cite every relation source unit in its owner fact.source_units.',
+        implementation_scope='The predicate constrains generation of the implementation, not execution of its runtime operations.',
+        guard='A requirement condition guards that complete consequent, including its owned relations. An execution_condition gates the entire operation. Source branch conditions hidden only in prose are not structured.',
+        return_boundary='An outward function return specification constrains normal returns, not exceptional exits; its function/return target need not add a separate success condition merely because exceptions exist. Explicit branch-dependent return alternatives still need their own structural guards. Normal return is not necessarily successful completion of every suboperation.',
+        modality='An obligation prescribes behavior. An assumption is source context without prescribing validation/rejection; unresolved force cannot certify an intervention.',
+        atomicity='Atoms preserve complete predicates and guards. OR/NOT members are not independently required. A faithfully represented composite is allowed but not automatically an editable Atomic factor.',
+        context='scope_conditions/context_for is independently source-established non-gating context, not a copy of a target requirement guard.',
+        uncertainty='Keep genuinely ambiguous predicates, bindings or force unresolved in source coverage; do not choose a favorable reading. Unspecified optional implementation detail is not itself a missing source requirement.',
+        impacts='For EVERY source unit, check unit_impacts against the complete source. Missing edges never prove no influence. Include direct targets and owned-relation endpoints in relevant source dependencies. Complete is false if meaning coverage or declared influence is unsupported/uncertain.')
+
+
 def record_request(inventory):
     from .prompt_contract_extract import grouped_inventory_request, _OBJECT_ROLE_MEANINGS
     request = grouped_inventory_request(inventory)
     for key in ("development_scope", "fact_granularity", "annotation_phase", "source_instance_policy"):
         request.pop(key, None)
     request.update(request_kind="source_only_atomic_records", binding_semantics="explicit_boundaries",
-        operation_role_meanings=_OBJECT_ROLE_MEANINGS,
+        operation_role_meanings=_OBJECT_ROLE_MEANINGS, record_semantics=record_semantics(),
         instructions=(
             "Read the complete source as data. Extract objects, operations and requirements together. "
             "Every top-level record has a unique record_id; references name those IDs, never graph IDs. "
@@ -81,7 +100,9 @@ def record_request(inventory):
             "runtime operation IDs; global/unresolved/no_runtime_effect have no operation list. Missing "
             "edges never prove locality. Shared objects, interfaces and cross-operation requirements "
             "must reach all affected operations. Generation layer alone does not mean no_runtime_effect. "
-            "precedes needs a source-required order, not sentence order or an imagined implementation. "
+            "An order requirement declares relations on its owner requirement. Relation endpoints are "
+            "not extra direct targets. Operation precedes is only independently supported context that "
+            "survives removing that requirement; never copy the same declaration into both. "
             "All references are semantic claims and need source support. Cite all cross-sentence premises. "
             "Use known concepts only when their complete meanings match; copy them exactly. Under "
             "DEVELOPMENT_OPEN declare a complete inline meaning when none fits; FROZEN admits no new "
@@ -121,7 +142,7 @@ def record_response_format(request):
                 role=dict(type="string", enum=["value_input", "identifier_input", "resource", "destination", "input_unspecified"]), **citation))),
                 results=_array(_object(dict(subject=dict(type="string", description="Exact record_id of an objects entry."), **citation))),
                 execution_conditions=_array(condition), scope_conditions=_array(condition),
-                precedes=_array(_object(dict(operation=dict(type="string", description="Exact record_id of another operation."), **citation))))
+                precedes=_array(_object(dict(operation=dict(type="string", description="Exact record_id of another operation. Only independent context; requirement-owned order goes in requirement.relations."), **citation))))
         if group == "requirements":
             if 'concept' in fact['properties']:
                 fact['properties']['concept']['properties']['definition']['description'] = (
@@ -133,10 +154,15 @@ def record_response_format(request):
                     members={**ref, "description": "Exact requirement record IDs. atom/opaque: none; and/or: at least two; not: exactly one."})),
                 scope_kind=dict(type="string", enum=["task", "targets", "implementation", "each", "composite"],
                     description="task: overall runtime-task boundary, NEVER all operations. targets: direct bindings. each: universal class rule within the task or one enclosing operation. composite: logical container, members carry bindings. implementation: generated artifact."),
-                operations={**ref, "description": "Exact direct targets; for each, zero or one enclosing runtime operation. Empty for task/implementation/composite."},
+                operations={**ref, "description": "Direct recipients of the ENTIRE predicate, not relation participants. For each, zero/one enclosing runtime operation. Empty for task/implementation/composite."},
                 subjects={**ref, "description": "Exact direct object targets; empty except for targets scope."},
                 target_class=dict(type=["string", "null"], description="For each only: complete source-supported target class, not an instance list. Otherwise null."),
-                conditions=_array(condition))
+                conditions=_array(condition),
+                relations=_array(_object(dict(
+                    source=dict(type="string", description="Exact runtime operation record_id: first operand, not a direct target declaration."),
+                    edge_type=dict(type="string", enum=["precedes"]),
+                    target=dict(type="string", description="Exact runtime operation record_id: second operand, not a direct target declaration."),
+                    **citation))))
             # Require the model to commit composition and binding before fluent prose.
             props = {**{key: val for key, val in props.items() if key != "fact"}, "fact": fact}
         fields[group] = _array(_object(props))
@@ -487,6 +513,12 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
             for key, row in requirements.items() if row['scope_kind'] in {'task', 'each'}},
         "requirement_structures": {aliases[key]: dict(kind=row['structure']['kind'],
             members=[aliases[m] for m in row['structure']['members']]) for key, row in requirements.items()}})
+    owned_relations = {aliases[key]: [dict(source=aliases[r['source']], target=aliases[r['target']],
+        edge_type=r['edge_type'], **_indexed_citation(task['prompt'], _source_tokens(task['prompt']), citation(r)))
+        for r in row['relations']] for key, row in requirements.items() if row['relations']}
+    if owned_relations:
+        contract = replace(contract, source_inventory={**contract.source_inventory,
+            'requirement_relations': owned_relations})
     impacts = deepcopy(contract.source_inventory['unit_impacts'])
     for key, impact in value['unit_impacts'].items():
         impacts[key].update(_indexed_citation(task['prompt'], _source_tokens(task['prompt']), citation(impact)))
@@ -577,9 +609,25 @@ def record_diagnostics(value, request):
     except PromptTSGError as error:
         errors.append(str(error))
     runtime = {r['record_id'] for r in value['operations'] if r['fact']['layer'] == 'runtime'}
+    independent = {(row['record_id'], 'precedes', r['operation'], r['evidence_source_unit'])
+        for row in value['operations'] for r in row['precedes']}
     for row in value['requirements']:
         if row['scope_kind']=='each' and not set(row['operations']) <= runtime:
             errors.append(row['record_id']+': universal boundary must be a runtime operation')
+        relation_keys = set()
+        for i, relation in enumerate(row['relations']):
+            key = (relation['source'], relation['edge_type'], relation['target'])
+            path = f"{row['record_id']}.relations.{i}"
+            if (key in relation_keys or key[0] == key[2] or {key[0], key[2]} - runtime
+                or key[1] != 'precedes' or row['fact']['layer'] != 'runtime'
+                or row['structure']['kind'] != 'atom'):
+                errors.append(path+': unique precedence between distinct runtime operations needs a runtime atom owner')
+            relation_keys.add(key)
+            if relation['evidence_source_unit'] not in row['fact']['source_units']:
+                errors.append(path+': relation evidence unit must belong to its requirement owner')
+            if (*key, relation['evidence_source_unit']) in independent:
+                errors.append(path+': one source declaration cannot be both owned order and independent context')
+            citations.append((path, relation))
     for unit, impact in value['unit_impacts'].items():
         if ((impact['effect']=='local') != bool(impact['operations'])
             or not set(impact['operations']) <= runtime or len(set(impact['operations'])) != len(impact['operations'])):
@@ -631,9 +679,13 @@ def structural_readback(request, value):
                 target_class=row['target_class'], expansion='NONE: no complete instance set is asserted')
                 if row['scope_kind'] in {'task','each'} else None),
             direct_subject_targets=row['subjects'],
+            owned_relations=[dict(source=r['source'],edge_type=r['edge_type'],target=r['target'],
+                source_quote=r['evidence_text'],
+                interpretation='Operands of this requirement; not additional direct targets or independent context. Owner modality, guards and composition apply.')
+                for r in row['relations']],
             requirement_guards=guards(row['conditions']) or 'UNCONDITIONAL: no requirement guard declared',
             interpretation='The predicate text is an unverified content claim. It cannot supply a missing structural guard/target. Composite members retain their own bindings; OR/NOT members are not independently asserted.')
-    return dict(requirements=decoded,
+    return dict(requirements=decoded, record_semantics=record_semantics(),
         objects={r['record_id']:dict(source_anchor=r['fact']['evidence_text']) for r in value['objects']},
         operations={key:dict(source_anchor=row['fact']['evidence_text'],
             execution_guard=guards(row['execution_conditions']) or
@@ -651,17 +703,7 @@ def review_request(request, value):
     return dict(request_kind="source_only_record_review", source_prompt=request["source_prompt"],
         source_units=request["source_units"], records=value,
         operation_role_meanings=request['operation_role_meanings'],
-        record_semantics=dict(
-            task_scope='An overall runtime-task contract. The compiler retains the boundary and emits NO per-operation obligation. A narrower source-named function/return/operation should use targets.',
-            each_scope='A universal rule over target_class within the task or one named enclosing runtime operation. Known instances are not a complete domain; the compiler never replaces the rule by an extracted instance list.',
-            composite_scope='AND/OR/NOT parents express logical composition and shared guards, not an additional target obligation. Every member keeps its own target binding. Only conjunction asserts its members independently.',
-            targets_scope='Only the listed operation and object record IDs receive this predicate; required targets must not be omitted.',
-            implementation_scope='The predicate constrains generation of the implementation, not execution of its runtime operations.',
-            guard='A requirement condition guards that complete consequent only. An execution_condition gates the entire operation. Conditions hidden only inside prose have not been structurally represented.',
-            modality='An obligation prescribes behavior. An assumption is source context without prescribing validation/rejection; unresolved force cannot certify an intervention.',
-            atomicity='Atoms preserve whole predicates and guards. Check and/or/not/opaque membership: OR/NOT members are not independently required. A faithfully represented composite is allowed but not an Atomic factor. Reliable if/else consequents retain distinct guards.',
-            context='scope_conditions/context_for is a source-established non-gating condition context, independent of the target obligation. It must remain meaningful after removing the target; execution_conditions gates the whole operation.',
-            impacts='For EVERY source unit, check its unit_impacts declaration against the complete source. Missing edges never prove no influence. Local must name ALL affected operations, including shared objects, interfaces and cross-operation effects. Complete is false if either meaning coverage or impact is unsupported/uncertain.'),
+        record_semantics=record_semantics(),
         instructions=(
             "Audit every record AND every source unit against the complete original source. The proposal "
             "is fallible. For each record check its full predicate, modality, every participant, target, "
@@ -704,8 +746,8 @@ def _claim_meaning(field, value):
     """A changed citation or provisional label cannot revive the same rejected proposition."""
     if isinstance(value,list):
         return [_claim_meaning(field,item) for item in value]
-    if field in {'inputs', 'results', 'precedes'}:
-        return {k:value[k] for k in ('subject','role','operation') if k in value}
+    if field in {'inputs', 'results', 'precedes', 'relations'}:
+        return {k:value[k] for k in ('subject','role','operation','source','edge_type','target') if k in value}
     if field in {'fact','conditions','execution_conditions','scope_conditions'}:
         concept = value.get('concept')
         return {k:concept[k] for k in ('node_type','definition')} if concept else value.get('concept_id')
@@ -725,6 +767,7 @@ def repair_request(request, value, review):
     def references(row):
         return ({r["subject"] for k in ("inputs", "results") for r in row.get(k, [])}
                 | {r["operation"] for r in row.get("precedes", [])}
+                | {r[k] for r in row.get('relations', []) for k in ('source', 'target')}
                 | set(row.get("operations", [])) | set(row.get("subjects", []))
                 | set(row.get('structure', {}).get('members', [])))
     # A changed source clause or referenced entity can require local rebinding.

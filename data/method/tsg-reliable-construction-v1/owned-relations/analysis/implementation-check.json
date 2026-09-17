@@ -1,0 +1,1 @@
+{"command":"python -m pytest -q","cwd":"D:\\MyCode\\Causal\\.tmp\\tsg-owned-review-clean","elapsed_seconds":34.891,"environment_overrides":{"PYTEST_DISABLE_PLUGIN_AUTOLOAD":"1","PYTHONPATH":"D:\\MyCode\\Causal\\.tmp\\tsg-owned-review-clean\\src","PYTHONUTF8":"1"},"exit_code":0,"python":"D:\\MyCode\\Causal\\.tmp\\tsg-workflow-review-env\\Scripts\\python.exe"}

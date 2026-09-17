@@ -375,11 +375,15 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
 
 def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
                          catalog=None, feature=None, prompt=None, object_uses=0,
-                         object_subjects=("buffer",)):
+                         object_subjects=("buffer",), owned_order=False):
     """Authored structures isolate projection/editing, not automatic extraction quality."""
     from dataclasses import replace
     invariant = "The entire task must preserve the status format."
+    if owned_order:
+        invariant = "Processing must finalize the status format before returning status."
     base = "Process the request and write the diagnostic log. Return status. " + invariant
+    if owned_order:
+        base += " Processing precedes returning."
     if kind == "objects":
         base += " The input buffer and saved path are available."
     task = dict(task_id="synthetic-complete-policy", language="python",
@@ -442,6 +446,15 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
                          for a, relation, b in links if relation == "used_by"],
         requirement_structures=structures, requirement_scopes=retained)
     contract = replace(contract, source_inventory=inventory)
+    if owned_order:
+        def order(evidence):
+            return dict(source="op", edge_type="precedes", target="return", evidence_text=evidence, occurrence=1)
+        inventory["requirement_relations"] = {"invariant": [order(invariant)]}
+        if present:
+            inventory["requirement_relations"]["r"] = [order(text)]
+        # This separately sourced order is deliberately also shared by two
+        # distinct policies; deleting one owner must not delete either support.
+        contract = replace(contract, relations=contract.relations + (order("Processing precedes returning."),))
     graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=supplied_catalog)
     return task, contract, graph, selected
 
@@ -462,6 +475,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
         ("compound_prohibition", "targets", "Do not combine redaction and omission for access tokens in the diagnostic log.", False, "not"),
         ("before", "targets", "Redact access tokens before writing the diagnostic log.", False, False),
         ("after", "targets", "Redact access tokens after writing the diagnostic log.", False, False),
+        ("owned_order", "targets", "Sanitize access tokens during request processing before returning status.", False, False),
         ("object_unused", "objects", "The input buffer must contain at most 256 KB.", False, False),
         ("object_used", "objects", "The input buffer must contain at most 256 KB.", False, False),
         ("object_shared", "objects", "The input buffer must contain at most 256 KB.", False, False),
@@ -472,7 +486,8 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
     results, factors = [], {}
     for name, kind, text, guard, choice in cases:
         options = dict(object_uses={"object_used": 1, "object_shared": 2}.get(name, 0),
-                       object_subjects=("buffer", "path") if name == "object_set" else ("buffer",))
+                       object_subjects=("buffer", "path") if name == "object_set" else ("buffer",),
+                       owned_order=name == "owned_order")
         task, contract, graph, selected = _whole_policy_source(kind, text, guard=guard, choice=choice, **options)
         before_projection = prompt_tsg_record(graph)
         request = candidate_request([task], [contract])
@@ -639,6 +654,20 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
             checked = render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
                 enabled=(True,), additions={}, reviewed_variant=variant)
             assert checked["prompt"] == rendered["prompt"]
+            if name == "owned_order" and operation == "remove":
+                assert len(source_graph.requirement_relations) == 2
+                assert len(target_graph.requirement_relations) == 1
+                assert all(edge[1] != "precedes" for edge in factor["query"]["required_relations"])
+                # Each mutation still compiles as a graph with the assigned
+                # target policy absent; preservation, not state labels, rejects it.
+                for corrupted, error in (
+                    (replace(target_graph, edges=tuple(e for e in target_graph.edges if e.edge_type != "precedes")),
+                     "non-target relation structure"),
+                    (replace(target_graph, requirement_relations=()), "another requirement's owned relation"),
+                ):
+                    with pytest.raises(MechanismRegistryError, match=error):
+                        render_task_hypothesis(binding, source_graph, prompt=source_task["prompt"], catalog=catalog,
+                            enabled=(True,), additions={}, reviewed_variant=dict(variant, graph=prompt_tsg_record(corrupted)))
             if name == "whole":
                 invariant_id = next(n.node_id for n in target_graph.nodes if n.node_type == "task_requirement")
                 corrupted = replace(target_graph, requirement_scopes=tuple(
