@@ -25,7 +25,6 @@ from prompt_mechanism_study.tsg.task_input import prepare_task_input
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
     contract_decision_request,
-    contract_from_response,
     contract_response_format,
 )
 from prompt_mechanism_study.tsg.scope_assessment import (
@@ -37,15 +36,6 @@ from prompt_mechanism_study.tsg.scope_assessment import (
 
 
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
-
-
-_CONTRACT_PROTOCOL_ID = "task_context_contract_v5_evidence_bound_single_annotation"
-
-
-_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_catalog_attributes_v2"
-
-
-_ANNOTATION_POLICY_ID = "single_annotation_valid_evidence_v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,59 +121,11 @@ def _attempt_source_graph(
     provider: Provider,
 ) -> _TaskContractAttempt:
     """Close raw responses and call counts even when deterministic parsing fails."""
-
-    if catalog.get("schema_version") == "2.0":
-        from prompt_mechanism_study.tsg.source_records import attempt_graph
-        return attempt_graph(task, catalog=catalog, evaluator=evaluator,
-            annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
-    request = contract_decision_request(task, catalog)
-    response_format = contract_response_format(request)
-    provider_calls = 0
-    raw: bytes | None = None
-    contract = graph = None
-    try:
-        provider_calls += 1
-        raw = provider(
-            request,
-            {**evaluator, "response_format": response_format},
-            annotator_prompt,
-        )
-        contract = contract_from_response(
-            raw,
-            task=task,
-            catalog=catalog,
-            annotator_id=f"single-evidence:{evaluator['candidate_id']}",
-            review_status=review_status,
-        )
-        graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
-    except (MemoryError, KeyboardInterrupt, SystemExit):
-        raise
-    except Exception as error:  # noqa: BLE001 - evidence must close before fail-stop
-        rejected = getattr(error, "provider_response", None)
-        provider_failure = (dict(response_envelope_text=rejected.decode("utf-8"),
-                                 response_envelope_sha256=hashlib.sha256(rejected).hexdigest())
-                            if isinstance(rejected, bytes) else None)
-        return _TaskContractAttempt(
-            str(task["task_id"]),
-            request,
-            provider_calls,
-            raw,
-            contract,
-            graph,
-            type(error).__name__,
-            f"task {task['task_id']}: {error}",
-            provider_failure=provider_failure,
-        )
-    return _TaskContractAttempt(
-        str(task["task_id"]),
-        request,
-        provider_calls,
-        raw,
-        contract,
-        graph,
-        None,
-        None,
-    )
+    if catalog.get("schema_version") != "2.0":
+        raise PromptContractExtractionError("active extraction requires an open-graph catalog")
+    from prompt_mechanism_study.tsg.source_records import attempt_graph
+    return attempt_graph(task, catalog=catalog, evaluator=evaluator,
+        annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
 
 
 def _assess_candidate_scopes(
@@ -198,7 +140,7 @@ def _assess_candidate_scopes(
     """
     if not graph_attempt.succeeded:
         return graph_attempt
-    task = prepare_task_input(task) if catalog.get("schema_version") == "2.0" else task
+    task = prepare_task_input(task)
     contract, graph = graph_attempt.contract, graph_attempt.graph
     provider_calls = graph_attempt.provider_calls
     scope_assessment = None
@@ -281,8 +223,9 @@ def extract_contract_task_file(
         raise PromptContractExtractionError("task selection is invalid or stale")
     selected = [by_id[task_id] for task_id in selection["task_ids"]]
     catalog = load_catalog(catalog_path)
-    if catalog.get("schema_version") == "2.0":
-        selected = [prepare_task_input(task) for task in selected]
+    if catalog.get("schema_version") != "2.0":
+        raise PromptContractExtractionError("active extraction requires an open-graph catalog")
+    selected = [prepare_task_input(task) for task in selected]
     if catalog.get("concept_policy") == "DEVELOPMENT_OPEN" and review_status != "development_exposed":
         raise PromptContractExtractionError("open concept development requires an explicit development exposure")
     evaluator = _evaluator(read_json(evaluator_path), evaluator_path)
@@ -375,28 +318,26 @@ def extract_contract_task_file(
             if complete
             else "PROMPT_CONTRACT_EXTRACTION_FAILED"
         ),
-        "protocol_id": "open_tsg_instance_contract_v3_partial_evidence" if catalog["schema_version"] == "2.0" else _CONTRACT_PROTOCOL_ID,
-        "annotation_policy_id": "atomic_records_review_patch_compile_scopes" if catalog["schema_version"] == "2.0" else _ANNOTATION_POLICY_ID,
+        "protocol_id": "open_tsg_instance_contract_v3_partial_evidence",
+        "annotation_policy_id": "atomic_records_review_patch_compile_scopes",
         "model_visible_routing_labels": False,
-        "input_scope": ("baseline_system_message_and_user_request" if catalog["schema_version"] == "2.0"
-                        else "archival_raw_source_prompt"),
+        "input_scope": "baseline_system_message_and_user_request",
         "tasks": len(selected),
         "contracts": len(contracts),
         "graphs": len(graphs),
         "provider_calls": sum(attempt.provider_calls for attempt in extracted),
-        **({"initial_record_calls": len(extracted),
-            "record_review_and_repair_calls": sum(attempt.binding_annotation["provider_calls"]
-                for attempt in extracted if attempt.binding_annotation is not None),
-            "graph_annotation_calls": len(extracted) + sum(attempt.binding_annotation["provider_calls"]
-                for attempt in extracted if attempt.binding_annotation is not None),
-            "fixed_scope_assessment_calls": sum(attempt.scope_assessment["provider_calls"]
-                for attempt in extracted if attempt.scope_assessment is not None),
-            "source_inventory_incomplete_task_units": sum(
-                _inventory_status(attempt.contract)["status"] == "INCOMPLETE"
-                for attempt in extracted if isinstance(attempt.contract, OpenTaskContract)),
-            "withheld_scope_count": sum(len(attempt.scope_assessment["request"]["withheld_scopes"])
-                for attempt in extracted if attempt.scope_assessment is not None)}
-           if catalog["schema_version"] == "2.0" else {}),
+        "initial_record_calls": len(extracted),
+        "record_review_and_repair_calls": sum(attempt.binding_annotation["provider_calls"]
+            for attempt in extracted if attempt.binding_annotation is not None),
+        "graph_annotation_calls": len(extracted) + sum(attempt.binding_annotation["provider_calls"]
+            for attempt in extracted if attempt.binding_annotation is not None),
+        "fixed_scope_assessment_calls": sum(attempt.scope_assessment["provider_calls"]
+            for attempt in extracted if attempt.scope_assessment is not None),
+        "source_inventory_incomplete_task_units": sum(
+            _inventory_status(attempt.contract)["status"] == "INCOMPLETE"
+            for attempt in extracted if isinstance(attempt.contract, OpenTaskContract)),
+        "withheld_scope_count": sum(len(attempt.scope_assessment["request"]["withheld_scopes"])
+            for attempt in extracted if attempt.scope_assessment is not None),
         "task_workers": max_workers,
         "effective_task_workers": min(max_workers, len(selected)),
         "candidate_id": candidate_id,
@@ -407,7 +348,7 @@ def extract_contract_task_file(
         "annotator_prompt_sha256": _sha256(annotator_prompt_path),
         "extractor_implementation_sha256": _sha256(Path(__file__)),
         "provider_adapter_sha256": _sha256(Path(provider.__code__.co_filename)),
-        "response_protocol_id": "source_covered_layered_bindings_expression_v1" if catalog["schema_version"] == "2.0" else _RESPONSE_PROTOCOL_ID,
+        "response_protocol_id": "source_covered_layered_bindings_expression_v1",
         "unresolved_task_units": sum(bool(graph["unresolved_semantics"]) or bool(contract.get("unresolved_notes"))
                                      for graph, contract in zip(graphs, contracts, strict=True)),
         "failed_task_unit_count": len(failed_task_units),
@@ -429,10 +370,9 @@ def extract_contract_task_file(
             "responses.json": responses,
             **({"qualification-reference.json": reference, "selection.json": selection}
                if reference is not None else {}),
-            **({"tasks.json": selected} if catalog["schema_version"] == "2.0" else {}),
-            **({"catalogs.json": {catalog_sha256(attempt.contract.catalog): attempt.contract.catalog
-                                  for attempt in extracted if isinstance(attempt.contract, OpenTaskContract)}}
-               if catalog["schema_version"] == "2.0" else {}),
+            "tasks.json": selected,
+            "catalogs.json": {catalog_sha256(attempt.contract.catalog): attempt.contract.catalog
+                              for attempt in extracted if isinstance(attempt.contract, OpenTaskContract)},
         },
     )
     if not complete:
@@ -510,7 +450,6 @@ def _sha256(path: Path) -> str:
 __all__ = [
     "PromptContractExtractionError",
     "contract_decision_request",
-    "contract_from_response",
     "contract_response_format",
     "extract_contract_task_file",
     "extract_task_contract",

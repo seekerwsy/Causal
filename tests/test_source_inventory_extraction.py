@@ -859,8 +859,8 @@ def test_qualification_keeps_incomplete_inventory_in_denominator_and_cannot_pass
     _extract_semantic_fixture(paths, provider, extraction)
     audit, _ = _source_review_fixture(extraction, paths, case, write)
     output = tmp_path / "qualification"
-    result = qualify_prompt_contract_extractor(tmp_path, paths["tasks"], extraction, paths["catalog"],
-        tmp_path / "unused-legacy-registry", paths["reference"], paths["evaluator"], paths["prompt"],
+    result = qualify_prompt_contract_extractor(paths["tasks"], extraction, paths["catalog"],
+        paths["reference"], paths["evaluator"], paths["prompt"],
         output, assertion_review_path=audit)
     assert [call["request_kind"] for call in calls] == ["source_only_atomic_records", "source_only_record_review"]
     assert result["task_units"] == 1 and result["failed_extraction_task_units"] == 0

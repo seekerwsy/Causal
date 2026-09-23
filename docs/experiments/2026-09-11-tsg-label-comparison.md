@@ -47,9 +47,10 @@ and compiler repairs, so that historical difference is not a label-only effect.
 
 ## Reproduction and current execution status
 
-The commands below reproduce the closed-vocabulary revision recorded in this report using its
-captured source snapshot. They are historical commands; the current open-graph interface is
-documented in the [reviewer guide](../reviewer-guide.md) and no longer takes a legacy registry:
+On `codex/pre-artifact-scope-20260923`, the historical commands below reproduce
+the closed-vocabulary revision using its captured source snapshot. Current
+`main` accepts only open-graph extraction and qualification; its interface is
+documented in the [reviewer guide](../reviewer-guide.md):
 
 ```text
 prompt-mechanism-study representation extract-contracts TASKS CATALOG EVALUATOR ANNOTATOR_PROMPT SELECTION OUTPUT

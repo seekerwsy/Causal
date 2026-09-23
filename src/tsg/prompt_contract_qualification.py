@@ -17,20 +17,14 @@ from prompt_mechanism_study.artifact_io import (
     file_sha256,
     loads_exact_json,
 )
-from prompt_mechanism_study.discovery.mechanisms import (
-    load_mechanism_registry,
-    tsg_mechanism_binding,
-)
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
-    task_context_contract_from_record,
 )
 from prompt_mechanism_study.tsg.source_codec import (
     contract_decision_request,
-    contract_from_response,
     contract_response_format,
 )
-from prompt_mechanism_study.tsg.prompt_tsg import PromptTSGError, load_catalog, prompt_tsg_record
+from prompt_mechanism_study.tsg.prompt_tsg import load_catalog, prompt_tsg_record
 from prompt_mechanism_study.records import canonical_json, content_hash
 
 
@@ -189,11 +183,9 @@ def evaluate_open_graph_expectations(graph: dict | None, *, prompt: str, expecte
                 for source, _, target in edges)}
 
 def qualify_prompt_contract_extractor(
-    repository_root: Path,
     tasks_path: Path,
     extraction_bundle: Path,
     catalog_path: Path,
-    registry_path: Path | None,
     gold_path: Path,
     evaluator_path: Path,
     annotator_prompt_path: Path,
@@ -201,324 +193,13 @@ def qualify_prompt_contract_extractor(
     *,
     assertion_review_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Score active open graphs; closed-vocabulary records retain archival replay only."""
-
-    if load_catalog(catalog_path).get("schema_version") == "2.0":
-        return _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_path,
-            evaluator_path, annotator_prompt_path, output, assertion_review_path)
-    if registry_path is None:
-        raise PromptContractQualificationError("closed-vocabulary replay requires its original archival registry")
-    return _qualify_archival_contract(repository_root, tasks_path, extraction_bundle, catalog_path,
-        registry_path, gold_path, evaluator_path, annotator_prompt_path, output)
+    """Replay and score the active open-graph extraction path."""
+    if load_catalog(catalog_path).get("schema_version") != "2.0":
+        raise PromptContractQualificationError("active qualification requires an open-graph catalog")
+    return _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_path,
+        evaluator_path, annotator_prompt_path, output, assertion_review_path)
 
 
-def _qualify_archival_contract(
-    repository_root: Path, tasks_path: Path, extraction_bundle: Path, catalog_path: Path,
-    registry_path: Path, gold_path: Path, evaluator_path: Path, annotator_prompt_path: Path,
-    output: Path,
-) -> dict[str, Any]:
-    """Replay frozen closed-vocabulary evidence under its original interpretation."""
-
-    root = repository_root.resolve()
-    verify_bundle(extraction_bundle)
-    bundle_report = read_json(extraction_bundle / "report.json")
-    contracts = _rows(read_json(extraction_bundle / "contracts.json"))
-    graph_rows = _rows(read_json(extraction_bundle / "graphs.json"))
-    requests = _rows(read_json(extraction_bundle / "requests.json"))
-    responses = _rows(read_json(extraction_bundle / "responses.json"))
-    tasks = _rows(read_json(tasks_path))
-    task_by_id = {row.get("task_id"): row for row in tasks}
-    if len(task_by_id) != len(tasks) or None in task_by_id:
-        raise PromptContractQualificationError("Prompt contract qualification task identities are invalid")
-
-    gold = read_json(gold_path)
-    required_gold = {
-        "schema_version",
-        "contract_protocol_id",
-        "extractor_candidate_id",
-        "selection_path",
-        "review_completed_before_extraction",
-        "arms_or_outcomes_used",
-        "qualification_rule",
-        "cases",
-    }
-    allowed_gold = {frozenset(required_gold), frozenset(required_gold | {"execution"})}
-    if (
-        not isinstance(gold, dict)
-        or frozenset(gold) not in allowed_gold
-        or gold["schema_version"] != "2.0"
-        or gold["contract_protocol_id"]
-        != "task_context_contract_v5_evidence_bound_single_annotation"
-        or gold["review_completed_before_extraction"] is not True
-        or gold["arms_or_outcomes_used"] is not False
-    ):
-        raise PromptContractQualificationError("Prompt contract qualification gold record is invalid")
-    execution = gold.get("execution", {"task_workers": 1})
-    if (
-        not isinstance(execution, dict)
-        or set(execution) != {"task_workers"}
-        or type(execution["task_workers"]) is not int
-        or not 1 <= execution["task_workers"] <= 8
-    ):
-        raise PromptContractQualificationError("Prompt contract execution policy is invalid")
-    rule = gold["qualification_rule"]
-    if (
-        not isinstance(rule, dict)
-        or set(rule)
-        != {
-            "minimum_exact_context_accuracy",
-            "minimum_present_recall",
-            "maximum_false_positive_present",
-            "maximum_wrong_realization",
-        }
-        or type(rule["minimum_exact_context_accuracy"]) is not float
-        or not 0 < rule["minimum_exact_context_accuracy"] <= 1
-        or type(rule["minimum_present_recall"]) is not float
-        or not 0 < rule["minimum_present_recall"] <= 1
-        or type(rule["maximum_false_positive_present"]) is not int
-        or rule["maximum_false_positive_present"] < 0
-        or type(rule["maximum_wrong_realization"]) is not int
-        or rule["maximum_wrong_realization"] < 0
-    ):
-        raise PromptContractQualificationError("Prompt contract qualification rule is invalid")
-
-    selection_path = (root / gold["selection_path"]).resolve()
-    try:
-        selection_path.relative_to(root)
-    except ValueError:
-        raise PromptContractQualificationError("Prompt contract qualification selection escapes repository") from None
-    selection = read_json(selection_path)
-    cases = _rows(gold["cases"])
-    case_ids = [case.get("task_id") for case in cases]
-    evaluator = read_json(evaluator_path)
-    if not isinstance(evaluator, dict):
-        raise PromptContractQualificationError("Prompt contract evaluator record is invalid")
-    candidate_id = f"single-evidence:{evaluator.get('candidate_id')}"
-    expected_report = {
-        "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
-        "protocol_id": gold["contract_protocol_id"],
-        "tasks": len(cases),
-        "contracts": len(cases),
-        "graphs": len(cases),
-        "provider_calls": len(cases),
-        "task_workers": execution["task_workers"],
-        "effective_task_workers": min(execution["task_workers"], len(cases)),
-        "candidate_id": candidate_id,
-        "task_file_sha256": _sha256(tasks_path),
-        "task_selection_sha256": _sha256(selection_path),
-        "evaluator_sha256": _sha256(evaluator_path),
-        "annotator_prompt_sha256": _sha256(annotator_prompt_path),
-        "response_protocol_id": "task_keyed_prompt_contract_catalog_attributes_v2",
-        "annotation_policy_id": "single_annotation_valid_evidence_v1",
-        "model_visible_routing_labels": False,
-        "failed_task_unit_count": 0,
-        "failed_task_units": [],
-        "review_status": "prospective_frozen",
-        "arms_or_outcomes_used": False,
-        "scientific_claim_allowed": False,
-    }
-    if (
-        gold["extractor_candidate_id"] != candidate_id
-        or case_ids != selection.get("task_ids")
-        or selection.get("source_tasks_sha256") != _sha256(tasks_path)
-        or any(bundle_report.get(key) != value for key, value in expected_report.items())
-        or not all(
-            len(rows) == len(cases)
-            for rows in (contracts, graph_rows, requests, responses)
-        )
-    ):
-        raise PromptContractQualificationError("Prompt contract qualification inputs do not close")
-
-    catalog = load_catalog(catalog_path)
-    registry = load_mechanism_registry(registry_path)
-    if bundle_report.get("catalog_sha256") != hashlib.sha256(
-        canonical_json(catalog).encode("utf-8")
-    ).hexdigest():
-        raise PromptContractQualificationError("Prompt contract catalog identity drifted")
-    contract_by_task = {
-        row.get("task_id"): row for row in contracts if isinstance(row.get("task_id"), str)
-    }
-    graph_by_task = {
-        row.get("task_id"): row for row in graph_rows if isinstance(row.get("task_id"), str)
-    }
-    request_by_task = {
-        row.get("task_id"): row for row in requests if isinstance(row.get("task_id"), str)
-    }
-    response_by_task = {
-        row.get("task_id"): row for row in responses if isinstance(row.get("task_id"), str)
-    }
-    populations = (contract_by_task, graph_by_task, request_by_task, response_by_task)
-    if any(set(rows) != set(case_ids) for rows in populations):
-        raise PromptContractQualificationError("Prompt contract bundle population differs from gold")
-
-    results = []
-    for case in cases:
-        if set(case) != {
-            "task_id",
-            "expected_context",
-            "expected_realization_id",
-            "rationale",
-        } or case["expected_context"] not in {
-            "present",
-            "absent",
-            "unresolved",
-            "absent_or_unresolved",
-        }:
-            raise PromptContractQualificationError("Prompt contract qualification case is invalid")
-        task = task_by_id.get(case["task_id"])
-        if task is None:
-            raise PromptContractQualificationError("Prompt contract qualification task is missing")
-        response = response_by_task[case["task_id"]]
-        response_fields = {
-            "task_id",
-            "response_format_sha256",
-            "provider_calls",
-            "status",
-            "response_sha256",
-            "response_text",
-            "error_type",
-            "error_message",
-        }
-        if (
-            set(response) != response_fields
-            or response["provider_calls"] != 1
-            or response["status"] != "complete"
-            or response["error_type"] is not None
-            or response["error_message"] is not None
-            or not isinstance(response["response_text"], str)
-        ):
-            raise PromptContractQualificationError("Prompt contract response closure fields are invalid")
-        expected_request = contract_decision_request(task, catalog)
-        if response["response_format_sha256"] != content_hash(
-            contract_response_format(expected_request)
-        ):
-            raise PromptContractQualificationError("Prompt contract response format identity is invalid")
-        raw = response["response_text"].encode("utf-8")
-        if hashlib.sha256(raw).hexdigest() != response["response_sha256"]:
-            raise PromptContractQualificationError("Prompt contract response identity is invalid")
-        try:
-            replayed = contract_from_response(
-                raw, task=task, catalog=catalog, annotator_id=candidate_id,
-                review_status="prospective_frozen",
-            )
-            contract = task_context_contract_from_record(contract_by_task[case["task_id"]])
-            if replayed != contract:
-                raise PromptContractQualificationError("single annotation replay differs")
-            graph = compile_task_context_contract(
-                contract, prompt=task["prompt"], catalog=catalog
-            )
-        except PromptTSGError as error:
-            raise PromptContractQualificationError(str(error)) from None
-        if (
-            request_by_task[case["task_id"]] != {"task_id": case["task_id"], "request": expected_request}
-            or prompt_tsg_record(graph) != graph_by_task[case["task_id"]]
-            or contract.annotator_id != candidate_id
-            or contract.review_status != "prospective_frozen"
-        ):
-            raise PromptContractQualificationError("Prompt contract deterministic replay differs")
-        binding = tsg_mechanism_binding(task, graph, catalog, registry)
-        actual_context = (
-            "present"
-            if binding["realization_id"] is not None
-            else "unresolved"
-            if binding["decision"] == "unresolved"
-            else "absent"
-        )
-        context_matched = actual_context == case["expected_context"] or (
-            case["expected_context"] == "absent_or_unresolved"
-            and actual_context in {"absent", "unresolved"}
-        )
-        matched = context_matched and (
-            binding["realization_id"] == case["expected_realization_id"]
-        )
-        results.append(
-            {
-                "task_id": case["task_id"],
-                "expected_context": case["expected_context"],
-                "actual_context": actual_context,
-                "expected_realization_id": case["expected_realization_id"],
-                "actual_realization_id": binding["realization_id"],
-                "binding_decision": binding["decision"],
-                "matched": matched,
-            }
-        )
-
-    mismatches = [row for row in results if not row["matched"]]
-    expected_present = [row for row in results if row["expected_context"] == "present"]
-    if not expected_present:
-        raise PromptContractQualificationError("Prompt contract qualification lacks positive gold")
-    present_recovered = [
-        row
-        for row in expected_present
-        if row["actual_context"] == "present"
-        and row["actual_realization_id"] == row["expected_realization_id"]
-    ]
-    false_positive_present = [
-        row
-        for row in results
-        if row["expected_context"] != "present" and row["actual_context"] == "present"
-    ]
-    wrong_realization = [
-        row
-        for row in results
-        if row["actual_realization_id"] is not None
-        and row["actual_realization_id"] != row["expected_realization_id"]
-    ]
-    exact_accuracy = (len(results) - len(mismatches)) / len(results)
-    present_recall = len(present_recovered) / len(expected_present)
-    qualified = (
-        exact_accuracy >= rule["minimum_exact_context_accuracy"]
-        and present_recall >= rule["minimum_present_recall"]
-        and len(false_positive_present) <= rule["maximum_false_positive_present"]
-        and len(wrong_realization) <= rule["maximum_wrong_realization"]
-    )
-    positive_gold_realization_ids = sorted(
-        {
-            row["expected_realization_id"]
-            for row in cases
-            if row["expected_context"] == "present"
-        }
-    )
-    catalog_realization_ids = sorted(
-        {query["realization_id"] for query in catalog["queries"]}
-    )
-    report = {
-        "schema_version": "2.0",
-        "status": "QUALIFIED_FOR_FORMAL_EXTRACTION" if qualified else "QUALIFICATION_FAILED",
-        "contract_protocol_id": gold["contract_protocol_id"],
-        "extractor_candidate_id": candidate_id,
-        "holdout_task_units": len(cases),
-        "matched_task_units": len(cases) - len(mismatches),
-        "mismatched_task_units": len(mismatches),
-        "exact_context_accuracy": round(exact_accuracy, 6),
-        "present_recall": round(present_recall, 6),
-        "false_positive_present": len(false_positive_present),
-        "wrong_realization": len(wrong_realization),
-        "qualification_rule": rule,
-        "positive_gold_realization_ids": positive_gold_realization_ids,
-        "catalog_realization_ids_without_positive_gold": sorted(
-            set(catalog_realization_ids) - set(positive_gold_realization_ids)
-        ),
-        "context_counts": dict(
-            sorted(Counter(row["expected_context"] for row in cases).items())
-        ),
-        "extractor_bundle_sha256": bundle_digest(extraction_bundle),
-        "extractor_implementation_sha256": bundle_report[
-            "extractor_implementation_sha256"
-        ],
-        "catalog_sha256": _sha256(catalog_path),
-        "registry_sha256": _sha256(registry_path),
-        "gold_sha256": _sha256(gold_path),
-        "selection_sha256": _sha256(selection_path),
-        "arms_or_outcomes_used": False,
-        "scientific_claim_allowed": False,
-        "claim_boundary": (
-            "Gate C qualifies task-context selection only for expected-present realizations "
-            "represented in this frozen source-only holdout; it is not effect evidence."
-        ),
-    }
-    write_bundle(output, {"case-results.json": results, "qualification.json": report})
-    return report
 
 
 _OPEN_REFERENCE = "open_tsg_source_semantics"
@@ -1150,8 +831,6 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     return value
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 __all__ = [

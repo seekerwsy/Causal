@@ -1356,72 +1356,6 @@ def feature_state(graph: PromptTSG, feature_id: str, target_node_id: str | None 
     )
 
 
-def apply_feature_patch(
-    graph: PromptTSG,
-    *,
-    prompt: str,
-    appended_text: str,
-    semantic_id: str,
-    catalog: Mapping[str, Any],
-) -> PromptTSG:
-    """Replay an archival non-instance arm patch (schema 1/2 only)."""
-
-    if graph.schema_version == "3.0":
-        raise PromptTSGError("open instance interventions must use render_task_hypothesis with an operation binding")
-
-    require_text(appended_text, "appended_text")
-    node_type = catalog["semantics"].get(semantic_id)
-    if node_type not in {"safety_requirement", "presentation_control"}:
-        raise PromptTSGError("typed patch semantic is not an intervention control")
-    variant_prompt = prompt + "\n\n" + appended_text
-    validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
-    patched = _node(
-        node_type,
-        semantic_id,
-        len(prompt) + 2,
-        len(variant_prompt),
-        appended_text,
-        {},
-    )
-    if any(node.semantic_id == semantic_id for node in graph.nodes):
-        raise PromptTSGError("typed patch target is already present")
-    root = next(node for node in graph.nodes if node.semantic_id == "task.root")
-    root_variant = _node("task", "task.root", 0, len(variant_prompt), variant_prompt, {})
-    remap = {root.node_id: root_variant.node_id}
-    nodes = tuple(
-        sorted(
-            [root_variant, patched]
-            + [node for node in graph.nodes if node.semantic_id != "task.root"],
-            key=lambda item: item.node_id,
-        )
-    )
-    allowed = {tuple(item) for item in catalog["allowed_edges"]}
-    edges = []
-    for edge in graph.edges:
-        source = next(node for node in nodes if node.node_id == remap.get(edge.source_id, edge.source_id))
-        target = next(node for node in nodes if node.node_id == remap.get(edge.target_id, edge.target_id))
-        edges.append(_edge(source, target, edge.edge_type, allowed))
-    edges.append(
-        _edge(
-            root_variant,
-            patched,
-            "contains" if node_type == "presentation_control" else "requires",
-            allowed,
-        )
-    )
-    result = PromptTSG(
-        graph.schema_version,
-        graph.task_id,
-        content_hash(variant_prompt),
-        graph.extractor_id,
-        graph.catalog_sha256,
-        nodes,
-        tuple(sorted(edges, key=lambda item: item.edge_id)),
-        graph.unresolved_semantics,
-        graph.unresolved_relations,
-    )
-    validate_prompt_tsg(result, prompt=variant_prompt, catalog=catalog)
-    return result
 
 
 def query_for_realization(
@@ -1554,7 +1488,6 @@ __all__ = [
     "QueryState",
     "TSGEdge",
     "TSGNode",
-    "apply_feature_patch",
     "build_prompt_tsg",
     "catalog_from_record",
     "catalog_sha256",

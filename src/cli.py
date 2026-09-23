@@ -578,7 +578,6 @@ def _add_qualification_group(groups: Any) -> None:
     prompt_contract.add_argument("evaluator", type=Path)
     prompt_contract.add_argument("annotator_prompt", type=Path)
     prompt_contract.add_argument("output", type=Path)
-    prompt_contract.add_argument("--repository-root", type=Path, default=Path.cwd())
     prompt_contract.add_argument("--assertion-review", type=Path,
                                  help="independent source review of every asserted open-graph statement")
 
@@ -1188,11 +1187,9 @@ def _run_prompt_contract_qualification(
     )
 
     report = qualify_prompt_contract_extractor(
-        args.repository_root,
         args.tasks,
         args.extraction_bundle,
         args.catalog,
-        None,
         args.gold,
         args.evaluator,
         args.annotator_prompt,

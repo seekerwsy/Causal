@@ -181,8 +181,8 @@ def test_independent_source_qualification_replays_three_steps_and_keeps_failed_t
     else:
         _extract_semantic_fixture(paths, provider, output)
     audit, _ = _source_review_fixture(output, paths, case, write)
-    result = qualify_prompt_contract_extractor(tmp_path, paths["tasks"], output, paths["catalog"],
-        tmp_path / "unused-legacy-registry", paths["reference"], paths["evaluator"], paths["prompt"],
+    result = qualify_prompt_contract_extractor(paths["tasks"], output, paths["catalog"],
+        paths["reference"], paths["evaluator"], paths["prompt"],
         tmp_path / "qualification", assertion_review_path=audit)
     assert result["task_units"] == 1
     assert result["failed_extraction_task_units"] == int(failure is not None)
@@ -226,8 +226,8 @@ def test_source_reference_is_frozen_before_provider_calls_and_cannot_be_retrofit
     _extract_semantic_fixture(paths, provider, output)
     reference["qualification_rule"]["minimum_complete_task_fraction"] = 0.5
     write("reference.json", reference)
-    result = qualify_prompt_contract_extractor(tmp_path, paths["tasks"], output, paths["catalog"],
-        tmp_path / "unused", paths["reference"], paths["evaluator"], paths["prompt"], tmp_path / "blocked")
+    result = qualify_prompt_contract_extractor(paths["tasks"], output, paths["catalog"],
+        paths["reference"], paths["evaluator"], paths["prompt"], tmp_path / "blocked")
     assert result["status"] == "QUALIFICATION_BLOCKED"
     assert "SOURCE_REFERENCE_NOT_CAPTURED_BEFORE_EXTRACTION" in result["blockers"]
 
