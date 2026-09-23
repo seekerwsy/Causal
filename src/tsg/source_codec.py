@@ -8,41 +8,15 @@ from copy import deepcopy
 from dataclasses import replace
 from prompt_mechanism_study.artifact_io import json_object
 from prompt_mechanism_study.tsg.prompt_contract import (
-    RelationDecision,
-    SemanticDecision,
-    TaskContextContract,
-    compile_task_context_contract,
-    task_context_scope,
     open_contract_from_response,
+    compile_task_context_contract,
+    OpenTaskContract,
 )
 from prompt_mechanism_study.tsg.prompt_tsg import (
     PromptTSGError,
-    QueryState,
-    catalog_sha256,
     has_required_source_name,
 )
-from prompt_mechanism_study.records import (
-    content_hash,
-)
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_template_facts
-
-
-_RESPONSE_FIELDS = {"semantic_decisions", "relation_decisions"}
-
-
-_SEMANTIC_FIELDS = {
-    "state",
-    "rationale",
-    "evidence_text",
-    "occurrence",
-    "attributes",
-}
-
-
-_RELATION_FIELDS = {
-    "state",
-    "rationale",
-}
 
 
 _INPUT_ROLES = ("value_input", "identifier_input", "resource", "destination", "input_unspecified")
@@ -76,7 +50,7 @@ _OBJECT_ROLE_MEANINGS = {
 
 
 class PromptContractExtractionError(RuntimeError):
-    """The frozen request, model decision table, or extraction closure is invalid."""
+    """The source request, model response, or extraction closure is invalid."""
 
 
 def _operation_anchor_conflicts(nodes: list, request: Mapping[str, Any]) -> list[tuple[int, int]]:
@@ -98,12 +72,6 @@ def _operation_anchor_conflicts(nodes: list, request: Mapping[str, Any]) -> list
             for j, other, left, right in operations[offset + 1:]
             if concept == other and (start, end) != (left, right)
             and max(start, left) <= min(end, right)]
-
-
-def _relation_decision_key(relation: Sequence[str]) -> str:
-    if len(relation) != 3 or any(not value or "|" in value for value in relation):
-        raise PromptContractExtractionError("relation cannot be encoded as a decision key")
-    return "|".join(relation)
 
 
 def _has_fixed_concept_layers(request: Mapping[str, Any]) -> bool:
@@ -672,170 +640,13 @@ def _represented_unit_operations(contract: OpenTaskContract) -> dict[str, set[st
 
 
 def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Build a strict task-specific schema whose required keys close the finite scope."""
-
+    """Return the active source-inventory or atomic-record response schema."""
     if request.get("request_kind") == "source_only_atomic_records":
         from prompt_mechanism_study.tsg.source_records import record_response_format
         return record_response_format(request)
     if request.get("request_kind") == "source_only_fact_inventory":
         return open_contract_response_format(request)
-    semantics = request.get("candidate_semantics")
-    relations = request.get("candidate_relations")
-    attributes = request.get("allowed_attributes")
-    if (
-        not isinstance(semantics, dict)
-        or not semantics
-        or not isinstance(relations, dict)
-        or not isinstance(attributes, list)
-        or not attributes
-        or any(not isinstance(item, str) or not item.strip() for item in attributes)
-        or len(attributes) != len(set(attributes))
-        or any(not isinstance(key, str) or not key for key in (*semantics, *relations))
-    ):
-        raise PromptContractExtractionError("response schema scope is invalid")
-    semantic_value = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": sorted(_SEMANTIC_FIELDS),
-        "properties": {
-            "state": {
-                "type": "string",
-                "enum": ["present", "absent", "unresolved"],
-            },
-            "rationale": {"type": "string", "minLength": 1},
-            "evidence_text": {"type": ["string", "null"]},
-            "occurrence": {"type": ["integer", "null"]},
-            "attributes": {
-                "type": "array",
-                "items": {"type": "string", "enum": sorted(attributes)},
-            },
-        },
-    }
-    relation_value = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": sorted(_RELATION_FIELDS),
-        "properties": {
-            "state": {
-                "type": "string",
-                "enum": ["present", "absent", "unresolved"],
-            },
-            "rationale": {"type": "string", "minLength": 1},
-        },
-    }
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "task_keyed_prompt_contract",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": sorted(_RESPONSE_FIELDS),
-                "properties": {
-                    "semantic_decisions": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": sorted(semantics),
-                        "properties": {
-                            semantic_id: semantic_value for semantic_id in semantics
-                        },
-                    },
-                    "relation_decisions": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": sorted(relations),
-                        "properties": {
-                            relation_id: relation_value for relation_id in relations
-                        },
-                    },
-                },
-            },
-        },
-    }
-
-
-def _close_relation_endpoint_states(
-    semantic_decisions: tuple[SemanticDecision, ...],
-    relation_decisions: tuple[RelationDecision, ...],
-) -> tuple[RelationDecision, ...]:
-    """Project relation states implied by their semantic endpoint states."""
-
-    semantic_states = {row.semantic_id: row.state for row in semantic_decisions}
-    closed = []
-    for row in relation_decisions:
-        endpoint_states = {
-            semantic_states.get(row.source_semantic_id),
-            semantic_states.get(row.target_semantic_id),
-        }
-        if QueryState.ABSENT in endpoint_states:
-            closed.append(
-                replace(
-                    row,
-                    state=QueryState.ABSENT,
-                    rationale=(
-                        "Deterministic endpoint closure: at least one endpoint is absent."
-                    ),
-                )
-            )
-        elif QueryState.UNRESOLVED in endpoint_states:
-            closed.append(
-                replace(
-                    row,
-                    state=QueryState.UNRESOLVED,
-                    rationale=(
-                        "Deterministic endpoint closure: at least one endpoint is unresolved."
-                    ),
-                )
-            )
-        else:
-            closed.append(row)
-    return tuple(closed)
-
-
-def _canonical_prompt_evidence(
-    prompt: str, evidence_text: object, occurrence: object
-) -> tuple[str, int] | None:
-    """Bind transport-normalized evidence back to one exact source-prompt span."""
-
-    if (
-        not isinstance(evidence_text, str)
-        or not evidence_text
-        or len(evidence_text.encode("utf-8")) > 2048
-        or type(occurrence) is not int
-        or occurrence <= 0
-    ):
-        return None
-    candidates: list[str] = []
-
-    def add(value: str) -> None:
-        if value and value not in candidates:
-            candidates.append(value)
-
-    add(evidence_text)
-    add(evidence_text.strip())
-    for value in tuple(candidates):
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'", "`"}:
-            add(value[1:-1].strip())
-    for value in tuple(candidates):
-        add(value.replace(r'\"', '"').replace(r"\'", "'"))
-
-    for candidate in candidates:
-        starts = _literal_starts(prompt, candidate)
-        if occurrence <= len(starts):
-            return candidate, occurrence
-    for candidate in candidates:
-        tokens = candidate.split()
-        if len(tokens) < 2:
-            continue
-        matches = list(re.finditer(r"\s+".join(re.escape(token) for token in tokens), prompt))
-        if occurrence > len(matches):
-            continue
-        match = matches[occurrence - 1]
-        exact = prompt[match.start() : match.end()]
-        exact_starts = _literal_starts(prompt, exact)
-        return exact, exact_starts.index(match.start()) + 1
-    return None
+    raise PromptContractExtractionError("unsupported source response request")
 
 
 def _literal_starts(text: str, fragment: str) -> list[int]:
@@ -849,130 +660,49 @@ def _literal_starts(text: str, fragment: str) -> list[int]:
         offset += 1
 
 
-def _demote_unbound_present_evidence(
-    prompt: str, semantic_decisions: tuple[SemanticDecision, ...]
-) -> tuple[SemanticDecision, ...]:
-    """Fail closed when a presence citation cannot bind to the source prompt."""
-
-    closed = []
-    for row in semantic_decisions:
-        if row.state is not QueryState.PRESENT:
-            closed.append(row)
-            continue
-        evidence = _canonical_prompt_evidence(prompt, row.evidence_text, row.occurrence)
-        if evidence is None:
-            closed.append(
-                replace(
-                    row,
-                    state=QueryState.UNRESOLVED,
-                    rationale=(
-                        "Deterministic evidence occurrence validation: claimed presence lacks "
-                        "an exact source-prompt occurrence; conservatively unresolved."
-                    ),
-                    evidence_text=None,
-                    occurrence=None,
-                    attributes=(),
-                )
-            )
-        else:
-            closed.append(replace(row, evidence_text=evidence[0], occurrence=evidence[1]))
-    return tuple(closed)
-
-
 def contract_decision_request(
     task: Mapping[str, Any], catalog: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Build the finite source-only table without exposing routing labels or query logic."""
+    """Build a source-only inventory request without outcome or arm labels."""
 
-    if catalog.get("schema_version") == "2.0":
-        task = prepare_task_input(task)
-        template = _template_for_catalog(task, catalog)
-        return {
-            "request_kind": "source_only_fact_inventory", "source_prompt": task["prompt"],
-            "source_tokens": {str(index): token.group() for index, token in enumerate(_source_tokens(task["prompt"]), 1)},
-            "evidence_coordinates": "Inclusive start/end keys from source_tokens. Tokens index the unchanged complete source_prompt, including punctuation; they carry no semantic labels.",
-            "input_scope": "baseline_system_message_and_user_request",
-            "message_roles": "System message has priority over User message. System message, User message and Task are provenance labels, not extra requirements. Language is an actual field supplied to the generator and must be considered with the message contents.",
-            "concept_policy": catalog["concept_policy"],
-            "known_concepts": {key: {"node_type": value, "definition": catalog["semantic_guidance"].get(key, ""),
-                                     **({"layer": catalog["semantic_layers"][key]} if key in catalog.get("semantic_layers", {}) else {}),
-                                     **({"source_name_terms": catalog["source_name_terms"][key]}
-                                        if key in catalog.get("source_name_terms", {}) else {})}
-                               for key, value in catalog["semantics"].items() if key != "task.root"
-                               and key not in {row["concept_id"] for row in template["concepts"]}
-                               and has_required_source_name(catalog, key, task["prompt"])},
-            **({"source_name_policy": (
-                    "For a concept with source_name_terms, its cited identity evidence must contain at least one "
-                    "declared literal name as a whole identifier, ignoring case. A name inside a longer identifier "
-                    "does not qualify. The compiler checks this prerequisite; a match alone does not establish "
-                    "the entity, role or full concept meaning. Imports, negations and unrelated mentions still "
-                    "require source-semantic review. Excluded concepts lack their declared name in the source; "
-                    "this is not an absence judgment about the underlying property. Preserve any stated generic "
-                    "entity with an admissible concept, or record a source gap rather than inventing a name."),
-                "excluded_source_name_concepts": {key: terms for key, terms in catalog["source_name_terms"].items()
-                    if not has_required_source_name(catalog, key, task["prompt"])}}
-               if "source_name_terms" in catalog else {}),
-            "allowed_node_types": [value for value in catalog["node_types"] if value != "task"],
-            "fixed_template": template,
-            "source_units": _source_units(task, fixed_template=bool(template["nodes"])),
-            "annotation_phase": "source_covered_fact_draft",
-            "source_instance_policy": "Use an action-specific identity quote for each operation. Distinct instances of the SAME operation concept must have non-overlapping identity spans; keep wider supporting clauses in source_units, not in a quote spanning the other operation. Exact duplicate instances may be merged. Different atomic concepts may share contextual evidence. Preserve object identity qualifiers, including whether a named result is an individual value or a whole collection. Role evidence may retain wider context independently of identity quotes.",
-            "fact_granularity": "Each node represents one source semantic unit. Each requirement node must express one independently specified requirement: split separately changeable requirements into distinct nodes during this inventory, before binding edges or constructing candidates. A sentence may support several atomic nodes, and their source-token spans may overlap. Preserve the whole meaning of each atom, including negation, quantifiers, comparison operators and thresholds; do not split a predicate into meaningless words or detach a condition from its obligation. Represent explicit conditions as their own facts and retain their source-supported bindings in the binding step. A single atomic requirement may apply to multiple explicitly stated operations or objects; scope multiplicity does not itself make the meaning composite. Under FROZEN, missing atomic meanings remain unresolved; do not substitute a composite or partially entailed known concept. If atomic decomposition is ambiguous, mark the source unit unresolved and explain the ambiguity. Semantic atomicity remains subject to source review, not a conclusion proved by valid JSON.",
-            "operation_feature_checks": [],
-            "development_scope": "Inventory atomic source facts with generation/runtime layer and source-unit coverage. Nodes cite preassigned source-unit keys; the program assigns all fact IDs after this response. Do not output local_id, operation_roles or cross-references between new facts. Under DEVELOPMENT_OPEN, each node carries its complete inline concept; under FROZEN it selects a known concept_id. Coverage rows contain status and reason only; no_task_fact means no additional fact beyond the supplied fixed template. The fixed template facts/edges are already supplied by the program: never redeclare or replace them. Role declarations are source propositions, not code predictions or committed graph edges. Report missing meanings explicitly; do not substitute another object. Relation confirmation and scope judgments follow separately.",
-            "arms_or_outcomes_included": False,
-        }
-    required = {"task_id", "prompt", "cwe", "task_family"}
-    if not required <= set(task) or any(
-        not isinstance(task[field], str) or not task[field].strip() for field in required
-    ):
-        raise PromptContractExtractionError("task lacks contract extraction coordinates")
-    scope = task_context_scope(
-        cwe_id=task["cwe"], task_family=task["task_family"], catalog=catalog
-    )
+    if catalog.get("schema_version") != "2.0":
+        raise PromptContractExtractionError("open-graph catalog is required")
+    task = prepare_task_input(task)
+    template = _template_for_catalog(task, catalog)
     return {
-        "schema_version": "1.0",
-        "request_kind": "blind_exhaustive_task_context_annotation",
-        "source_prompt": task["prompt"],
-        "candidate_semantics": {
-            semantic_id: {
-                "node_type": catalog["semantics"][semantic_id],
-                "guidance": catalog["semantic_guidance"].get(
-                    semantic_id,
-                    "Mark present only when the source prompt directly entails this role.",
-                ),
-            }
-            for semantic_id in scope["semantic_ids"]
-        },
-        "candidate_relations": {
-            _relation_decision_key(relation): list(relation)
-            for relation in scope["relations"]
-        },
-        "allowed_attributes": list(catalog["attribute_names"]),
-        "decision_states": ["present", "absent", "unresolved"],
+        "request_kind": "source_only_fact_inventory", "source_prompt": task["prompt"],
+        "source_tokens": {str(index): token.group() for index, token in enumerate(_source_tokens(task["prompt"]), 1)},
+        "evidence_coordinates": "Inclusive start/end keys from source_tokens. Tokens index the unchanged complete source_prompt, including punctuation; they carry no semantic labels.",
+        "input_scope": "baseline_system_message_and_user_request",
+        "message_roles": "System message has priority over User message. System message, User message and Task are provenance labels, not extra requirements. Language is an actual field supplied to the generator and must be considered with the message contents.",
+        "concept_policy": catalog["concept_policy"],
+        "known_concepts": {key: {"node_type": value, "definition": catalog["semantic_guidance"].get(key, ""),
+                                 **({"layer": catalog["semantic_layers"][key]} if key in catalog.get("semantic_layers", {}) else {}),
+                                 **({"source_name_terms": catalog["source_name_terms"][key]}
+                                    if key in catalog.get("source_name_terms", {}) else {})}
+                           for key, value in catalog["semantics"].items() if key != "task.root"
+                           and key not in {row["concept_id"] for row in template["concepts"]}
+                           and has_required_source_name(catalog, key, task["prompt"])},
+        **({"source_name_policy": (
+                "For a concept with source_name_terms, its cited identity evidence must contain at least one "
+                "declared literal name as a whole identifier, ignoring case. A name inside a longer identifier "
+                "does not qualify. The compiler checks this prerequisite; a match alone does not establish "
+                "the entity, role or full concept meaning. Imports, negations and unrelated mentions still "
+                "require source-semantic review. Excluded concepts lack their declared name in the source; "
+                "this is not an absence judgment about the underlying property. Preserve any stated generic "
+                "entity with an admissible concept, or record a source gap rather than inventing a name."),
+            "excluded_source_name_concepts": {key: terms for key, terms in catalog["source_name_terms"].items()
+                if not has_required_source_name(catalog, key, task["prompt"])}}
+           if "source_name_terms" in catalog else {}),
+        "allowed_node_types": [value for value in catalog["node_types"] if value != "task"],
+        "fixed_template": template,
+        "source_units": _source_units(task, fixed_template=bool(template["nodes"])),
+        "annotation_phase": "source_covered_fact_draft",
+        "source_instance_policy": "Use an action-specific identity quote for each operation. Distinct instances of the SAME operation concept must have non-overlapping identity spans; keep wider supporting clauses in source_units, not in a quote spanning the other operation. Exact duplicate instances may be merged. Different atomic concepts may share contextual evidence. Preserve object identity qualifiers, including whether a named result is an individual value or a whole collection. Role evidence may retain wider context independently of identity quotes.",
+        "fact_granularity": "Each node represents one source semantic unit. Each requirement node must express one independently specified requirement: split separately changeable requirements into distinct nodes during this inventory, before binding edges or constructing candidates. A sentence may support several atomic nodes, and their source-token spans may overlap. Preserve the whole meaning of each atom, including negation, quantifiers, comparison operators and thresholds; do not split a predicate into meaningless words or detach a condition from its obligation. Represent explicit conditions as their own facts and retain their source-supported bindings in the binding step. A single atomic requirement may apply to multiple explicitly stated operations or objects; scope multiplicity does not itself make the meaning composite. Under FROZEN, missing atomic meanings remain unresolved; do not substitute a composite or partially entailed known concept. If atomic decomposition is ambiguous, mark the source unit unresolved and explain the ambiguity. Semantic atomicity remains subject to source review, not a conclusion proved by valid JSON.",
+        "operation_feature_checks": [],
+        "development_scope": "Inventory atomic source facts with generation/runtime layer and source-unit coverage. Nodes cite preassigned source-unit keys; the program assigns all fact IDs after this response. Do not output local_id, operation_roles or cross-references between new facts. Under DEVELOPMENT_OPEN, each node carries its complete inline concept; under FROZEN it selects a known concept_id. Coverage rows contain status and reason only; no_task_fact means no additional fact beyond the supplied fixed template. The fixed template facts/edges are already supplied by the program: never redeclare or replace them. Role declarations are source propositions, not code predictions or committed graph edges. Report missing meanings explicitly; do not substitute another object. Relation confirmation and scope judgments follow separately.",
         "arms_or_outcomes_included": False,
-        "output_contract": {
-            "top_level_keys": ["semantic_decisions", "relation_decisions"],
-            "semantic_decision_value_keys": sorted(_SEMANTIC_FIELDS),
-            "relation_decision_value_keys": sorted(_RELATION_FIELDS),
-            "semantic_rows": "object keyed exactly by every candidate_semantics key",
-            "relation_rows": "object keyed exactly by every candidate_relations key",
-            "present_semantic_evidence": (
-                "exact contiguous source_prompt substring plus 1-based occurrence that "
-                "supports the catalog's operational definition; topical overlap, a CWE, "
-                "a function name, or a merely possible implementation is not support"
-            ),
-            "rationale": (
-                "non-empty concise audit explanation retained only in the raw response; "
-                "never use it instead of evidence"
-            ),
-            "attributes": (
-                "JSON array of unique allowed attribute names asserted true; never an object"
-            ),
-            "non_present_evidence": (
-                "null evidence_text, null occurrence, empty attributes array"
-            ),
-        },
     }
 
 
@@ -983,8 +713,8 @@ def contract_from_response(
     catalog: Mapping[str, Any],
     annotator_id: str,
     review_status: str,
-) -> TaskContextContract:
-    """Parse one exhaustive model decision table and reject any omitted row."""
+) -> OpenTaskContract:
+    """Parse one source inventory response."""
 
     try:
         value = json.loads(raw)
@@ -995,124 +725,13 @@ def contract_from_response(
 
 
 def contract_from_value(value: Any, *, task: Mapping[str, Any], catalog: Mapping[str, Any],
-                        annotator_id: str, review_status: str) -> TaskContextContract:
+                        annotator_id: str, review_status: str) -> OpenTaskContract:
     """Compile parsed source facts with the same validation as external responses."""
-    if catalog.get("schema_version") == "2.0":
-        task = prepare_task_input(task)
-        value, inventory = _indexed_facts_response(value, prompt=task["prompt"], request=contract_decision_request(task, catalog))
-        contract = open_contract_from_response(value, task=task, catalog=catalog,
-                                              annotator_id=annotator_id, review_status=review_status,
-                                              source_inventory=inventory)
-        return contract
-    if not isinstance(value, dict) or set(value) != _RESPONSE_FIELDS:
-        raise PromptContractExtractionError("contract response fields are invalid")
-    scope = task_context_scope(
-        cwe_id=task["cwe"], task_family=task["task_family"], catalog=catalog
-    )
-    expected_semantics = set(scope["semantic_ids"])
-    relation_by_key = {
-        _relation_decision_key(relation): relation for relation in scope["relations"]
-    }
-    semantic_rows = value["semantic_decisions"]
-    relation_rows = value["relation_decisions"]
-    if not isinstance(semantic_rows, dict) or not isinstance(relation_rows, dict):
-        raise PromptContractExtractionError("contract decision tables are invalid")
-    if set(semantic_rows) != expected_semantics or set(relation_rows) != set(
-        relation_by_key
-    ):
-        raise PromptContractExtractionError("contract decision rows are not exhaustive")
-    if (
-        any(
-            not isinstance(row, dict) or set(row) != _SEMANTIC_FIELDS
-            for row in semantic_rows.values()
-        )
-        or any(
-            not isinstance(row, dict) or set(row) != _RELATION_FIELDS
-            for row in relation_rows.values()
-        )
-    ):
-        raise PromptContractExtractionError("contract decision row fields are invalid")
-    if any(
-        not isinstance(row["rationale"], str) or not row["rationale"].strip()
-        for row in (*semantic_rows.values(), *relation_rows.values())
-    ):
-        raise PromptContractExtractionError("contract decision rationale is invalid")
-    if any(
-        not isinstance(row["attributes"], list)
-        or any(
-            not isinstance(attribute, str) or not attribute
-            for attribute in row["attributes"]
-        )
-        or len(row["attributes"]) != len(set(row["attributes"]))
-        for row in semantic_rows.values()
-    ):
-        raise PromptContractExtractionError("contract semantic attributes are invalid")
-    try:
-        semantic_decisions = tuple(
-            SemanticDecision(
-                semantic_id,
-                QueryState(row["state"]),
-                (
-                    "Annotator declared this semantic "
-                    f"{QueryState(row['state']).value}; the audit explanation is retained "
-                    "only in the raw response."
-                ),
-                (
-                    row["evidence_text"]
-                    if QueryState(row["state"]) is QueryState.PRESENT
-                    else None
-                ),
-                (
-                    row["occurrence"]
-                    if QueryState(row["state"]) is QueryState.PRESENT
-                    else None
-                ),
-                (
-                    tuple((attribute, True) for attribute in sorted(row["attributes"]))
-                    if QueryState(row["state"]) is QueryState.PRESENT
-                    else ()
-                ),
-            )
-            for semantic_id, row in semantic_rows.items()
-        )
-        relation_decisions = tuple(
-            RelationDecision(
-                relation_by_key[relation_id][0],
-                relation_by_key[relation_id][1],
-                relation_by_key[relation_id][2],
-                QueryState(row["state"]),
-                (
-                    "Annotator declared this relation "
-                    f"{QueryState(row['state']).value}; the audit explanation is retained "
-                    "only in the raw response."
-                ),
-            )
-            for relation_id, row in relation_rows.items()
-        )
-    except (AttributeError, KeyError, TypeError, ValueError):
-        raise PromptContractExtractionError("contract decision values are invalid") from None
-    semantic_decisions = _demote_unbound_present_evidence(
-        task["prompt"], semantic_decisions
-    )
-    relation_decisions = _close_relation_endpoint_states(
-        semantic_decisions, relation_decisions
-    )
-    contract = TaskContextContract(
-        "2.0",
-        task["task_id"],
-        content_hash(task["prompt"]),
-        catalog_sha256(catalog),
-        task["cwe"],
-        task["task_family"],
-        scope["query_ids"],
-        annotator_id,
-        review_status,
-        False,
-        tuple(sorted(semantic_decisions, key=lambda row: row.semantic_id)),
-        tuple(sorted(relation_decisions, key=lambda row: row.relation)),
-    )
-    try:
-        compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
-    except PromptTSGError as error:
-        raise PromptContractExtractionError(str(error)) from None
+    if catalog.get("schema_version") != "2.0":
+        raise PromptContractExtractionError("open-graph catalog is required")
+    task = prepare_task_input(task)
+    value, inventory = _indexed_facts_response(value, prompt=task["prompt"], request=contract_decision_request(task, catalog))
+    contract = open_contract_from_response(value, task=task, catalog=catalog,
+                                          annotator_id=annotator_id, review_status=review_status,
+                                          source_inventory=inventory)
     return contract

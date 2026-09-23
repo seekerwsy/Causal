@@ -6,7 +6,7 @@ Use Python 3.12 with the repository's `dev,selectors,languages` extras:
 python -m pytest -q
 ```
 
-The default suite contains **100 cases in 80 test functions**. Its end-to-end
+The default suite contains **99 cases in 79 test functions**. Its end-to-end
 smoke executes all seven stages with offline model responses and a real FCI fit
 on synthetic observations. It also runs the independent saved-result verifier.
 These checks make no paid provider calls and cannot establish real-model TSG or

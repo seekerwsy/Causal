@@ -21,7 +21,6 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     validate_feature_scope,
     prompt_tsg_from_record,
     query_context,
-    query_for_realization,
     query_bindings,
     validate_prompt_tsg,
 )
@@ -711,121 +710,10 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     }
 
 
-@dataclass(frozen=True, slots=True)
-class ControlPath:
-    """One canonical directed Prompt-TSG path; it is semantic, not causal."""
-
-    node_ids: tuple[str, ...]
-    edge_ids: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if len(self.node_ids) < 2 or len(self.edge_ids) != len(self.node_ids) - 1:
-            raise ValueError("a control path needs ordered nodes and one edge per step")
-        if len(set(self.node_ids)) != len(self.node_ids) or len(set(self.edge_ids)) != len(
-            self.edge_ids
-        ):
-            raise ValueError("a control path cannot repeat nodes or edges")
-        for value in (*self.node_ids, *self.edge_ids):
-            require_text(value, "control path identifier")
-
-    @property
-    def path_id(self) -> str:
-        return content_id("prompt_tsg_control_path_", self)
 
 
-@dataclass(frozen=True, slots=True)
-class PromptControlBinding:
-    """Outcome-blind binding from one actionable feature to graph evidence."""
-
-    feature_id: str
-    task_id: str
-    task_unit_id: str
-    prompt_tsg_id: str
-    control_node_id: str
-    source_node_ids: tuple[str, ...]
-    sink_node_ids: tuple[str, ...]
-    surface_node_ids: tuple[str, ...]
-    paths: tuple[ControlPath, ...]
-    alternative_group_node_ids: tuple[str, ...] = ()
-    outcomes_or_arms_used: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "feature_id",
-            "task_id",
-            "task_unit_id",
-            "prompt_tsg_id",
-            "control_node_id",
-        ):
-            require_text(getattr(self, name), name)
-        for values, name, required in (
-            (self.source_node_ids, "control sources", True),
-            (self.sink_node_ids, "control sinks", True),
-            (self.surface_node_ids, "control surfaces", True),
-            (self.alternative_group_node_ids, "alternative groups", False),
-        ):
-            if required and not values:
-                raise ValueError(f"{name} cannot be empty")
-            if values != tuple(sorted(set(values))):
-                raise ValueError(f"{name} must be unique and canonical")
-            for value in values:
-                require_text(value, name)
-        if not self.paths or any(type(item) is not ControlPath for item in self.paths):
-            raise TypeError("a control binding requires typed canonical paths")
-        if tuple(sorted(self.paths, key=lambda item: item.path_id)) != self.paths:
-            raise ValueError("control paths must use canonical content order")
-        if len({item.path_id for item in self.paths}) != len(self.paths):
-            raise ValueError("control binding paths must be unique")
-        if any(
-            path.node_ids[0] not in self.source_node_ids
-            or path.node_ids[-1] not in self.sink_node_ids
-            or self.control_node_id not in path.node_ids
-            for path in self.paths
-        ):
-            raise ValueError("every control path must bind a declared source, control, and sink")
-        if self.outcomes_or_arms_used is not False:
-            raise ValueError("Prompt control bindings cannot use outcomes or assignments")
-
-    @property
-    def control_binding_id(self) -> str:
-        return content_id("prompt_control_binding_", self)
 
 
-def validate_prompt_control_binding(
-    graph: PromptTSG,
-    binding: PromptControlBinding,
-) -> None:
-    """Recompute every binding coordinate against the frozen Prompt TSG."""
-
-    if type(graph) is not PromptTSG or type(binding) is not PromptControlBinding:
-        raise TypeError("control binding validation requires typed graph and binding")
-    if binding.prompt_tsg_id != graph.tsg_id or binding.task_id != graph.task_id:
-        raise MechanismRegistryError("control binding graph identity drift")
-    nodes = {item.node_id: item for item in graph.nodes}
-    edges = {item.edge_id: item for item in graph.edges}
-    referenced_nodes = {
-        binding.control_node_id,
-        *binding.source_node_ids,
-        *binding.sink_node_ids,
-        *binding.surface_node_ids,
-        *binding.alternative_group_node_ids,
-    }
-    if not referenced_nodes <= set(nodes):
-        raise MechanismRegistryError("control binding references a missing Prompt-TSG node")
-    if nodes[binding.control_node_id].semantic_id != binding.feature_id:
-        raise MechanismRegistryError("control node does not bind the declared actionable feature")
-    for path in binding.paths:
-        if not set(path.node_ids) <= set(nodes) or not set(path.edge_ids) <= set(edges):
-            raise MechanismRegistryError("control path references missing graph evidence")
-        for source_id, target_id, edge_id in zip(
-            path.node_ids[:-1],
-            path.node_ids[1:],
-            path.edge_ids,
-            strict=True,
-        ):
-            edge = edges[edge_id]
-            if edge.source_id != source_id or edge.target_id != target_id:
-                raise MechanismRegistryError("control path edge order does not replay")
 
 
 def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:
@@ -906,82 +794,14 @@ def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:
     return result
 
 
-def mechanism_binding_id(binding: Mapping[str, Any]) -> str:
-    """Return the content identity of one task-side binding core."""
-
-    core = {key: value for key, value in binding.items() if key != "binding_id"}
-    return content_id("mechanism_binding_", core)
 
 
-def tsg_mechanism_binding(
-    task: Mapping[str, Any],
-    graph: PromptTSG,
-    catalog: Mapping[str, Any],
-    registry: Mapping[str, Mapping[str, Any]],
-) -> dict[str, Any]:
-    """Bind one task using only its frozen Prompt TSG and finite catalog queries."""
-
-    relevant = [
-        row
-        for row in registry.values()
-        if row["cwe_id"] == task.get("cwe") and row["task_family"] == task.get("task_family")
-    ]
-    results = []
-    for row in sorted(relevant, key=lambda item: item["realization_id"]):
-        query = query_for_realization(catalog, row["realization_id"])
-        result = query_context(
-            graph,
-            query=query,
-            cwe=task["cwe"],
-            task_family=task["task_family"],
-        )
-        results.append((row, query, result))
-    present = [item for item in results if item[2].state == QueryState.PRESENT]
-    selected = present[0] if len(present) == 1 else None
-    feature = selected[1]["actionable_feature_id"] if selected else None
-    target_state = feature_state(graph, feature).value if feature else "not_applicable"
-    controls = {
-        semantic_id: feature_state(graph, semantic_id).value
-        for semantic_id in ("control.generic_security", "control.code_style")
-    }
-    if len(present) > 1 or (not present and any(
-        item[2].state == QueryState.UNRESOLVED for item in results
-    )):
-        decision = "unresolved"
-    elif not present:
-        decision = "not_applicable"
-    elif target_state != QueryState.ABSENT.value:
-        decision = "target_feature_present" if target_state == "present" else "unresolved"
-    elif any(state != QueryState.ABSENT.value for state in controls.values()):
-        decision = "control_feature_present"
-    else:
-        decision = "applicable"
-    core = {
-        "decision": decision,
-        "realization_id": selected[0]["realization_id"] if selected else None,
-        "prompt_tsg_id": graph.tsg_id,
-        "context_query_id": selected[1]["query_id"] if selected else None,
-        "context_state": selected[2].state.value if selected else "unresolved" if decision == "unresolved" else "absent",
-        "actionable_feature_id": feature,
-        "target_feature_state": target_state,
-        "control_feature_states": controls,
-        "evidence_node_ids": list(selected[2].evidence_node_ids) if selected else [],
-        "evidence_edge_ids": list(selected[2].evidence_edge_ids) if selected else [],
-        "query_states": [
-            {"query_id": query["query_id"], "state": result.state.value}
-            for _, query, result in results
-        ],
-        "outcomes_or_arms_used": False,
-    }
-    return {"binding_id": mechanism_binding_id(core), **core}
 
 
 __all__ = [
-    "ControlPath",
     "MechanismRegistryError",
-    "PromptControlBinding",
+    "TaskHypothesisBinding",
+    "bind_task_hypothesis",
     "load_mechanism_registry",
-    "mechanism_binding_id",
-    "tsg_mechanism_binding",
-    "validate_prompt_control_binding",
+    "render_task_hypothesis",
 ]

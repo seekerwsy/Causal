@@ -16,6 +16,7 @@ from prompt_mechanism_study.tsg.prompt_contract import (
     OpenTaskContract,
 )
 from prompt_mechanism_study.tsg.prompt_tsg import (
+    PromptTSG,
     catalog_sha256,
     load_catalog,
     prompt_tsg_record,
@@ -44,7 +45,7 @@ class _TaskContractAttempt:
     request: dict[str, Any]
     provider_calls: int
     raw: bytes | None
-    contract: TaskContextContract | None
+    contract: OpenTaskContract | None
     graph: PromptTSG | None
     error_type: str | None
     error_message: str | None
@@ -65,7 +66,7 @@ def extract_task_contract(
     annotator_prompt: str,
     review_status: str,
     provider: Provider = bailian_complete,
-) -> tuple[TaskContextContract, PromptTSG, dict[str, Any], bytes]:
+) -> tuple[OpenTaskContract, PromptTSG, dict[str, Any], bytes]:
     """Extract one task; the final two values are the fact-inventory request/raw.
 
     Use extract_contract_task_file for a replayable package retaining fact,

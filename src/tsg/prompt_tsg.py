@@ -1358,13 +1358,6 @@ def feature_state(graph: PromptTSG, feature_id: str, target_node_id: str | None 
 
 
 
-def query_for_realization(
-    catalog: Mapping[str, Any], realization_id: str
-) -> dict[str, Any]:
-    matches = [item for item in catalog["queries"] if item["realization_id"] == realization_id]
-    if len(matches) != 1:
-        raise PromptTSGError("realization does not bind exactly one context query")
-    return dict(matches[0])
 
 
 def _node(
@@ -1496,6 +1489,5 @@ __all__ = [
     "prompt_tsg_from_record",
     "prompt_tsg_record",
     "query_context",
-    "query_for_realization",
     "validate_prompt_tsg",
 ]
