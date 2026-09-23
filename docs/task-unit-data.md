@@ -29,10 +29,11 @@ The old schema-4 build commands and provisional 1,222/563/166 counts are
 development history recoverable from Git. Reproducing the current verification
 does not require those development directories or repeat provider calls.
 
-The single downstream preparation package is
-`data/dataset-curation/research-source-use-v2`, produced by
-`qualification_data.prepare_source_use` and independently reconstructed by
-`verification.qualification.verify_source_use`. It retains every v5 task and
+The retained downstream preparation package is
+`data/dataset-curation/research-source-use-v2`. Its five-axis producer and
+independent verifier are archived on `codex/pre-artifact-scope-20260923`;
+the current `main` path reads the frozen records without rerunning that method.
+The package retains every v5 task and
 original quality/role identity. `prepared-tasks.json` supplies actual prompts and
 functional contracts bound to those prompts; `task-uses.json` records current
 source quality, protected uses and pending candidate requirements. Restored inputs

@@ -117,8 +117,10 @@ Oracle or formal design qualification.
 The prospective revision in [protocol Section 19](protocol.md#19-prospective-sample-size-and-data-gate)
 separates three source axes (context, operation/security boundary and non-target
 invariants) from operation and control design. The frozen package remains the
-current prepared input source, with its original review counts; it has not been
-rescored under the revision. Its builder/verifier reproduce the earlier rule only.
+prepared input source, with its original review counts; it has not been
+rescored under the revision. Its five-axis builder and verifier are preserved
+on the historical branch `codex/pre-artifact-scope-20260923`, not exposed by
+the current `main` command path.
 The [bounded development check](experiments/2026-09-10-proportional-prototype.md)
 uses already exposed material to examine the new semantics before any expanded
 qualification or formal admission.
@@ -199,21 +201,16 @@ An incomplete or restored-unreviewed source keeps functionality and joint succes
 unknown even if independently measured security is evaluable. Non-Python target
 interventions and security/functional qualification remain pending.
 
-After installing `.[dev,selectors,languages]`, independently verify the released
-prepared inputs, role firewall, current contracts, complete review lineage, source
-assets and counts:
+The source-use verification below was run with the archived five-axis
+implementation. Its command and input hashes are retained on
+`codex/pre-artifact-scope-20260923`; it is not part of the current reviewer
+command path.
 
-```text
-prompt-mechanism-study curate finalize source-use data/dataset-curation/reviewer-task-unit-dataset-v5 data/method/qwen37flash-qualification-source-review-candidates-v1 data/method/prompt-tsg-catalog-source-contract-v2.json data/method/phase-context-policy-v3-mechanism-registry-v1.json data/dataset-curation/research-source-use-v2
-```
-
-Without raw source locations this reports `SOURCE_USE_STRUCTURE_VERIFIED`. The
-report's `reproduction.command` records the exact producer invocation, seven
-source roots, two pinned archives and review inputs; use a new output directory
-to reproduce preparation. Add the recorded `--source-root` and `--source-archive`
-arguments to the verification command above for full `SOURCE_USE_VERIFIED`
-replay. Review-lineage verification reads the complete embedded judgments and
-does not require the original development review directories.
+On the archived branch, structure-only replay reported
+`SOURCE_USE_STRUCTURE_VERIFIED`; supplying the recorded source roots and archives
+enabled full `SOURCE_USE_VERIFIED` replay. The frozen report records the exact
+producer invocation, input hashes and review lineage. Current `main` reads the
+frozen source records without re-running the old five-axis qualification.
 The recorded environment is Python 3.12.13 on Windows 11 build 26200. Parser
 versions and producer-file hashes are recorded in the package. No provider calls,
 new roles or scientific effects were produced.
@@ -251,7 +248,7 @@ with zero provider calls. Its bundle SHA-256 is
 
 ## Prior bounded Python capacity diagnostic
 
-`qualification_data.summarize_source_role_capacity` verifies both source and
+The archived `qualification_data.summarize_source_role_capacity` verified both source and
 reservation bundles, reads source quality, CWE routing and exposure metadata,
 and counts the prior 21-CWE residual population. It does not read Prompt TSG results,
 candidate ranks, generated code, experimental arms or outcomes. The checked

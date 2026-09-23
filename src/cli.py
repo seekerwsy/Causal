@@ -140,21 +140,6 @@ def _add_curation_prepare(stages: Any) -> None:
     pool.add_argument("--qualification-manifest", type=Path, required=True,
                       help="current qualification reservations and additional method exposures")
 
-    source_use = _leaf(actions, "source-use", _run_prepare_source_use,
-                       "prepare every frozen task, replay its source assets and preserve role boundaries")
-    source_use.add_argument("source_bundle", type=Path)
-    source_use.add_argument("reservation_bundle", type=Path)
-    source_use.add_argument("catalog", type=Path)
-    source_use.add_argument("registry", type=Path)
-    source_use.add_argument("output", type=Path)
-    source_use.add_argument("--source-root", action="append", required=True, metavar="DATASET=PATH")
-    source_use.add_argument("--source-archive", action="append", default=[], metavar="DATASET=PATH")
-    source_use.add_argument("--candidate-reviews", type=Path)
-    source_use.add_argument("--candidate-context-reviews", type=Path)
-    source_use.add_argument("--native-asset-reviews", type=Path)
-    source_use.add_argument("--contract-review-round", type=Path, action="append", nargs=6,
-                            metavar=("PROPOSALS", "PACKETS", "DECISIONS", "INITIAL", "ADJUDICATIONS", "REVIEWS"))
-
     restored = _leaf(actions, "restored-contracts", _run_prepare_restored_contracts,
                      "propose source-backed contracts for available restored inputs")
     restored.add_argument("base_bundle", type=Path)
@@ -386,16 +371,6 @@ def _add_curation_finalize(stages: Any) -> None:
     group = stages.add_parser("finalize", help="assemble and verify the frozen reviewer data")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
 
-    source_use = _leaf(actions, "source-use", _run_verify_source_use,
-                       "independently verify source uses, input restoration and role boundaries")
-    source_use.add_argument("source_bundle", type=Path)
-    source_use.add_argument("reservation_bundle", type=Path)
-    source_use.add_argument("catalog", type=Path)
-    source_use.add_argument("registry", type=Path)
-    source_use.add_argument("output", type=Path)
-    source_use.add_argument("--source-root", action="append", default=[], metavar="DATASET=PATH")
-    source_use.add_argument("--source-archive", action="append", default=[], metavar="DATASET=PATH")
-
     finalize_content = _leaf(
         actions,
         "task-units",
@@ -418,25 +393,6 @@ def _add_representation_group(groups: Any) -> None:
         description=("Freeze task roles and extract evidence-bound Prompt TSG representations."),
     )
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
-
-    population = _leaf(
-        actions,
-        "freeze-population",
-        _run_freeze_population,
-        "freeze a natural-Prompt task-unit census without outcomes",
-    )
-    population.add_argument("prepared_root", type=Path)
-    population.add_argument("clusters_root", type=Path)
-    population.add_argument("catalog", type=Path)
-    population.add_argument("output", type=Path)
-    population.add_argument(
-        "--scope",
-        action="append",
-        required=True,
-        metavar="CWE=TASK_FAMILY",
-        help="repeat for each preregistered local discovery scope",
-    )
-    population.add_argument("--language", default="python")
 
     selection = _leaf(
         actions,
@@ -572,19 +528,6 @@ def _add_representation_group(groups: Any) -> None:
     bindings.add_argument("output", type=Path)
     bindings.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
 
-    partition = _leaf(
-        actions,
-        "freeze-partition",
-        _run_freeze_partition,
-        "freeze an outcome-blind discovery/pilot/confirmation task-unit partition",
-    )
-    partition.add_argument("tasks", type=Path)
-    partition.add_argument("clusters_root", type=Path)
-    partition.add_argument("catalog", type=Path)
-    partition.add_argument("output", type=Path)
-    partition.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
-    partition.add_argument("--seed", type=int, default=2026083001)
-
 
 def _add_qualification_group(groups: Any) -> None:
     group = groups.add_parser(
@@ -662,7 +605,7 @@ def _add_qualification_group(groups: Any) -> None:
     positivity.add_argument("catalog", type=Path)
     positivity.add_argument("output", type=Path)
     positivity.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
-    positivity.add_argument("--scope-bindings", type=Path,
+    positivity.add_argument("--scope-bindings", type=Path, required=True,
                             help="frozen global factor definitions, task scopes and shared support rules for open graphs")
     positivity.add_argument(
         "--graph-artifact",
@@ -674,42 +617,6 @@ def _add_qualification_group(groups: Any) -> None:
             "confirm-graphs.json",
         ),
         help="graph collection inside each verified bundle",
-    )
-    positivity.add_argument("--minimum-state-task-units", type=int,
-                            help="archival closed-catalog replay only")
-    positivity.add_argument("--minimum-shared-lineages", type=int,
-                            help="archival closed-catalog replay only")
-
-    dataset = _leaf(
-        actions,
-        "dataset",
-        _run_dataset_eligibility,
-        "audit curated clusters for current experiment readiness",
-    )
-    dataset.add_argument("prepared_root", type=Path)
-    dataset.add_argument("clusters_root", type=Path)
-    dataset.add_argument("contracts_root", type=Path)
-    dataset.add_argument("output", type=Path)
-    dataset.add_argument("--repository-root", type=Path, default=Path.cwd())
-    dataset.add_argument("--policy", type=Path)
-    dataset.add_argument(
-        "--bindings-root",
-        type=Path,
-        help="optional outcome-blind task-to-mechanism binding bundle",
-    )
-    dataset.add_argument(
-        "--contract-reviews-root",
-        type=Path,
-        help="optional complete blind functional-contract review bundle",
-    )
-    dataset.add_argument("--development-exclusions", type=Path)
-    dataset.add_argument("--case-audit", type=Path)
-    dataset.add_argument("--quality-adjudication", type=Path)
-    dataset.add_argument("--extension-policy", type=Path)
-    dataset.add_argument(
-        "--backend-root",
-        type=Path,
-        help="optional BaxBench-compatible source snapshot for backend data inventory",
     )
 
 
@@ -1131,29 +1038,6 @@ def _run_binding_adjudications(args: argparse.Namespace, _: argparse.ArgumentPar
     return _emit_status(report)
 
 
-def _run_freeze_population(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.discovery_population import prepare_discovery_population
-
-    scopes: dict[str, str] = {}
-    for item in args.scope:
-        try:
-            cwe, task_family = item.split("=", 1)
-        except ValueError:
-            parser.error("discovery scopes must use CWE=TASK_FAMILY")
-        if not cwe.strip() or not task_family.strip() or cwe in scopes:
-            parser.error("discovery scopes must be unique non-empty CWE=TASK_FAMILY values")
-        scopes[cwe] = task_family
-    report = prepare_discovery_population(
-        args.prepared_root,
-        args.clusters_root,
-        args.catalog,
-        args.output,
-        scopes=scopes,
-        language=args.language,
-    )
-    return _emit_status(report)
-
-
 def _run_select_tsg_tasks(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     from prompt_mechanism_study.data.eligibility import freeze_prompt_tsg_task_selection
 
@@ -1176,50 +1060,10 @@ def _run_select_tsg_holdout(args: argparse.Namespace, _: argparse.ArgumentParser
     return _emit_status(report)
 
 
-def _source_use_locations(args: argparse.Namespace, parser: argparse.ArgumentParser):
-    roots = {}
-    for item in args.source_root:
-        name, separator, path = item.partition("=")
-        if not separator or not name or not path or name in roots:
-            parser.error("source roots must be unique DATASET=PATH values")
-        roots[name] = Path(path)
-    archives = {}
-    for item in args.source_archive:
-        name, separator, path = item.partition("=")
-        if not separator or not name or not path or name in archives:
-            parser.error("source archives must be unique DATASET=PATH values")
-        archives[name] = Path(path)
-    return roots, archives
-
-
 def _run_prepare_candidate_pool(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     from prompt_mechanism_study.data.qualification_data import screen_prepared_source_pool
     return _emit_status(screen_prepared_source_pool(
         args.source_bundle, args.output, qualification_manifest=args.qualification_manifest,
-    ))
-
-
-def _run_prepare_source_use(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.qualification_data import prepare_source_use
-
-    roots, archives = _source_use_locations(args, parser)
-    return _emit_json(prepare_source_use(
-        args.source_bundle, args.reservation_bundle, args.catalog, args.registry,
-        args.output, source_roots=roots, source_archives=archives,
-        candidate_reviews=args.candidate_reviews,
-        contract_review_rounds=args.contract_review_round,
-        native_asset_reviews=args.native_asset_reviews,
-        candidate_context_reviews=args.candidate_context_reviews,
-    ))
-
-
-def _run_verify_source_use(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.verification.qualification import verify_source_use
-
-    roots, archives = _source_use_locations(args, parser)
-    return _emit_json(verify_source_use(
-        args.output, args.source_bundle, args.reservation_bundle, args.catalog, args.registry,
-        source_roots=roots or None, source_archives=archives or None,
     ))
 
 
@@ -1306,20 +1150,6 @@ def _run_freeze_bindings(args: argparse.Namespace, _: argparse.ArgumentParser) -
         args.catalog,
         args.registry,
         args.output,
-    )
-    return _emit_status(report)
-
-
-def _run_freeze_partition(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.discovery_population import freeze_task_unit_partition
-
-    report = freeze_task_unit_partition(
-        args.tasks,
-        tuple(args.prompt_tsg_bundle),
-        args.clusters_root,
-        args.catalog,
-        args.output,
-        seed=args.seed,
     )
     return _emit_status(report)
 
@@ -1422,35 +1252,10 @@ def _run_positivity(args: argparse.Namespace, _: argparse.ArgumentParser) -> int
         tuple(args.prompt_tsg_bundle),
         args.catalog,
         args.output,
-        minimum_state_task_units=args.minimum_state_task_units,
-        minimum_shared_lineages=args.minimum_shared_lineages,
         graph_artifact=args.graph_artifact,
         scope_bindings_path=args.scope_bindings,
     )
-    if report["status"] == "SCOPED_SOURCE_SUPPORT_CHECK_COMPLETE":
-        return _emit_json(report)
-    return _emit_gate_status(report, "POSITIVITY_GATE_PASSED")
-
-
-def _run_dataset_eligibility(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.eligibility import audit_dataset_eligibility
-
-    report = audit_dataset_eligibility(
-        args.repository_root,
-        args.prepared_root,
-        args.clusters_root,
-        args.contracts_root,
-        args.output,
-        policy_path=args.policy,
-        bindings_root=args.bindings_root,
-        contract_reviews_root=args.contract_reviews_root,
-        development_exclusions_path=args.development_exclusions,
-        case_audit_path=args.case_audit,
-        quality_adjudication_path=args.quality_adjudication,
-        extension_policy_path=args.extension_policy,
-        backend_root=args.backend_root,
-    )
-    return _emit_status(report)
+    return _emit_json(report)
 
 
 def _run_artifact_verify(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
