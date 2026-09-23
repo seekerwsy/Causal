@@ -6,6 +6,9 @@ an offline seven-stage smoke, **not** a formal effect result. It makes no model
 provider calls and consumes no protected evaluation tasks. Historical development
 outputs are preserved on local branch `codex/pre-artifact-scope-20260923` at
 `f1cd0011`; they are outside this default reviewer path.
+The closed-vocabulary TSG qualifier and fixed-registry task-to-mechanism
+binding commands are available only in that historical implementation; the
+current path constructs open-graph Atomic candidates.
 
 ## Reproduce the current result
 

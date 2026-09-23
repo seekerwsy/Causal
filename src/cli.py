@@ -283,21 +283,6 @@ def _add_curation_review(stages: Any) -> None:
     merge_subagent_reviews.add_argument("proposals_root", type=Path)
     merge_subagent_reviews.add_argument("output", type=Path)
 
-    review_bindings = _leaf(
-        actions,
-        "bindings",
-        _run_binding_review,
-        "blindly bind ambiguous task units to registered mechanism realizations",
-    )
-    review_bindings.add_argument("prepared_root", type=Path)
-    review_bindings.add_argument("clusters_root", type=Path)
-    review_bindings.add_argument("contracts_root", type=Path)
-    review_bindings.add_argument("eligibility_root", type=Path)
-    review_bindings.add_argument("registry", type=Path)
-    review_bindings.add_argument("output", type=Path)
-    _add_curation_runtime_options(review_bindings)
-
-
 def _add_curation_repair(stages: Any) -> None:
     group = stages.add_parser("repair", help="resolve nonterminal contracts and evidence only when required")
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
@@ -352,20 +337,6 @@ def _add_curation_repair(stages: Any) -> None:
     contract_adjudications.add_argument("reviews_root", type=Path)
     contract_adjudications.add_argument("adjudications", type=Path)
     contract_adjudications.add_argument("output", type=Path)
-
-    binding_adjudications = _leaf(
-        actions,
-        "binding-adjudications",
-        _run_binding_adjudications,
-        "apply bounded outcome-blind corrections to unresolved mechanism bindings",
-    )
-    binding_adjudications.add_argument("prepared_root", type=Path)
-    binding_adjudications.add_argument("clusters_root", type=Path)
-    binding_adjudications.add_argument("bindings_root", type=Path)
-    binding_adjudications.add_argument("registry", type=Path)
-    binding_adjudications.add_argument("adjudications", type=Path)
-    binding_adjudications.add_argument("output", type=Path)
-
 
 def _add_curation_finalize(stages: Any) -> None:
     group = stages.add_parser("finalize", help="assemble and verify the frozen reviewer data")
@@ -514,20 +485,6 @@ def _add_representation_group(groups: Any) -> None:
     visualize.add_argument(
         "--review", type=Path, help="saved development analysis bundle for graph debugging"
     )
-
-    bindings = _leaf(
-        actions,
-        "freeze-bindings",
-        _run_freeze_bindings,
-        "freeze Prompt-TSG task-to-mechanism and local-Oracle bindings",
-    )
-    bindings.add_argument("tasks", type=Path)
-    bindings.add_argument("contracts_root", type=Path)
-    bindings.add_argument("catalog", type=Path)
-    bindings.add_argument("registry", type=Path)
-    bindings.add_argument("output", type=Path)
-    bindings.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
-
 
 def _add_qualification_group(groups: Any) -> None:
     group = groups.add_parser(
@@ -985,24 +942,6 @@ def _run_finalize_contract_content(
     return _emit_status(report)
 
 
-def _run_binding_review(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.curation import run_mechanism_binding_review
-
-    report = run_mechanism_binding_review(
-        args.repository_root,
-        args.prepared_root,
-        args.clusters_root,
-        args.contracts_root,
-        args.eligibility_root,
-        args.registry,
-        args.output,
-        max_new_batches=args.max_new_batches,
-        workers=args.workers,
-        reuse_root=args.reuse_root,
-    )
-    return _emit_status(report)
-
-
 def _run_repair_contracts(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     from prompt_mechanism_study.data.curation import repair_response_format_contract_leaks
 
@@ -1017,20 +956,6 @@ def _run_contract_adjudications(args: argparse.Namespace, _: argparse.ArgumentPa
     report = apply_contract_recovery_adjudications(
         args.contracts_root,
         args.reviews_root,
-        args.adjudications,
-        args.output,
-    )
-    return _emit_status(report)
-
-
-def _run_binding_adjudications(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.eligibility import apply_binding_adjudications
-
-    report = apply_binding_adjudications(
-        args.prepared_root,
-        args.clusters_root,
-        args.bindings_root,
-        args.registry,
         args.adjudications,
         args.output,
     )
@@ -1137,20 +1062,6 @@ def _run_bind_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) -
             qualification_bundle=args.qualification_bundle,
         )
     )
-
-
-def _run_freeze_bindings(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.eligibility import freeze_tsg_realization_bindings
-
-    report = freeze_tsg_realization_bindings(
-        args.tasks,
-        tuple(args.prompt_tsg_bundle),
-        args.contracts_root,
-        args.catalog,
-        args.registry,
-        args.output,
-    )
-    return _emit_status(report)
 
 
 def _run_security_oracle(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
