@@ -1,16 +1,76 @@
 import hashlib
 import json
+from pathlib import Path
 from prompt_mechanism_study.artifact_io import write_bundle
-from prompt_mechanism_study.contract_cleaning import (
+from prompt_mechanism_study.data.contract_cleaning import (
     finalize_contract_content_data,
     freeze_future_evaluation_reservation,
     verify_contract_content_data,
 )
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.task_unit_data import (
-    compile_task_unit_data,
-    verify_task_unit_data,
-)
+from prompt_mechanism_study.data.task_unit_data import compile_task_unit_data, verify_task_unit_data
+
+
+def test_content_producer_binds_repaired_contracts_without_certifying_disputed_evidence(tmp_path, monkeypatch):
+    """Exercise actual requests/parsers; only the upstream bundle reader is stubbed."""
+    from prompt_mechanism_study.data import contract_cleaning as cleaning
+    from prompt_mechanism_study.artifact_io import read_json
+
+    tasks, contracts, quality = {}, {}, {}
+    for key, faithful in [('faithful', True), ('faulty', False)]:
+        prompt = f'For {key}, implement main. Return result.'
+        tasks[key] = dict(representative_record_id=key, declared_execution_context=dict(language='python'),
+            model_visible_input=dict(natural_prompt=prompt, natural_prompt_content_sha256=content_hash(prompt)))
+        contracts[key] = dict(contract_id='old-' + key, resolution_status='resolved', entrypoint='main',
+            requirements=['Return result.' if faithful else 'Return something else.'], inputs=[],
+            outputs=['result'], side_effects=[], environment_dependencies=[],
+            review=dict(contract_status='faithful' if faithful else 'faulty',
+                        issue_codes=[], remaining_deterministic_issue_codes=[]))
+        quality[key] = dict(quality_disposition='QUALITY_INCLUDED' if faithful else 'QUALITY_PENDING_CONTRACT_REPAIR')
+    base = write_bundle(tmp_path / 'base', {'fixture.json': 'Source population is checked in the compiler test.'})
+    monkeypatch.setattr(cleaning, 'verify_task_unit_data', lambda _: None)
+    monkeypatch.setattr(cleaning, '_base_population', lambda _: (tasks, contracts, quality))
+    requests = []
+
+    def provider(request, config, prompt):
+        requests.append(request)
+        rows = []
+        for item in request['tasks']:
+            if request['request_kind'] == 'blind_functional_contract_semantic_repair':
+                assert 'Do not return evidence spans' in prompt
+                rows.append(dict(item_index=item['item_index'], resolution_status='resolved', entrypoint='main',
+                    requirements=['Return result.'], inputs=[], outputs=['result'], side_effects=[],
+                    environment_dependencies=[], source_specification_assessment='sufficient',
+                    repair_category='CONTRACT_EXTRACTION_ERROR', reason='Source-only repair.'))
+            else:
+                assert item['immutable_contract']['requirements'] == ['Return result.']
+                quote = item['source_prompt'] if 'faithful' in item['source_prompt'] else 'not a source quote'
+                rows.append(dict(item_index=item['item_index'], binding_status='bound', reason='Fixture binding.',
+                    evidence_bindings=[dict(target_id=target['target_id'],
+                        spans=[dict(evidence_text=quote, evidence_occurrence=1)])
+                        for target in item['evidence_targets']]))
+        return json.dumps({'items': rows}).encode()
+
+    output = tmp_path / 'proposals'
+    report = cleaning.run_contract_content_proposals(Path.cwd(), base, output,
+        producer_commit='test', provider=provider)
+    assert len(requests) == 3  # Existing evidence, semantic repair, then repaired evidence.
+    assert all(r['arms_outcomes_roles_included'] is False for r in requests)
+    assert report['all_task_units_accounted_for'] and report['task_unit_count'] == 2
+    assert report['evidence_only_count'] == report['semantic_repair_count'] == 1
+    assert report['full_prompt_pending_review_count'] == 1 and not report['scientific_claim_allowed']
+    proposals = read_json(output / 'final/proposed-contracts.json')
+    ledger = {r['task_unit_id']: r for r in read_json(output / 'final/contract-repair-ledger.json')}
+    assert ledger['faulty']['evidence_binding_status'] == 'full_prompt_pending_review'
+    assert all(r['review_status'] == 'PENDING' for r in ledger.values())
+    for proposal in proposals:
+        cleaning._validate_proposal_identity(proposal)
+        cleaning._validate_frozen_evidence(tasks[proposal['task_unit_id']], proposal)
+    raw_binding = read_json(output / 'repair-evidence/batches/batch-0001/result.json')['items'][0]
+    assert raw_binding['binding_status'] == 'needs_repair' and raw_binding['content_evidence'] is None
+    assert cleaning.run_contract_content_proposals(Path.cwd(), base, output,
+        producer_commit='test', provider=provider) == report
+    assert len(requests) == 3  # Same frozen preparation replays without extra provider calls.
 
 
 def _record(record_id, prompt, dataset, item, *, tests=()):

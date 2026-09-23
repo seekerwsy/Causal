@@ -2,13 +2,13 @@
 
 import json
 import pytest
-from prompt_mechanism_study.prompt_contract import (
+from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
     open_concept_catalog,
     open_contract_from_response,
     task_context_contract_record,
 )
-from prompt_mechanism_study.candidate_construction import (
+from prompt_mechanism_study.tsg.candidate_construction import (
     build_candidate_catalog,
     candidate_model_request,
     candidate_request,
@@ -16,10 +16,191 @@ from prompt_mechanism_study.candidate_construction import (
     prepare_candidate_request,
 )
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
-from prompt_mechanism_study.prompt_tsg import prompt_tsg_record
-from prompt_mechanism_study.prompt_contract_extract import contract_decision_request
-from prompt_mechanism_study.task_input import generation_template_facts, prepare_task_input
+from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_record
+from prompt_mechanism_study.tsg.source_codec import contract_decision_request
+from prompt_mechanism_study.tsg.task_input import generation_template_facts, prepare_task_input
 from prompt_mechanism_study.records import content_hash
+
+
+def test_knowledge_add_keeps_source_provenance_unknown_and_conflict_separate():
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.candidate_construction import knowledge_add_candidate
+    from annotation_fixture import authored_two_output_candidate
+    task, knowledge = authored_two_output_candidate()
+    original = deepcopy(task['source_records'])
+    proposal = task['proposal']
+    assert proposal['decision'] == 'include'
+    assert 'requirement_node_id' not in proposal['policy']
+    assert proposal['policy']['targets'] == ['first_file', 'second_file']
+    args = dict(source_prompt=task['prompt'], source_records=task['source_records'],
+                knowledge=knowledge, binding=proposal['policy'])
+    for changes, expected in [({'source_state':'UNRESOLVED'}, 'abstain'),
+                              ({'compatibility':'conflict'}, 'reject'),
+                              ({'complete_binding':False}, 'abstain')]:
+        result = knowledge_add_candidate(**args, assessment={**proposal['assessment'], **changes})
+        assert result['decision'] == expected and result['policy'] is None
+    quote_changed = {**proposal['assessment'], 'evidence':['a paraphrase, not a located quotation']}
+    result = knowledge_add_candidate(**args, assessment=quote_changed)
+    assert result['decision'] == 'include' and result['evidence_diagnostics']
+    assert result['assessment']['evidence'] == quote_changed['evidence']
+    assert not result['automatic_semantic_certification']
+    result = knowledge_add_candidate(**args, assessment={**quote_changed, 'relevance':'unsupported'})
+    assert result['decision'] == 'abstain'
+    with pytest.raises(ValueError, match='quotation'):
+        knowledge_add_candidate(**args, assessment={**proposal['assessment'], 'evidence':['']})
+    with pytest.raises(ValueError, match='existing'):
+        knowledge_add_candidate(**{**args,'binding':{**args['binding'],'targets':['invented']}},
+                                assessment=proposal['assessment'])
+    for empty in ('targets', 'operations'):
+        bound = {**args['binding'], empty: []}
+        result = knowledge_add_candidate(**{**args, 'binding': bound}, assessment=proposal['assessment'])
+        assert result['decision'] == 'include' and result['policy'][empty] == []
+    with pytest.raises(ValueError, match='at least one'):
+        knowledge_add_candidate(**{**args,'binding':{**args['binding'],'targets':[],'operations':[]}},
+                                assessment=proposal['assessment'])
+    broken = deepcopy(original)
+    broken['objects'][0]['fact']['layer'] = 'generation'
+    result = knowledge_add_candidate(**{**args,'source_records':broken,
+                                      'binding':{**args['binding'],'targets':[]}}, assessment=proposal['assessment'])
+    assert result['decision'] == 'abstain' and result['blocking_records']
+    # No independent edit text can override or quietly broaden the binding.
+    changed = {**args['binding'], 'edit_text':'Contradict every policy field.', 'conditions':['When the input is nonempty.']}
+    result = knowledge_add_candidate(**{**args, 'binding':changed}, assessment=proposal['assessment'])
+    assert 'Contradict' not in result['policy']['edit_text']
+    assert 'When the input is nonempty.' in result['policy']['edit_text']
+    for key in changed['targets']:
+        row = next(r for r in original['objects'] if r['record_id']==key)
+        assert row['fact']['concept']['definition'] in result['policy']['edit_text']
+    for row in original['operations']:
+        assert row['fact']['evidence_text'] in result['policy']['edit_text']
+    unlocated = deepcopy(original)
+    next(r for r in unlocated['objects'] if r['record_id']=='first_file')['fact']['evidence_text']='not a source quotation'
+    result=knowledge_add_candidate(**{**args,'source_records':unlocated},assessment=proposal['assessment'])
+    assert 'not a source quotation' not in result['policy']['edit_text'] and result['evidence_diagnostics']
+    # A disconnected defect is preserved, never silently assumed unrelated.
+    local = deepcopy(original)
+    local['objects'].append(dict(record_id='unrelated', fact={}))
+    result = knowledge_add_candidate(**{**args,'source_records':local}, assessment=proposal['assessment'])
+    assert result['decision'] == 'abstain'
+    judgment = {**proposal['assessment'], 'structural_dispositions':{
+        'unrelated':dict(relevance='unrelated',rationale='Authored diagnostic: unused display object, no policy constraint.')}}
+    result = knowledge_add_candidate(**{**args,'source_records':local}, assessment=judgment)
+    assert result['decision'] == 'include' and result['structural_diagnostics']
+    # An unrelated AND container is not itself a whole-task constraint.
+    leaf = deepcopy(original['requirements'][0])
+    leaf.update(record_id='display_rule',subjects=['unrelated'],operations=[])
+    parent = deepcopy(leaf)
+    parent.update(record_id='display_group',scope_kind='composite',subjects=[],
+                  structure=dict(kind='and',members=['display_rule']))
+    local['requirements'] += [leaf,parent]
+    assert knowledge_add_candidate(**{**args,'source_records':local}, assessment=judgment)['decision']=='include'
+    # Owned relation endpoints and incoming order are necessary context as well.
+    related = deepcopy(local)
+    related['requirements'][-2]['relations']=[dict(source='unrelated',target='write_first',edge_type='precedes',evidence_text='Authored diagnostic.')]
+    assert knowledge_add_candidate(**{**args,'source_records':related}, assessment=judgment)['decision']=='abstain'
+    related = deepcopy(original)
+    related['operations'].append(dict(record_id='before',fact={},precedes=[dict(operation='write_first')]))
+    before_judgment={**proposal['assessment'],'structural_dispositions':{'before':dict(relevance='unrelated',rationale='Attempted waiver.')}}
+    assert knowledge_add_candidate(**{**args,'source_records':related},assessment=before_judgment)['decision']=='abstain'
+    # A selected dependency or a global unknown constraint cannot be waived.
+    local['requirements'].append(dict(record_id='global',scope_kind='task',fact={}))
+    judgment['structural_dispositions']['global']=dict(relevance='unrelated',rationale='Incorrect attempted waiver.')
+    assert knowledge_add_candidate(**{**args,'source_records':local}, assessment=judgment)['decision']=='abstain'
+    assert task['source_records'] == original
+
+
+def test_knowledge_response_preserves_valid_neighbors_unknown_cells_and_slot_budget():
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.candidate_construction import compile_knowledge_add_response
+    from annotation_fixture import authored_two_output_candidate
+    task, knowledge = authored_two_output_candidate()
+    key = knowledge['id']
+    valid = dict(knowledge_id=key, binding={**task['proposal']['policy'], 'endpoint':key}, assessment=task['proposal']['assessment'])
+    response = dict(assessments={key:dict(task['proposal']['assessment'], applicability='applicable'),
+        'malformed':dict(applicability='applicable', source_state='not an allowed state')},
+        proposals=[dict(knowledge_id='missing',binding=valid['binding']), valid, valid])
+    original = deepcopy(response)
+    args = dict(source_prompt=task['prompt'],source_records=task['source_records'],author='test',
+        knowledge=[knowledge, {**knowledge,'id':'missing'}, {**knowledge,'id':'malformed'}])
+    result = compile_knowledge_add_response(**args,response=response)
+    assert result['assessments'][key] == response['assessments'][key]
+    assert result['assessments']['missing'] is None and result['assessments']['malformed'] is None
+    assert set(result['assessment_errors']) == {'missing','malformed'}
+    assert 'error' in result['proposals'][0]
+    assert result['proposals'][1]['compiled']['decision'] == 'include'
+    assert 'budget' in result['proposals'][2]['error'] and 'compiled' not in result['proposals'][2]
+    # Even a malformed proposal envelope must not erase independently supplied states.
+    result = compile_knowledge_add_response(**args,response={**response,'proposals':None})
+    assert result['assessments'][key] and result['response_errors'] and not result['proposals']
+    # The complete scoped proposal cannot inherit a broad card's positive state.
+    uncertain = {**valid, 'assessment':{**valid['assessment'], 'source_state':'UNRESOLVED'}}
+    result = compile_knowledge_add_response(**args,response={**response,'proposals':[uncertain]})
+    assert result['proposals'][0]['compiled']['decision']=='abstain'
+    missing = {k:v for k,v in valid.items() if k!='assessment'}
+    result = compile_knowledge_add_response(**args,response={**response,'proposals':[missing]})
+    assert 'complete-binding assessment' in result['proposals'][0]['error']
+    # Census answers do not gate independently assessed complete policies.
+    for census in ({}, {key:dict(applicability='not_applicable',source_state='UNRESOLVED')}):
+        result=compile_knowledge_add_response(**args,response=dict(assessments=census,proposals=[valid]))
+        assert result['proposals'][0]['compiled']['decision']=='include'
+    inferred_endpoint=deepcopy(valid)
+    inferred_endpoint['binding'].pop('endpoint')
+    result=compile_knowledge_add_response(**args,response=dict(assessments={},proposals=[inferred_endpoint]))
+    assert result['proposals'][0]['compiled']['policy']['endpoint']==key
+    result['proposals'][0]['compiled']['policy']['targets'].clear()
+    assert inferred_endpoint['binding']['targets']  # No mutable alias back into the model response.
+    assert response == original
+
+
+def test_development_requests_keep_integrity_and_evidence_diagnostics_separate():
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.source_records import (
+        development_record_request,
+        validate_development_records,
+    )
+    from prompt_mechanism_study.tsg.candidate_construction import knowledge_add_model_request
+    prompt = 'Read file x and return its content.'
+    fact = lambda kind, text: dict(concept=dict(concept_id=kind, node_type=kind, definition=text),
+                                  evidence_text=text, layer='runtime')
+    records = dict(objects=[dict(record_id='x', fact=fact('data_object', 'file x'))],
+        operations=[dict(record_id='read', fact=fact('task_operation', 'Read file x'),
+            inputs=[dict(subject='x', role='resource', evidence_text='Read file x')], results=[],
+            execution_conditions=[], scope_conditions=[], precedes=[])], requirements=[], unresolved_notes=[])
+    view = validate_development_records(records, prompt)
+    assert not view['semantic_certification'] and not view['evidence_diagnostics']
+    bad = deepcopy(records)
+    bad['operations'][0]['inputs'][0]['subject'] = 'invented'
+    assert 'participant' in validate_development_records(bad, prompt)['structural_diagnostics'][0]['error']
+    bad = deepcopy(records)
+    bad['objects'][0]['fact']['layer'] = 'generation'
+    assert 'runtime operation and object' in validate_development_records(bad, prompt)['structural_diagnostics'][0]['error']
+    bad = deepcopy(records)
+    bad['objects'][0]['fact']['evidence_text'] = 'private file'
+    diagnostic = validate_development_records(bad, prompt)
+    assert diagnostic['evidence_diagnostics'] == [dict(path='$.objects[0].fact.evidence_text',
+        quotation='private file', status='unmatched', semantic_support='not_verified')]
+    assert diagnostic['records']['x']['fact']['evidence_text'] == 'private file'
+    second = knowledge_add_model_request(prompt, bad, [])
+    assert second['source_records'] == bad
+    assert second['evidence_diagnostics'] == diagnostic['evidence_diagnostics']
+    bad['objects'][0]['fact']['evidence_text'] = ''
+    assert 'quotation' in validate_development_records(bad, prompt)['structural_diagnostics'][0]['error']
+    bad=deepcopy(records)
+    bad['operations'][0]['execution_conditions']=[dict(evidence_text='Read file x')]
+    assert validate_development_records(bad,prompt)['structural_diagnostics']
+    # Neither prose whitespace nor code-literal changes are silently normalized.
+    for original in ('Read\nfile x and return its content.', 'Read file x with code "a  b".'):
+        changed = deepcopy(records)
+        changed['objects'][0]['fact']['evidence_text'] = '"a b"' if 'code' in original else 'Read file x'
+        assert validate_development_records(changed, original)['evidence_diagnostics']
+        assert changed['objects'][0]['fact']['evidence_text'] not in original
+    first = development_record_request(prompt)
+    assert 'knowledge' not in first and first['source_prompt'] == prompt
+    assert isinstance(first['format']['objects'][0]['fact'], dict)
+    assert isinstance(first['format']['operations'][0]['execution_conditions'][0], dict)
+    second = knowledge_add_model_request(prompt, records, [])
+    assert second['source_records'] == records
+    assert not {'outcomes', 'tests', 'references'} & second.keys()
 
 
 def _development_sources(*, include_template=False):
@@ -388,8 +569,8 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
         assert schema["required"] == ["decisions"]
         assert set(schema["properties"]["decisions"]["required"]) == set(response["decisions"])
         return json.dumps(response).encode()
-    monkeypatch.setattr("prompt_mechanism_study.functional_judge.bailian_complete", fake_complete)
-    monkeypatch.setattr("prompt_mechanism_study.candidate_construction._proposal_evaluator", lambda path: {})
+    monkeypatch.setattr("prompt_mechanism_study.measurement.functional_judge.bailian_complete", fake_complete)
+    monkeypatch.setattr("prompt_mechanism_study.tsg.candidate_construction._proposal_evaluator", lambda path: {})
     proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=paths[1])
     assert sent == [candidate_model_request(request)]
     assert proposed["status"] == "PENDING_SEMANTIC_REVIEW" and proposed["accepted_factors"] == 0
@@ -498,11 +679,28 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
 
 def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_conditions(record_property):
     from dataclasses import replace
-    from prompt_mechanism_study.candidate_construction import _candidate_catalog, choose_candidate_scope
-    from prompt_mechanism_study.prompt_contract_extract import fixed_scope_request, apply_fixed_scope_response
-    from prompt_mechanism_study.prompt_tsg import requirement_owned_nodes, PromptTSGError, catalog_sha256
-    from prompt_mechanism_study.prompt_contract_qualification import open_graph_assertions, evaluate_open_semantic_case
-    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
+    from prompt_mechanism_study.tsg.candidate_construction import (
+        _candidate_catalog,
+        choose_candidate_scope,
+    )
+    from prompt_mechanism_study.tsg.scope_assessment import (
+        fixed_scope_request,
+        apply_fixed_scope_response,
+    )
+    from prompt_mechanism_study.tsg.prompt_tsg import (
+        requirement_owned_nodes,
+        PromptTSGError,
+        catalog_sha256,
+    )
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import (
+        open_graph_assertions,
+        evaluate_open_semantic_case,
+    )
+    from prompt_mechanism_study.discovery.mechanisms import (
+        bind_task_hypothesis,
+        render_task_hypothesis,
+        MechanismRegistryError,
+    )
     cases = [
         ("conditional", "targets", "If processing fails, do not include access tokens in the diagnostic log.", True, False),
         ("whole", "task", "The entire task must allocate at most 1 MB in total.", False, False),
@@ -731,10 +929,20 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
 def test_candidate_local_edit_scope_preserves_background_shared_support_and_unknowns():
     """Authored policy support permits full edits, never establishes LLM accuracy."""
     from dataclasses import asdict, replace
-    from prompt_mechanism_study.candidate_construction import _candidate_catalog, choose_candidate_scope
-    from prompt_mechanism_study.prompt_contract_extract import fixed_scope_request, apply_fixed_scope_response
-    from prompt_mechanism_study.prompt_tsg import _edge, requirement_owned_nodes
-    from prompt_mechanism_study.mechanisms import bind_task_hypothesis, render_task_hypothesis, MechanismRegistryError
+    from prompt_mechanism_study.tsg.candidate_construction import (
+        _candidate_catalog,
+        choose_candidate_scope,
+    )
+    from prompt_mechanism_study.tsg.scope_assessment import (
+        fixed_scope_request,
+        apply_fixed_scope_response,
+    )
+    from prompt_mechanism_study.tsg.prompt_tsg import _edge, requirement_owned_nodes
+    from prompt_mechanism_study.discovery.mechanisms import (
+        bind_task_hypothesis,
+        render_task_hypothesis,
+        MechanismRegistryError,
+    )
     from prompt_mechanism_study.verification.reporting import _replay_scoped_development_prompt
 
     base = "Accept a password and insert the account into the database. Return status for the account."
@@ -804,7 +1012,7 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         operation_definition="insert the account into the database", subject_definitions=["the account"])
     wire = candidate_model_request(request)
     assert "READ-ONLY" in wire["instructions"] and "NOT the policy's" in wire["instructions"]
-    from prompt_mechanism_study.candidate_construction import candidate_response_format
+    from prompt_mechanism_study.tsg.candidate_construction import candidate_response_format
     schema = candidate_response_format(request)["json_schema"]["schema"]["properties"]["decisions"]["properties"]
     assert all("applicability_bindings" in row["required"] for row in schema.values())
     draft = compile_candidate_proposal(request, response, _design())

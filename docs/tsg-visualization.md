@@ -54,8 +54,8 @@ prompt-mechanism-study representation visualize TASKS EXTRACTION_BUNDLE OUTPUT.h
 用 `--catalog CATALOG.json` 提供该图的原始概念表。输出应放在冻结包之外。
 
 已有实验的 `--results` 和 `--additional-extraction` 参数保留。
-新增实现仍在 `src/prompt_mechanism_study/tsg_visualization.py` 和
-`src/prompt_mechanism_study/fixtures/tsg-viewer.html`，没有第二条抽取链路。
+新增实现仍在 `src/tsg/tsg_visualization.py` 和
+`src/fixtures/tsg-viewer.html`，没有第二条抽取链路。
 流程图使用 [Dagre](https://github.com/dagrejs/dagre/wiki) 1.1.5 自动布局；其官方浏览器
 发行文件及 MIT 许可保存在 `fixtures/dagre.min.js`，导出时内嵌到 HTML，无需运行时联网。
 布局只改变坐标、线形和显示文字，不改变原始节点、边或复核记录。

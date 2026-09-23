@@ -34,6 +34,24 @@ The model no longer receives a separate free binding task. Ordinary extraction a
 and retained fixtures; frozen old runs reproduce with their own execution archives.
 They are not an alternative active workflow.
 
+Supplied code and examples remain in the complete source. The existing records
+represent their source-required interfaces, objects, behavior and explicit library
+requirements; a bare import need not become a node and does not establish runtime
+use. Examples can support an existing fact or contribute a distinct behavior, but
+their literals do not become universal obligations. Context with no additional
+task fact uses `no_task_fact` with a reason; this is not a claim of no influence on
+generation. Extraction, ordinary review and local repair share this instruction.
+There is no extra parser, record type or review round. Visualizations of selected
+related subgraphs must identify that scope and keep the complete source accessible.
+
+Generation is a layer, not a compulsory common target. The existing `targets`
+scope can bind a requirement to an explicitly identified generated artifact or
+generation operation in the same layer. `implementation` is the fallback for an
+overall implementation obligation with no narrower supported target. This does
+not turn imports into runtime participation or general preservation reminders
+into obligations on every operation. Task overview groups are reading aids;
+they do not rewrite saved requirement targets or count as extraction improvements.
+
 The [September 17 reliability checks](experiments/2026-09-17-tsg-reliable-construction.md)
 keep independent obligation inventories experimental: complete output and valid
 structure did not guarantee correct guards, scope or composition. Candidate delivery

@@ -3,7 +3,7 @@ import json
 from dataclasses import replace
 import pytest
 from prompt_mechanism_study.cli import main
-from prompt_mechanism_study.prioritization import (
+from prompt_mechanism_study.discovery.prioritization import (
     atomic_preoutcome_data_sha256,
     discovery_data_sha256,
     freeze_atomic_candidate_folds,
@@ -11,19 +11,15 @@ from prompt_mechanism_study.prioritization import (
     run_atomic_shadow_qualification,
     run_atomic_fci_bootstrap,
 )
-from prompt_mechanism_study.verification import (
-    load_and_verify_target_result_bundle,
-)
+from prompt_mechanism_study.verification import load_and_verify_target_result_bundle
 from prompt_mechanism_study.target_workflow import SMOKE_STAGES
-from prompt_mechanism_study.reviewer_fixture import load_reviewer_smoke_fixture
+from prompt_mechanism_study.development.reviewer_fixture import load_reviewer_smoke_fixture
 from prompt_mechanism_study import target_workflow
 
 
-@pytest.mark.parametrize('summary', [
-    {'requirements': [{'criterion': 'An obsolete task'}], 'environment_dependencies': ['obsolete-library'], 'parent_contract_applies_to_current_input': False},
-])
-def test_functional_review_uses_original_task_without_missing_or_inapplicable_summary(summary):
-    from prompt_mechanism_study.measurement import measure_generated_code
+def test_functional_review_uses_original_task_without_missing_or_inapplicable_summary():
+    summary = {'requirements': [{'criterion': 'An obsolete task'}], 'environment_dependencies': ['obsolete-library'], 'parent_contract_applies_to_current_input': False}
+    from prompt_mechanism_study.measurement.evaluate import measure_generated_code
 
     requests = []
 

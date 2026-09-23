@@ -2,21 +2,14 @@ import json
 from dataclasses import replace
 from pathlib import Path
 import pytest
-from prompt_mechanism_study.artifact_io import (
-    read_json,
-    write_bundle,
-)
-from prompt_mechanism_study.discovery_population import (
+from prompt_mechanism_study.artifact_io import read_json, write_bundle
+from prompt_mechanism_study.data.discovery_population import (
     audit_discovery_positivity,
     freeze_task_unit_partition,
 )
-from prompt_mechanism_study.prompt_tsg import (
-    build_prompt_tsg,
-    load_catalog,
-    prompt_tsg_record,
-)
+from prompt_mechanism_study.tsg.prompt_tsg import build_prompt_tsg, load_catalog, prompt_tsg_record
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.representation import (
+from prompt_mechanism_study.tsg.representation import (
     DataRole,
     DataRoleBinding,
     DataRoleManifest,

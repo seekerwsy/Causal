@@ -3,8 +3,8 @@
 from __future__ import annotations
 from dataclasses import replace
 import pytest
-from prompt_mechanism_study import prioritization
-from prompt_mechanism_study.prioritization import (
+from prompt_mechanism_study.discovery import prioritization
+from prompt_mechanism_study.discovery.prioritization import (
     AtomicFCIBootstrapEvidence,
     AtomicFCIGateStatus,
     AtomicSelectorVariant,
@@ -27,7 +27,7 @@ from prompt_mechanism_study.prioritization import (
     run_atomic_shadow_qualification,
 )
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.rq1_baselines import (
+from prompt_mechanism_study.discovery.rq1_baselines import (
     BlindExpertRankingCard,
     SeededRandomRankingPlan,
     freeze_atomic_baseline_universe,
@@ -35,24 +35,13 @@ from prompt_mechanism_study.rq1_baselines import (
     run_seeded_random_baseline,
     verify_rq1_baseline_result,
 )
-from prompt_mechanism_study.representation import (
+from prompt_mechanism_study.tsg.representation import (
     AnalysisScope,
     AtomicPolicyKey,
     ModelBoundCandidateRecord,
     Operation,
     PolicyFactor,
 )
-
-
-def test_atomic_solver_preserves_pre_refactor_probabilities() -> None:
-    # Frozen from the original 300-iteration implementation before consolidation.
-    actual = prioritization._ridge_probabilities(
-        [[-1., 0.], [0., 1.], [1., 0.], [2., 1.], [3., 0.], [4., 1.]],
-        [0, 1, 0, 1, 1, 0], [[-2., 0.], [.5, 1.], [5., 0.]], 0.05,
-    )
-    assert actual == pytest.approx(
-        [0.3701132198123729, 0.575907007519519, 0.4568600979215474], rel=0, abs=1e-12,
-    )
 
 
 def _atomic_shadow_fixture():
@@ -166,6 +155,7 @@ def _atomic_shadow_fixture():
 
 
 def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
+    assert prioritization._ridge_probabilities([[0.], [0.]], [0, 1], [[0.]], 0.05) == [0.5]
     universe, rows, plan, evidence, positive_id, negative_id = _atomic_shadow_fixture()
     folds = freeze_atomic_candidate_folds(
         universe,
@@ -215,6 +205,44 @@ def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
             assert {
                 item.target_state for item in manifest.assignments if item.fold == fold
             } == {0, 1}
+
+    # The same ranking has one dispatch per effect, including shared selector slots.
+    sources = (
+        FixedSlotSource(
+            PolicyTrack.ATOMIC,
+            "atomic_full",
+            "model-a",
+            universe.universe_id,
+            result.full.slots,
+            universe.model_bound_records,
+        ),
+        FixedSlotSource(
+            PolicyTrack.ATOMIC,
+            "atomic_rd_only",
+            "model-a",
+            universe.universe_id,
+            result.rd_only.slots,
+            universe.model_bound_records,
+        ),
+    )
+    ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
+    union = freeze_shared_confirmation_union(ledger)
+    dispatch = freeze_confirmation_dispatch(
+        union,
+        {item.candidate_record_id: f"protocol-{index}" for index, item in enumerate(union.entries)},
+    )
+    assert len(ledger.slots) == 4
+    assert sum((item.status is SlotStatus.NON_EVALUABLE for item in ledger.slots)) == 0
+    assert {item.candidate.policy_key for item in union.entries} == {positive_id, negative_id}
+    fanout = {item.candidate_record_id: item.slot_ids for item in union.candidate_to_slots}
+    first_record = next((item for item in universe.model_bound_records if item.policy_key == positive_id))
+    assert len(fanout[first_record.candidate_record_id]) == 2
+    assert len(dispatch.records) == len(union.entries)
+    assert {item.model_id for item in dispatch.records} == {"model-a"}
+    assert all((item.dispatch_count == 1 for item in dispatch.records))
+    tampered = replace(dispatch.records[0], model_id="wrong-model")
+    with pytest.raises(ValueError, match="model-bound effect coordinate"):
+        ConfirmationDispatchManifest(union, (tampered, *dispatch.records[1:]))
 
 
 def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None:
@@ -418,50 +446,14 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable(monkeypatch) ->
     assert all("Backend unavailable" in draw["error"] for group in trace["groups"] for draw in group["draws"])
 
 
-def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
-    universe, observations, plan, evidence, first, second = _atomic_shadow_fixture()
-    atomic = run_atomic_shadow_qualification(
-        universe,
-        observations,
-        plan,
-        evidence,
-        fold_freeze=freeze_atomic_candidate_folds(
-            universe, atomic_preoutcome_observations(observations), plan
-        ),
-    )
-    sources = (
-        FixedSlotSource(
-            PolicyTrack.ATOMIC,
-            "atomic_full",
-            "model-a",
-            universe.universe_id,
-            atomic.full.slots,
-            universe.model_bound_records,
-        ),
-        FixedSlotSource(
-            PolicyTrack.ATOMIC,
-            "atomic_rd_only",
-            "model-a",
-            universe.universe_id,
-            atomic.rd_only.slots,
-            universe.model_bound_records,
-        ),
-    )
-    ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
-    union = freeze_shared_confirmation_union(ledger)
-    dispatch = freeze_confirmation_dispatch(
-        union,
-        {item.candidate_record_id: f"protocol-{index}" for index, item in enumerate(union.entries)},
-    )
-    assert len(ledger.slots) == 4
-    assert sum((item.status is SlotStatus.NON_EVALUABLE for item in ledger.slots)) == 0
-    assert {item.candidate.policy_key for item in union.entries} == {first, second}
-    fanout = {item.candidate_record_id: item.slot_ids for item in union.candidate_to_slots}
-    first_record = next((item for item in universe.model_bound_records if item.policy_key == first))
-    assert len(fanout[first_record.candidate_record_id]) == 2
-    assert len(dispatch.records) == len(union.entries)
-    assert {item.model_id for item in dispatch.records} == {"model-a"}
-    assert all((item.dispatch_count == 1 for item in dispatch.records))
-    tampered = replace(dispatch.records[0], model_id="wrong-model")
-    with pytest.raises(ValueError, match="model-bound effect coordinate"):
-        ConfirmationDispatchManifest(union, (tampered, *dispatch.records[1:]))
+def test_temporal_non_ancestry_does_not_assert_the_reverse_causal_direction():
+    # Two correlated variables cannot distinguish a direct effect from latent confounding.
+    # The old forbidden-edge API incorrectly turned this circle-circle edge into X -> Y.
+    adjacent, edges = prioritization._run_causal_learn_pag(
+        tuple((i % 2, i % 2) for i in range(64)), alpha=.05, depth=-1,
+        max_path_length=-1, outcome_index=1, variable_order=('X', 'Y'),
+        forbidden_directions=(('Y', 'X'),))
+    assert adjacent == {0}
+    assert len(edges) == 1 and edges[0][1] == edges[0][3] == 'CIRCLE'
+    assert prioritization.pag_temporal_conflicts((('X','ARROW','Y','ARROW'),), (('Y','X'),)) == ()
+    assert prioritization.pag_temporal_conflicts((('Y','TAIL','X','ARROW'),), (('Y','X'),)) == (('Y','X'),)

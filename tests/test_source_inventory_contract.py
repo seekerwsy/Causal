@@ -3,11 +3,14 @@
 from copy import deepcopy
 from dataclasses import replace
 import pytest
-from prompt_mechanism_study.prompt_contract import (
-    compile_open_task_contract, open_concept_catalog, open_contract_from_response,
-    task_context_contract_from_record, task_context_contract_record,
+from prompt_mechanism_study.tsg.prompt_contract import (
+    compile_open_task_contract,
+    open_concept_catalog,
+    open_contract_from_response,
+    task_context_contract_from_record,
+    task_context_contract_record,
 )
-from prompt_mechanism_study.prompt_tsg import PromptTSGError
+from prompt_mechanism_study.tsg.prompt_tsg import PromptTSGError
 from prompt_mechanism_study.records import canonical_value, content_id
 
 

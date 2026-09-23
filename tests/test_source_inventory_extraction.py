@@ -2,20 +2,24 @@
 
 import json
 import pytest
-from annotation_fixture import indexed_annotation, quoted_inventory
+from annotation_fixture import (
+    indexed_annotation,
+)
 from prompt_mechanism_study.artifact_io import read_json
-from prompt_mechanism_study.prompt_contract import open_concept_catalog
-from prompt_mechanism_study.prompt_contract_extract import (
+from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
+from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
-    _attempt_task_contract,
     apply_fixed_binding_response,
     contract_decision_request,
     contract_from_response,
     fixed_binding_request,
-    fixed_scope_request,
 )
-from prompt_mechanism_study.prompt_contract_qualification import qualify_prompt_contract_extractor
-from prompt_mechanism_study.task_input import generation_template_facts, prepare_task_input
+from prompt_mechanism_study.tsg.prompt_contract_extract import _attempt_task_contract
+from prompt_mechanism_study.tsg.scope_assessment import fixed_scope_request
+from prompt_mechanism_study.tsg.prompt_contract_qualification import (
+    qualify_prompt_contract_extractor,
+)
+from prompt_mechanism_study.tsg.task_input import generation_template_facts, prepare_task_input
 
 
 def _source_fixture(task_text="Run query A using input x. Return the selected rows. Produce readable code."):
@@ -60,112 +64,8 @@ def _compile(task, catalog, wire):
         annotator_id="source-authored-offline-fixture", review_status="development_exposed")
 
 
-def test_independent_obligation_inventory_preserves_binding_evidence_and_uncertainty():
-    from copy import deepcopy
-    from prompt_mechanism_study.source_records import (
-        record_request, obligation_inventory_request, obligation_inventory_response_format,
-        validate_obligation_inventory,
-    )
-    task = prepare_task_input(dict(task_id='authored-independent-obligation-inventory', language='python',
-        prompt='Function process(value, base). When ready, redact or withhold value within base. '
-        'Across the task allocate at most ten units. Every output must be redacted.'))
-    original = record_request(contract_decision_request(task, open_concept_catalog()))
-    original.update(records={'private_draft_sentinel': 'draft'},
-        reference_answer='private_reference_sentinel', graph={'private_graph_sentinel': 'graph'})
-    request = obligation_inventory_request(original, task=task)
-    assert set(request) == {'request_kind', 'source_prompt', 'source_units', 'instructions'}
-    assert request['source_prompt'] == task['prompt']
-    from prompt_mechanism_study.prompt_contract_extract import _source_units
-    expected_units = _source_units(task, fixed_template=False)
-    assert request['source_units'] == {key: {name: item for name, item in row.items()
-        if name not in {'evidence_start_token', 'evidence_end_token'}} for key, row in expected_units.items()}
-    assert len(request['source_units']) > len(original['source_units'])
-    assert any(row['evidence_text'] == 'python' for row in request['source_units'].values())
-    assert any(row['evidence_text'] in task['generation_input']['system_prompt']
-        for row in request['source_units'].values())
-    assert 'sentinel' not in json.dumps(request)
-    schema = obligation_inventory_response_format(request)['json_schema']
-    assert schema['strict']
-    descriptions = schema['schema']['properties']['requirements']['items']['properties']
-    assert 'Empty for task, implementation and composite' in descriptions['targets']['description']
-    assert 'Neutral identity' in schema['schema']['properties']['entities']['items']['properties']['meaning']['description']
-    wrong_source = deepcopy(original)
-    wrong_source['source_prompt'] += ' Changed source.'
-    with pytest.raises(PromptContractExtractionError, match='differs from the supplied task'):
-        obligation_inventory_request(wrong_source, task=task)
-    def evidence(quote):
-        unit = next(key for key, row in request['source_units'].items() if quote in row['evidence_text'])
-        return [dict(unit=unit, quote=quote)]
-    def requirement(key, content, quote, **fields):
-        return dict(id=key, content=content, modality='obligation', structure='atom', members=[],
-            boundary='targets', targets=['e2'], references=['e3'], target_class=None, guards=[],
-            source=evidence(quote), **fields)
-    rows = [requirement('r1', 'Redact the value.', 'redact or withhold value within base'),
-            requirement('r2', 'Withhold the value.', 'redact or withhold value within base'),
-            requirement('r3', 'Choose redaction or withholding.', 'When ready, redact or withhold value within base'),
-            requirement('r4', 'Allocate at most ten units in total.', 'Across the task allocate at most ten units'),
-            requirement('r5', 'Redact each output.', 'Every output must be redacted')]
-    rows[2].update(structure='or', members=['r1', 'r2'], boundary='composite', targets=[], references=[],
-        guards=[dict(meaning='Processing is ready.', source=evidence('When ready'))])
-    rows[3].update(boundary='task', targets=[], references=[])
-    rows[4].update(boundary='each', targets=['e1'], references=[], target_class='Every output')
-    value = dict(entities=[dict(id=key, meaning=meaning, source=evidence(quote)) for key, meaning, quote in [
-        ('e1', 'The process function.', 'Function process'),
-        ('e2', 'The value being handled.', 'value, base'),
-        ('e3', 'The enclosing base.', 'within base')]], requirements=rows,
-        coverage={unit: dict(status='no_requirement', requirements=[]) for unit in request['source_units']},
-        unresolved_notes=[])
-    def coverage(payload):
-        for row in payload['coverage'].values():
-            row.update(status='no_requirement', requirements=[])
-        for row in payload['requirements']:
-            for unit in {item['unit'] for item in row['source']}:
-                target = payload['coverage'][unit]
-                target['requirements'].append(row['id'])
-                uncertain = row['boundary'] == 'unresolved' or row['modality'] == 'unresolved' or row['structure'] == 'opaque'
-                target['status'] = 'unresolved' if uncertain or target['status'] == 'unresolved' else 'represented'
-        return payload
-    value = coverage(value)
-    checked = validate_obligation_inventory(value, request=request)
-    assert checked == value and checked is not value
-    assert checked['requirements'][0]['targets'] == ['e2']
-    assert checked['requirements'][0]['references'] == ['e3']
-    assert checked['requirements'][2]['guards'][0]['source'] == evidence('When ready')
-    # Effective system/language obligations now have literal evidence coordinates
-    # even when the ordinary source-record request relies on injected templates.
-    all_input = deepcopy(value)
-    system_unit, system_row = next((key, row) for key, row in request['source_units'].items()
-        if row['evidence_text'] in task['generation_input']['system_prompt'])
-    system_requirement = requirement('r6', system_row['evidence_text'], system_row['evidence_text'])
-    system_requirement.update(boundary='implementation', targets=[], references=[])
-    all_input['requirements'].append(system_requirement)
-    validate_obligation_inventory(coverage(all_input), request=request)
-    # These controls test representational mechanics, not semantic truth of a
-    # model-generated inventory or entailment of the altered authored predicates.
-    for structure in ('and', 'not', 'opaque'):
-        other = deepcopy(value)
-        parent = other['requirements'][2]
-        parent.update(structure=structure, members=['r1'] if structure == 'not' else ['r1', 'r2'])
-        if structure == 'opaque':
-            parent.update(members=[], boundary='unresolved')
-        validate_obligation_inventory(coverage(other), request=request)
-    malformed = []
-    bad = deepcopy(value); bad['entities'][0]['source'][0]['quote'] = 'invented source words'; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][0]['targets'] = ['missing']; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][3]['targets'] = ['e1']; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][4]['target_class'] = None; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][0]['modality'] = 'assumption'; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][3]['boundary'] = 'unresolved'; malformed.append(bad)
-    bad = deepcopy(value); next(row for row in bad['coverage'].values() if row['requirements'])['requirements'] = []; malformed.append(bad)
-    bad = deepcopy(value); bad['requirements'][0].update(structure='not', members=['r3'], boundary='composite', targets=[]); malformed.append(bad)
-    for bad in malformed:
-        with pytest.raises(PromptContractExtractionError):
-            validate_obligation_inventory(bad, request=request)
-
-
 def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
     from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import source_annotation_diagnostics
     task, catalog, canonical, request, _ = _source_fixture(
         'Run query A using input x. Return the selected rows. Produce readable code. Run query B using input x.')
     canonical['nodes'].append(dict(local_id='b', concept_id='sql.query', evidence_text='query B', occurrence=1))
@@ -175,8 +75,6 @@ def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
     operations = [n for n in wire['nodes'] if n['concept_id']=='sql.query']
     operations[0]['evidence_end_token'] = operations[1]['evidence_end_token']
     before = deepcopy(wire)
-    diagnostics = source_annotation_diagnostics(request, json.dumps(wire))
-    assert any('identity anchor overlaps' in d['rule'] for d in diagnostics)
     with pytest.raises(PromptContractExtractionError, match='do not distinguish instances'):
         _compile(task, catalog, wire)
     assert wire == before
@@ -184,7 +82,10 @@ def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
 
 def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
     from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import apply_fixed_scope_response, fixed_scope_response_format
+    from prompt_mechanism_study.tsg.scope_assessment import (
+        apply_fixed_scope_response,
+        fixed_scope_response_format,
+    )
     task, catalog, bound, request, response, ids = _property_scope_fixture('character_sequence', conditional=True)
     schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
     for key, scope in request['scopes'].items():
@@ -224,8 +125,11 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
     ('value_input', True, True, 'applicable'),
 ])
 def test_declared_role_domains_preserve_unknown_and_separate_expression(role, caller_required, caller_declared, expected):
-    from prompt_mechanism_study.prompt_contract_extract import fixed_scope_response_format, apply_fixed_scope_response
-    from prompt_mechanism_study.prompt_tsg import catalog_from_record
+    from prompt_mechanism_study.tsg.scope_assessment import (
+        fixed_scope_response_format,
+        apply_fixed_scope_response,
+    )
+    from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
     task, catalog, canonical, _, _ = _source_fixture()
     catalog.update(feature_scope_domains={'sql.binding': 'subjects'},
         caller_supplied_concepts=['sql.input'] if caller_declared else [],
@@ -277,7 +181,7 @@ def _bindings(task, catalog, canonical, wire):
 
 def _property_scope_fixture(kind, *, conditional=False):
     from copy import deepcopy
-    from prompt_mechanism_study.prompt_tsg import catalog_from_record
+    from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
     prefix = {'character_sequence': 'The input x is text. ',
               'other_value': 'The input x is an integer. ', 'unspecified': ''}[kind]
     conditional_text = 'When mode is safe, require input x to be at most 10 characters.'
@@ -347,492 +251,6 @@ def _property_scope_fixture(kind, *, conditional=False):
     return task, catalog, bound, request, dict(states=states, subject_properties=answers, unresolved_notes=[]), ids
 
 
-def test_joint_inventory_preserves_unnamed_result_identity_and_allows_role_correction():
-    from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import (
-        grouped_inventory_request, grouped_inventory_response_format, flatten_grouped_inventory_response,
-        inventory_entailment_review_request, source_annotation_diagnostics,
-    )
-    from prompt_mechanism_study.prompt_tsg import PromptTSGError
-
-    task, catalog, canonical, _, _ = _source_fixture()
-    catalog['semantics']['rows.return'] = 'task_operation'
-    catalog['semantic_guidance']['rows.return'] = 'Return the already selected rows.'
-    canonical['nodes'].append(dict(local_id='ret', concept_id='rows.return',
-        evidence_text='Return the selected rows', occurrence=1))
-    canonical['edges'].append(dict(source_node_local_id='rows', target_node_local_id='ret',
-        edge_type='used_by', evidence_text='Return the selected rows', occurrence=1))
-    request = contract_decision_request(task, catalog)
-    wire = indexed_annotation(request, canonical)
-    nodes = {n['concept_id']: n for n in wire['nodes']}
-    def citation(row):
-        return {k: row[k] for k in ('evidence_start_token', 'evidence_end_token')}
-    selected = nodes['sql.rows']
-    # The result has no variable declaration. Its source identity is reused by
-    # the producer and consumer, while their relationship citations differ.
-    response = dict(objects=[], requirements=[nodes['code.readable']], conditions=[],
-        operations=[{**nodes['sql.query'], 'inputs':[dict(object=nodes['sql.input'],
-            role='value_input', **citation(nodes['sql.query']))],
-            'results':[dict(object=selected, **citation(selected))]},
-            {**nodes['rows.return'], 'inputs':[dict(object=deepcopy(selected),
-                role='value_input', **citation(nodes['rows.return']))], 'results':[]}],
-        coverage=wire['coverage'], unresolved_notes=[])
-    grouped = grouped_inventory_request(request)
-    schema = grouped_inventory_response_format(grouped)['json_schema']['schema']
-    assert {'inputs', 'results'} <= set(schema['properties']['operations']['items']['required'])
-    response = quoted_inventory(request, response)
-    # Different mention spans may identify the same explicitly declared entity.
-    response['operations'][1]['inputs'][0]['object']['evidence_text'] = 'selected rows'
-    raw = json.dumps(response)
-    flattened = json.loads(flatten_grouped_inventory_response(raw.encode(), request=grouped))
-    contract = _compile(task, catalog, flattened)
-    selected_ids = [f['local_id'] for f in contract.facts if f['semantic_id'] == 'sql.rows']
-    assert len(selected_ids) == 1
-    assert len(contract.source_inventory['operation_roles']) == 3
-    assert sum(r['subject'] == selected_ids[0] for r in contract.source_inventory['operation_roles']) == 2
-    assert all(e['source'].startswith('template.') for e in contract.relations)
-    # Catch empty represented units before compilation, where the bounded
-    # inventory repair can see the diagnostic rather than ending the task.
-    broken = deepcopy(response)
-    empty_unit = broken['requirements'][0]['source_units'][0]
-    broken['requirements'] = []
-    broken['coverage'][empty_unit]['status'] = 'represented'
-    with pytest.raises(PromptContractExtractionError, match='requires an additional submitted fact'):
-        flatten_grouped_inventory_response(json.dumps(broken).encode(), request=grouped)
-    review = inventory_entailment_review_request(grouped, raw)
-    assert review['source_object_meaning'] == grouped['source_object_meaning']
-    assert review['operation_role_meanings'] == grouped['operation_role_meanings']
-    assert review['operation_role_meanings'] is not grouped['operation_role_meanings']
-    assert len(review['participant_claims']) == 3
-    assert len(review['candidate_statements']) == 6  # Includes both explicit uses of the one result.
-    result_occurrences = [s for s in review['candidate_statements'] if s['concept_id'] == 'sql.rows']
-    assert len({s['entity_key'] for s in result_occurrences}) == 1
-    assert len({s['citation']['evidence_text'] for s in result_occurrences}) == 2
-    assert all(r['path'] in review['allowed_issue_paths'] for r in review['participant_claims'])
-    # Omitted entities have no row index yet. Review can locate the destination
-    # array, while repair still has to verify and submit the actual new fact.
-    from prompt_mechanism_study.prompt_contract_extract import (
-        source_annotation_review_response_format, source_annotation_revision_request,
-    )
-    issue_schema = source_annotation_review_response_format(review)['json_schema']['schema']['properties']['issues']['items']
-    assert {'objects', 'operations[0].inputs', 'operations[1].results'} <= set(issue_schema['properties']['path']['enum'])
-    feedback = dict(issues=[dict(path='operations[0].results', source_quote=task['prompt'],
-        problem='Authored omission feedback to exercise the insertion location.',
-        correction='Check whether a missing result must be restored from the available vocabulary.',
-        repair_stage='inventory')], remaining_uncertainties=[])
-    revision = source_annotation_revision_request(grouped, raw, feedback)
-    assert revision['source_review_revision']['critique']['issues'] == feedback['issues']
-    assert revision['known_concepts'] == grouped['known_concepts']
-    assert response['operations'][0]['results'] == json.loads(raw)['operations'][0]['results']
-    assert not source_annotation_diagnostics(grouped, raw)
-    # A draft with bad evidence must reach review, while final compilation still
-    # rejects it. Otherwise repair cannot see precisely the defects it should fix.
-    unlocated = deepcopy(response)
-    unlocated['operations'][0]['results'][0]['object']['evidence_text'] = 'invented result text'
-    unlocated_raw = json.dumps(unlocated)
-    unlocated_review = inventory_entailment_review_request(grouped, unlocated_raw)
-    unlocated_statement = next(s for s in unlocated_review['candidate_statements']
-                              if s['path'] == 'operations[0].results[0].object')
-    assert unlocated_statement['citation'] is None and unlocated_statement['citation_error']
-    assert unlocated_statement['submitted_evidence']['evidence_text'] == 'invented result text'
-    assert 'invented result text' not in unlocated_review['allowed_issue_source_quotes']
-    with pytest.raises(PromptContractExtractionError, match='token-aligned occurrence'):
-        flatten_grouped_inventory_response(unlocated_raw.encode(), request=grouped)
-    unlocated['operations'][1]['inputs'][0]['evidence_text'] = 'another invented quote'
-    diagnostics = source_annotation_diagnostics(grouped, json.dumps(unlocated))
-    assert {d['path'] for d in diagnostics} == {
-        'operations[0].results[0].object', 'operations[1].inputs[0]'}
-    assert all('found 0 matches' in d['rule'] for d in diagnostics)
-    # Binding independently rejudges an initially claimed input role.
-    binding_request = fixed_binding_request(contract, prompt=task['prompt'], catalog=catalog)
-    binding = indexed_annotation(binding_request, canonical)
-    input_id = next(f['local_id'] for f in contract.facts if f['semantic_id'] == 'sql.input')
-    assert next(r for r in binding['operation_roles'] if r['subject'] == input_id)['role'] == 'input_unspecified'
-    bound = apply_fixed_binding_response(json.dumps(binding).encode(), request=binding_request,
-        contract=contract, prompt=task['prompt'], catalog=catalog)
-    assert bound.facts == contract.facts
-    assert next(r for r in bound.source_inventory['operation_roles'] if r['subject'] == input_id)['role'] == 'input_unspecified'
-    assert any(e['edge_type'] == 'produces' and e['target'] == selected_ids[0] for e in bound.relations)
-    assert any(e['edge_type'] == 'used_by' and e['source'] == selected_ids[0] for e in bound.relations)
-    # Bad occurrence metadata cannot be concealed by pooling, and repeated
-    # participant claims cannot create silently duplicated graph evidence.
-    broken = deepcopy(response)
-    broken['operations'][1]['inputs'][0]['object']['concept_id'] = 'sql.input'
-    with pytest.raises(PromptContractExtractionError, match='conflicting concepts'):
-        flatten_grouped_inventory_response(json.dumps(broken).encode(), request=grouped)
-    broken = deepcopy(response)
-    broken['operations'][1]['inputs'][0]['object']['layer'] = 'generation'
-    with pytest.raises(PromptContractExtractionError, match='conflicting layers'):
-        flatten_grouped_inventory_response(json.dumps(broken).encode(), request=grouped)
-    broken = deepcopy(response)
-    broken['operations'][0]['results'].append(deepcopy(broken['operations'][0]['results'][0]))
-    flat = json.loads(flatten_grouped_inventory_response(json.dumps(broken).encode(), request=grouped))
-    with pytest.raises(PromptTSGError, match='role is duplicated'):
-        _compile(task, catalog, flat)
-    broken = deepcopy(flattened)
-    broken['operation_roles'][0]['evidence_end_token'] = 999999
-    with pytest.raises(PromptContractExtractionError, match='source-token endpoints'):
-        _compile(task, catalog, broken)
-
-    # The same path admits genuinely new source meanings in development while
-    # preserving supplied concepts, candidate rules, bindings and source review.
-    from dataclasses import replace
-    from prompt_mechanism_study.prompt_contract import compile_task_context_contract
-    from prompt_mechanism_study.prompt_contract_extract import _attempt_source_graph, _assess_candidate_scopes
-    from prompt_mechanism_study.prompt_tsg import catalog_from_record
-    open_catalog = deepcopy(catalog)
-    open_catalog['concept_policy'] = 'DEVELOPMENT_OPEN'
-    open_catalog['semantic_layers'] = {key: 'generation' if key == 'code.readable' or key.startswith('generation.') else 'runtime'
-        for key in catalog['semantics'] if key != 'task.root'}
-    # Derive the template layers from their actual facts, without guessing IDs.
-    for concept in generation_template_facts(task)['concepts']:
-        open_catalog['semantic_layers'][concept['concept_id']] = 'generation'
-    for key in ('sql.rows', 'sql.input', 'rows.return'):
-        open_catalog['semantics'].pop(key)
-        open_catalog['semantic_guidance'].pop(key)
-        open_catalog['semantic_layers'].pop(key)
-    length = 'input.length'
-    open_catalog['semantics'][length] = 'safety_requirement'
-    open_catalog['semantic_guidance'][length] = 'Require the input to be at most 10 characters.'
-    open_catalog['semantic_layers'][length] = 'runtime'
-    query = deepcopy(open_catalog['queries'][0])
-    query.update(query_id=length, actionable_feature_id=length, realization_id=length)
-    open_catalog['queries'].append(query)
-    open_catalog['feature_scope_domains'] = {'sql.binding': 'subjects', length: 'subjects'}
-    open_catalog['feature_subject_properties'] = {length: 'character_sequence'}
-    catalog_from_record(open_catalog)
-    original_catalog = deepcopy(open_catalog)
-    open_request = contract_decision_request(task, open_catalog)
-    assert 'sql.query' in open_request['known_concepts'] and 'sql.rows' not in open_request['known_concepts']
-    def inline(value):
-        if isinstance(value, list):
-            return [inline(v) for v in value]
-        if not isinstance(value, dict):
-            return value
-        value = {k: inline(v) for k, v in value.items()}
-        if 'concept_id' in value:
-            key = value.pop('concept_id')
-            value['concept'] = dict(concept_id=key, node_type=catalog['semantics'][key],
-                definition=catalog['semantic_guidance'][key])
-        return value
-    open_response = inline(response)
-    open_raw = json.dumps(open_response).encode()
-    grouped = grouped_inventory_request(open_request)
-    schema = grouped_inventory_response_format(grouped)['json_schema']['schema']
-    assert schema['properties']['operations']['items']['properties']['concept']['properties']['node_type']['enum'] == ['task_operation']
-    assert not source_annotation_diagnostics(grouped, open_raw.decode())
-    reviewed = inventory_entailment_review_request(grouped, open_raw.decode())
-    assert any(s['full_meaning'] == catalog['semantic_guidance']['sql.rows'] for s in reviewed['candidate_statements'])
-    flat = flatten_grouped_inventory_response(open_raw, request=grouped)
-    delivered = []
-    def provider(request, *_):
-        delivered.append(request)
-        if request['request_kind'] in {'source_only_atomic_records', 'source_only_record_review'}:
-            from copy import deepcopy
-            declared = deepcopy(canonical)
-            declared['concepts'] = [dict(concept_id=k, node_type=v, definition=catalog['semantic_guidance'][k]) for k,v in catalog['semantics'].items() if k in catalog['semantic_guidance']]
-            return json.dumps(indexed_annotation(request, declared)).encode()
-        assert request['request_kind'] == 'source_only_fixed_scope_states'
-        assert all(f['definition'] for f in request['facts'])
-        assert all(q['subject_definition'] for q in request['subject_property_questions'].values())
-        # A failed scope response must retain the finished source graph.
-        raise RuntimeError('authored downstream failure')
-    attempt = _attempt_source_graph(task=task, catalog=open_catalog, evaluator={'candidate_id': 'offline'},
-        annotator_prompt='offline', provider=provider, review_status='development_exposed')
-    assert attempt.succeeded, attempt.error_message
-    assert catalog['semantic_guidance']['sql.rows'] in attempt.contract.catalog['semantic_guidance'].values()
-    assert open_catalog == original_catalog
-    assessed = _assess_candidate_scopes(attempt, task=task, catalog=open_catalog, evaluator={},
-        annotator_prompt='offline', provider=provider)
-    assert len(delivered) == 3 and assessed.scope_assessment['status'] == 'FAILED'
-    assert assessed.contract == attempt.contract and assessed.graph == attempt.graph
-    assert {s['concept_id'] for s in delivered[-1]['scopes'].values()} == {'sql.binding', length}
-    broken = deepcopy(open_response)
-    broken['operations'][0]['concept']['definition'] = 'Run arbitrary shell commands.'
-    with pytest.raises(PromptContractExtractionError, match='cannot change a supplied meaning'):
-        flatten_grouped_inventory_response(json.dumps(broken).encode(), request=grouped)
-    altered = deepcopy(attempt.contract.catalog)
-    altered['queries'][0]['realization_id'] = 'changed'
-    with pytest.raises(PromptTSGError, match='cannot change supplied concepts or candidate rules'):
-        compile_task_context_contract(replace(attempt.contract, catalog=altered), prompt=task['prompt'], catalog=open_catalog)
-
-
-def test_independent_participant_table_is_blind_and_excludes_generation_objects():
-    from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import (
-        source_precedence_review_request, source_precedence_review_response_format,
-    )
-    task, catalog, canonical, _, wire = _source_fixture()
-    _, request, _ = _bindings(task, catalog, canonical, wire)
-    first = source_precedence_review_request(request, include_participants=True)
-    changed = deepcopy(request)
-    changed['source_inventory']['operation_roles'] = [{'invented': 'use'}]
-    changed['source_inventory']['coverage'] = {'unsupported': 'complete'}
-    changed['fixed_relations'] = [{'invented': 'order'}]
-    assert source_precedence_review_request(changed, include_participants=True) == first
-    objects = {f['local_id'] for f in request['facts']
-               if f['node_type'] == 'data_object' and f['layer'] == 'runtime'}
-    assert {f['local_id'] for f in first['objects']} == objects
-    frames = source_precedence_review_response_format(first)['json_schema']['schema']['properties']['participant_roles']
-    assert set(frames['required']) == {f['local_id'] for f in first['operations']}
-    assert all(set(frame['required']) == objects for frame in frames['properties'].values())
-    cell_schema = next(iter(next(iter(frames['properties'].values()))['properties'].values()))
-    assert set(cell_schema['required']) == {'roles', 'source_units'}
-    assert cell_schema['properties']['roles']['minItems'] == 1
-    assert first['source_prompt'] == task['prompt']
-
-
-def test_independent_participant_review_routes_missing_shared_use_without_graph_edits():
-    from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import merge_source_precedence_review
-
-    source = 'Open the store and look up the record by key in that store.'
-    entries = [('open', 'task_operation', 'Open the store'),
-               ('lookup', 'task_operation', 'look up the record by key in that store'),
-               ('store', 'data_object', 'the store'), ('key', 'data_object', 'key')]
-    request = dict(request_kind='source_only_fixed_bindings', source_prompt=source,
-        source_inventory=dict(source_units={'u1': dict(evidence_text=source, occurrence=1)}),
-        operation_role_meanings={'resource': 'Execution facility.', 'value_input': 'Data value.'},
-        facts=[dict(local_id=key, concept_id=key, definition=quote, node_type=kind, layer='runtime',
-                    evidence_text=quote, occurrence=1, source_units=['u1']) for key, kind, quote in entries])
-    draft = dict(bindings={'open': dict(precedes=[dict(target='lookup')]), 'lookup': dict(precedes=[])},
-        incidence={'open': dict(inputs=[dict(subject='store', role='resource')], results=[], unresolved_subjects=[]),
-                   'lookup': dict(inputs=[dict(subject='key', role='value_input')], results=[], unresolved_subjects=[])})
-    def cell(*roles):
-        return dict(roles=list(roles) or ['no_required_role'], source_units=['u1'])
-    proposal = dict(required_precedence=[], unresolved_notes=[], participant_roles={
-        'open': {'store': cell('resource'), 'key': cell()},
-        'lookup': {'store': cell('resource'), 'key': cell('value_input')}})
-    review = dict(issues=[], remaining_uncertainties=[])
-    before = deepcopy((request, draft, review))
-    merged = merge_source_precedence_review(request, json.dumps(draft), review, json.dumps(proposal), include_participants=True)
-    assert (request, draft, review) == before
-    assert len(merged['issues']) == 1
-    assert merged['issues'][0]['path'] == 'incidence.lookup'
-    assert 'store' in merged['issues'][0]['correction']
-    # Already-used resources cannot conceal an omitted use by another operation.
-    draft['incidence']['lookup']['inputs'].append(dict(subject='store', role='resource'))
-    assert not merge_source_precedence_review(request, json.dumps(draft), review, json.dumps(proposal), include_participants=True)['issues']
-    # A contradictory critique is repair input, not a reason to discard every
-    # other useful finding or silently interpret an empty list as no source use.
-    for labels in ([], ['resource', 'no_required_role'], ['unresolved']):
-        proposal['participant_roles']['open']['store']['roles'] = labels
-        merged = merge_source_precedence_review(request, json.dumps(draft), review, json.dumps(proposal), include_participants=True)
-        assert len(merged['issues']) == 1 and merged['issues'][0]['path'] == 'incidence.open'
-        assert draft['incidence']['open']['inputs'] == [dict(subject='store', role='resource')]
-    # Consuming and exposing an existing object remain separate required roles.
-    proposal['participant_roles']['lookup']['key']['roles'] = ['value_input', 'result']
-    proposal['participant_roles']['open']['store']['roles'] = ['resource']
-    merged = merge_source_precedence_review(request, json.dumps(draft), review, json.dumps(proposal), include_participants=True)
-    assert len(merged['issues']) == 1 and "'result'" in merged['issues'][0]['correction']
-    del proposal['participant_roles']['lookup']['store']
-    with pytest.raises(PromptContractExtractionError, match='every operation/object pair'):
-        merge_source_precedence_review(request, json.dumps(draft), review, json.dumps(proposal), include_participants=True)
-
-
-def _incidence_fixture():
-    from prompt_mechanism_study.prompt_contract_extract import operation_incidence_request
-    task, catalog, canonical, _, wire = _source_fixture()
-    facts, request, binding = _bindings(task, catalog, canonical, wire)
-    matrix = operation_incidence_request(request)
-    response = {key: value for key, value in binding.items() if key != "operation_roles"}
-    response["incidence"] = {operation: dict(
-        inputs=[{k: v for k, v in row.items() if k != "operation"}
-                for row in binding["operation_roles"] if row["operation"] == operation and row["role"] != "result"],
-        results=[{k: v for k, v in row.items() if k not in {"operation", "role"}}
-                 for row in binding["operation_roles"] if row["operation"] == operation and row["role"] == "result"],
-        unresolved_subjects=[]) for operation in matrix["operation_subjects"]}
-    return task, catalog, facts, request, binding, matrix, response
-
-
-def test_exhaustive_critic_cannot_skip_claims_or_leave_reported_errors_unrepaired():
-    from prompt_mechanism_study.prompt_contract_extract import (
-        source_annotation_review_request, source_annotation_review_response_format,
-        source_annotation_revision_request,
-    )
-    task, catalog, _, _, _, request, response = _incidence_fixture()
-    # The proposed concrete role is deliberately fallible; the review must
-    # route its admitted ambiguity even alongside a positive verdict.
-    next(frame for frame in response['incidence'].values() if frame['inputs'])['inputs'][0]['role'] = 'value_input'
-    raw = json.dumps(response)
-    critique = source_annotation_review_request(request, raw)
-    paths = [c['path'] for c in critique['expanded_binding_claims']]
-    assert {f"facts.{f['local_id']}" for f in request['facts'] if not f['local_id'].startswith('template.')} <= set(paths)
-    checks = {p: dict(support='supported', reason='Fixture source review.') for p in paths}
-    for claim in critique['expanded_binding_claims']:
-        if claim.get('repair_stage') == 'inventory':
-            checks[claim['path']].update(unsupported_specificity_possible=False,
-                specificity_reason='The fixture source supports the full fact meaning.')
-        if claim.get('role') in {'value_input','identifier_input','resource','destination'}:
-            checks[claim['path']].update(alternative_role_possible=False,
-                alternative_role_reason='The fixture source establishes this concrete role.')
-        if claim.get('role') in {'value_input','identifier_input','resource','destination','input_unspecified'}:
-            checks[claim['path']].update(alternative_nonuse_possible=False,
-                nonuse_reason='The fixture explicitly requires this operation to use this input.')
-    schema = source_annotation_review_response_format(critique)['json_schema']['schema']
-    from prompt_mechanism_study.prompt_contract_extract import operation_incidence_response_format
-    binding_schema = operation_incidence_response_format(request)['json_schema']['schema']['properties']['bindings']
-    for binding in binding_schema['properties'].values():
-        for column in binding['properties'].values():
-            assert column['maxItems'] == len(column['items']['properties']['target'].get('enum', []))
-    assert set(schema['properties']['claim_checks']['required']) == set(paths)
-    assert critique['reuse_bound_claim_citations'] is True
-    for path, verdict in schema['properties']['claim_checks']['properties'].items():
-        expected_fields = {'support', 'reason'}
-        role = next(c.get('role') for c in critique['expanded_binding_claims'] if c['path'] == path)
-        if 'alternative_role_possible' in verdict['properties'] and role != 'input_unspecified':
-            expected_fields |= {'alternative_role_possible', 'alternative_role_reason'}
-            assert next(iter(verdict['properties'])) == 'alternative_nonuse_possible'
-        if 'alternative_nonuse_possible' in verdict['properties']:
-            expected_fields |= {'alternative_nonuse_possible', 'nonuse_reason'}
-        if 'unsupported_specificity_possible' in verdict['properties']:
-            expected_fields |= {'unsupported_specificity_possible', 'specificity_reason'}
-            assert next(iter(verdict['properties'])) == 'unsupported_specificity_possible'
-        assert set(verdict['required']) == expected_fields
-    assert request['source_prompt'] in critique['allowed_issue_source_quotes']
-    assert all(quote in request['source_prompt'] for quote in critique['allowed_issue_source_quotes'])
-    result_checks = {key: {side: dict(required_participants='The source-required participants are represented.',
-        source_quote=request['source_prompt'], status='represented', reason='Fixture participation review.')
-        for side in ('inputs', 'results')} for key in critique['operation_participation_questions']}
-    assert next(iter(schema['properties'])) == 'operation_participation_checks'
-    review = dict(issues=[], remaining_uncertainties=[], claim_checks=checks,
-        operation_participation_checks=result_checks)
-    with pytest.raises(PromptContractExtractionError, match='fields are invalid'):
-        source_annotation_revision_request(critique, raw, dict(issues=[], remaining_uncertainties=[]))
-    revision = source_annotation_revision_request(critique, raw, review)
-    from copy import deepcopy
-    from prompt_mechanism_study.prompt_contract_extract import source_binding_repair_request, validate_source_binding_repair
-    negative_review = deepcopy(review)
-    edge = next(c for c in critique['expanded_binding_claims'] if c.get('role') == 'value_input')
-    negative_review['claim_checks'][edge['path']]['support'] = 'unsupported'
-    guarded = source_binding_repair_request(request, reviewed_request=critique, critique=negative_review)
-    with pytest.raises(PromptContractExtractionError, match='repair repeated rejected'):
-        validate_source_binding_repair(raw.encode(), request=guarded)
-    corrected = json.loads(raw)
-    rejected, = guarded['rejected_source_claims']
-    corrected['incidence'][rejected['operation']]['inputs'] = [
-        r for r in corrected['incidence'][rejected['operation']]['inputs'] if r['subject'] != rejected['subject']]
-    validate_source_binding_repair(json.dumps(corrected).encode(), request=guarded)
-    assert 'rejected_source_claims' not in request
-    retained = revision['source_review_revision']['critique']['claim_checks']
-    for claim in critique['expanded_binding_claims']:
-        assert retained[claim['path']] == {
-            **checks[claim['path']], 'source_quote': claim['citation']['evidence_text']}
-    assert all('source_quote' not in check for check in checks.values())
-    unspecified_response = json.loads(raw)
-    next(frame for frame in unspecified_response['incidence'].values() if frame['inputs'])['inputs'][0]['role'] = 'input_unspecified'
-    unspecified_raw = json.dumps(unspecified_response)
-    unspecified_critique = source_annotation_review_request(request, unspecified_raw)
-    unspecified_review = json.loads(json.dumps(review))
-    unspecified = next(c['path'] for c in unspecified_critique['expanded_binding_claims'] if c.get('role') == 'input_unspecified')
-    unspecified_verdict = source_annotation_review_response_format(unspecified_critique)['json_schema']['schema']['properties']['claim_checks']['properties'][unspecified]
-    assert set(unspecified_verdict['required']) == {'support', 'reason', 'alternative_nonuse_possible', 'nonuse_reason'}
-    unspecified_review['claim_checks'][unspecified].update(alternative_role_possible=False,
-        alternative_role_reason='This input already retains its source-unspecified role.')
-    redundant = source_annotation_revision_request(unspecified_critique, unspecified_raw, unspecified_review)['source_review_revision']
-    assert redundant['critique']['issues'] == []
-    assert redundant['critique']['claim_checks'][unspecified]['alternative_role_possible'] is False
-    # An unknown role still claims definite use. Admitted non-use must route
-    # removal of that relation, even if the same verdict approves it.
-    unspecified_review['claim_checks'][unspecified].update(alternative_nonuse_possible=True,
-        nonuse_reason='This optional available object need not participate in this operation.')
-    nonuse = source_annotation_revision_request(unspecified_critique, unspecified_raw, unspecified_review)['source_review_revision']
-    assert unspecified in nonuse['program_routed_verdict_paths']
-    assert any('Do not substitute input_unspecified' in i['correction'] for i in nonuse['critique']['issues'])
-    assert unspecified_review['issues'] == []
-    unspecified_review['claim_checks'][unspecified]['alternative_nonuse_possible'] = False
-    unspecified_review['claim_checks'][unspecified]['support'] = 'uncertain'
-    negative = source_annotation_revision_request(unspecified_critique, unspecified_raw, unspecified_review)['source_review_revision']
-    assert any(i['path'] == unspecified for i in negative['critique']['issues'])
-    missing = paths[-1]
-    del checks[missing]
-    with pytest.raises(PromptContractExtractionError, match='every submitted binding claim'):
-        source_annotation_revision_request(critique, raw, review)
-    checks[missing] = dict(support='unsupported', reason='The role exceeds source support.')
-    routed = source_annotation_revision_request(critique, raw, review)['source_review_revision']
-    assert routed['program_routed_verdict_paths'] == [missing]
-    assert routed['critique']['claim_checks'][missing]['support'] == 'unsupported'
-    assert routed['critique']['issues'][0]['path'] == missing
-    assert routed['critique']['issues'][0]['source_quote'] == next(
-        c['citation']['evidence_text'] for c in critique['expanded_binding_claims'] if c['path'] == missing)
-    assert review['issues'] == []  # Raw verdicts remain unchanged and cannot silently pass.
-    review['issues'] = [dict(path=missing, source_quote='query A', problem='An unsupported role.',
-                             correction='Recheck and remove unsupported roles.', repair_stage='bindings')]
-    assert source_annotation_revision_request(critique, raw, review)['facts'] == request['facts']
-    review['issues'][0]['source_quote'] = 'query A ... invented quotation'
-    with pytest.raises(PromptContractExtractionError, match='valid source-bound correction'):
-        source_annotation_revision_request(critique, raw, review)
-    # Missing results trigger the upstream branch even when every existing
-    # claim is approved and the critic forgets to summarize the defect.
-    review['issues'] = []
-    checks[missing]['support'] = 'supported'
-    operation = next(iter(result_checks))
-    result_checks[operation]['results']['status'] = 'missing_entity'
-    with pytest.raises(PromptContractExtractionError, match='another construction stage'):
-        source_annotation_revision_request(critique, raw, review)
-    inventory = contract_decision_request(task, catalog)
-    inventory_raw = json.dumps(_source_fixture()[4])
-    revised = source_annotation_revision_request(critique, raw, review,
-        inventory_request=inventory, inventory_response=inventory_raw)
-    assert revised['request_kind'] == 'source_only_fact_inventory'
-    assert revised['source_prompt'] == request['source_prompt']
-    repair = revised['source_review_revision']
-    assert repair['previous_response'] == inventory_raw
-    assert repair['reviewed_fixed_facts'] == request['facts']
-    assert any(i['repair_stage']=='inventory' for i in repair['critique']['issues'])
-    assert review['issues'] == []
-    # A contradictory positive verdict cannot cancel its admitted role
-    # ambiguity. Preserve required participation when repairing its role.
-    result_checks[operation]['results']['status'] = 'represented'
-    # Missing source-required resource/input edges use the same single repair,
-    # even if every submitted assertion is supported and issues is empty.
-    result_checks[operation]['inputs']['status'] = 'missing_binding'
-    participant_repair = source_annotation_revision_request(critique, raw, review)
-    assert participant_repair['request_kind'] == 'source_only_fixed_bindings'
-    assert any(i['path'] == f'operation_participation_checks.{operation}.inputs'
-               and i['repair_stage'] == 'bindings'
-               for i in participant_repair['source_review_revision']['critique']['issues'])
-    result_checks[operation]['inputs']['status'] = 'missing_entity'
-    assert source_annotation_revision_request(critique, raw, review,
-        inventory_request=inventory, inventory_response=inventory_raw)['request_kind'] == 'source_only_fact_inventory'
-    result_checks[operation]['inputs']['status'] = 'represented'
-    fact_path = next(c['path'] for c in critique['expanded_binding_claims'] if c.get('repair_stage') == 'inventory')
-    checks[fact_path]['unsupported_specificity_possible'] = True
-    fact_repair = source_annotation_revision_request(critique, raw, review,
-        inventory_request=inventory, inventory_response=inventory_raw)
-    assert checks[fact_path]['support'] == 'supported'
-    assert fact_repair['request_kind'] == 'source_only_fact_inventory'
-    assert fact_path in fact_repair['source_review_revision']['program_routed_verdict_paths']
-    checks[fact_path]['unsupported_specificity_possible'] = False
-    checks[fact_path]['support'] = 'unsupported'
-    fact_repair = source_annotation_revision_request(critique, raw, review,
-        inventory_request=inventory, inventory_response=inventory_raw)
-    assert fact_repair['request_kind'] == 'source_only_fact_inventory'
-    assert any(i['path'] == fact_path and i['repair_stage'] == 'inventory'
-               for i in fact_repair['source_review_revision']['critique']['issues'])
-    # Even a critic's incorrectly requested binding repair cannot rewrite a fact.
-    review['issues'] = [dict(path=fact_path, source_quote=request['source_prompt'],
-        problem='The fact adds an unsupported obligation.', correction='Recheck its complete definition.', repair_stage='bindings')]
-    fact_repair = source_annotation_revision_request(critique, raw, review,
-        inventory_request=inventory, inventory_response=inventory_raw)
-    assert fact_repair['request_kind'] == 'source_only_fact_inventory'
-    assert review['issues'][0]['repair_stage'] == 'bindings'
-    review['issues'] = []
-    checks[fact_path]['support'] = 'supported'
-    role_path = next(c['path'] for c in critique['expanded_binding_claims']
-        if c.get('role') in {'value_input','identifier_input','resource','destination'})
-    checks[role_path].update(alternative_role_possible=True,
-        alternative_role_reason='Authored conflict: another concrete role remains possible.')
-    role_repair = source_annotation_revision_request(critique, raw, review)['source_review_revision']
-    assert role_path in role_repair['program_routed_verdict_paths']
-    assert any(i['path']==role_path and 'input_unspecified' in i['correction']
-               for i in role_repair['critique']['issues'])
-    assert checks[role_path]['support'] == 'supported' and review['issues'] == []
-    result_checks.pop(operation)
-    with pytest.raises(PromptContractExtractionError, match="every operation's participation"):
-        source_annotation_revision_request(critique, raw, review)
-
-
 def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_condition():
     sentence = ("Run query A using input x; for external requests, bind input x as an SQL parameter "
                 "and require input x to be at most 10 characters.")
@@ -891,12 +309,21 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     # assumptions; no extra incident-specific test family is added.
     from copy import deepcopy
     from annotation_fixture import record_annotation
-    from prompt_mechanism_study.source_records import (
-        record_request, compile_records, review_request, repair_request, apply_record_patch, record_diagnostics,
+    from prompt_mechanism_study.tsg.source_records import (
+        record_request,
+        compile_records,
+        review_request,
+        repair_request,
+        apply_record_patch,
+        record_diagnostics,
     )
     catalog = open_concept_catalog()
     request = record_request(contract_decision_request(task, catalog))
     records = record_annotation(request, canonical)
+    generation_participant = deepcopy(records)
+    generation_participant['operations'][0]['fact']['layer'] = 'generation'
+    assert any('participation requires runtime operation and object' in error
+               for error in record_diagnostics(generation_participant, request))
     invalid = deepcopy(records)
     invalid['requirements'][0].update(scope_kind='task', operations=[], subjects=[])
     invalid['requirements'][0]['fact'].update(layer='generation')
@@ -910,7 +337,10 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     check = review_request(request, records)
     assert check['operation_role_meanings'] == request['operation_role_meanings']
     assert 'NO per-operation obligation' in check['record_semantics']['task_scope']
-    from prompt_mechanism_study.source_records import structural_readback, review_response_format
+    from prompt_mechanism_study.tsg.source_records import (
+        structural_readback,
+        review_response_format,
+    )
     assert structural_readback(request,records)['operations']['q']['execution_guard'].startswith('NO DECLARED EXECUTION GUARD:')
     operation_reading = structural_readback(request, records)['operations']['q']
     assert operation_reading['predicate_definition_claim'] == 'Execute the source SQL query.'
@@ -965,7 +395,7 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     assert merged['objects'] == records['objects'] and merged['requirements'] == records['requirements']
     # Freeze a normalized action predicate, then vary its bindings without
     # reinterpreting that immutable predicate or the research requirements.
-    from prompt_mechanism_study.prompt_contract import freeze_open_concepts, catalog_sha256
+    from prompt_mechanism_study.tsg.prompt_contract import freeze_open_concepts, catalog_sha256
     base_contract = compile_records(records, request=request, task=task, catalog=catalog,
         annotator_id='authored-normalized-operation', review_status='development_exposed')
     frozen = freeze_open_concepts((base_contract,), normalization_map={},
@@ -1000,10 +430,18 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
             [f for f in frozen_contracts[1].facts if f['node_type']=='safety_requirement'])
     # Preserve composition and inherited guards at construction; only conjunction
     # entails its declared leaves. This is a synthetic logic boundary, not accuracy.
-    from prompt_mechanism_study.prompt_contract import compile_task_context_contract
-    from prompt_mechanism_study.prompt_tsg import graph_requirement_membership, prompt_tsg_record, prompt_tsg_from_record
-    from prompt_mechanism_study.candidate_construction import (
-        candidate_request, _occurrence, _canonical_concepts, _query, choose_candidate_scope,
+    from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
+    from prompt_mechanism_study.tsg.prompt_tsg import (
+        graph_requirement_membership,
+        prompt_tsg_record,
+        prompt_tsg_from_record,
+    )
+    from prompt_mechanism_study.tsg.candidate_construction import (
+        candidate_request,
+        _occurrence,
+        _canonical_concepts,
+        _query,
+        choose_candidate_scope,
     )
     composite = deepcopy(records)
     parent = deepcopy(composite['requirements'][0])
@@ -1076,7 +514,7 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
         with pytest.raises(ValueError,match='existing source requirement'):
             _occurrence(candidate['sources'][0],occurrence,aliases)
         # Scope preparation must withhold the referenced feature, not claim absence.
-        from prompt_mechanism_study.prompt_tsg import catalog_sha256
+        from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
         fixed=deepcopy(comp.catalog)
         feature=next(f['semantic_id'] for f in comp.facts if f['local_id']=='fact.3')
         fixed['queries']=[dict(query_id='binding',actionable_feature_id=feature,required_semantics=[by_id[op]],
@@ -1118,7 +556,7 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     with pytest.raises(PromptContractExtractionError,match='zero/one boundary'):
         compile_composite(illegal)
     assert ('fact.5','conditions','fact.3') in links and ('fact.5','conditions','fact.2') not in links
-    from prompt_mechanism_study.candidate_construction import candidate_request, _occurrence
+    from prompt_mechanism_study.tsg.candidate_construction import candidate_request, _occurrence
     source = candidate_request([task], [compiled], input_catalog=catalog)['sources'][0]
     assumption = next(n for n in source['nodes'] if n.get('statement_kind') == 'assumption')
     with pytest.raises(ValueError, match='existing source requirement'):
@@ -1129,15 +567,29 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     from copy import deepcopy
     from dataclasses import replace
     from annotation_fixture import record_annotation
-    from prompt_mechanism_study.source_records import (
-        record_request, compile_records, structural_readback, review_request, repair_request, apply_record_patch)
-    from prompt_mechanism_study.prompt_contract import compile_task_context_contract
-    from prompt_mechanism_study.prompt_tsg import (
-        graph_requirement_membership, requirement_binding, requirement_matches_policy,
-        requirement_policy_relations, prompt_tsg_record, prompt_tsg_from_record, query_context,
+    from prompt_mechanism_study.tsg.source_records import (
+        record_request,
+        compile_records,
+        structural_readback,
+        review_request,
+        repair_request,
+        apply_record_patch,
     )
-    from prompt_mechanism_study.candidate_construction import (
-        candidate_request, _occurrence, _query, choose_candidate_scope,
+    from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
+    from prompt_mechanism_study.tsg.prompt_tsg import (
+        graph_requirement_membership,
+        requirement_binding,
+        requirement_matches_policy,
+        requirement_policy_relations,
+        prompt_tsg_record,
+        prompt_tsg_from_record,
+        query_context,
+    )
+    from prompt_mechanism_study.tsg.candidate_construction import (
+        candidate_request,
+        _occurrence,
+        _query,
+        choose_candidate_scope,
     )
     sentence = 'When ready, prepare before publish and enable strict mode during preparation.'
     task = prepare_task_input(dict(task_id='authored-owned-order-boundary', language='python', prompt=sentence))
@@ -1310,7 +762,7 @@ def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider(
     # Exercise the active record compiler's local-impact declarations, not just
     # handcrafted contract metadata. Separate inputs prevent accidental sharing.
     from annotation_fixture import record_annotation
-    from prompt_mechanism_study.source_records import record_request, compile_records
+    from prompt_mechanism_study.tsg.source_records import record_request, compile_records
     task,catalog,canonical,_,_ = _source_fixture('Run query A using input x. Return the selected rows. Produce readable code. Run query B.')
     canonical['nodes'].append(dict(local_id='b',concept_id='sql.query',evidence_text='query B',occurrence=1))
     request=record_request(contract_decision_request(task,catalog))
@@ -1337,6 +789,58 @@ def test_fixed_generation_facts_are_injected_once_and_never_become_model_binding
     assert len(facts.relations) == 4
     assert not template_ids & set(binding["binding_rows"])
     assert all(facts.source_inventory["layers"][key] == "generation" for key in template_ids)
+
+    # Same generation layer does not imply the same direct target. Keep the
+    # module obligation separate from reply formatting using existing fields.
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.tsg.source_records import (
+        record_request, compile_records, record_response_format, record_diagnostics,
+        structural_readback, review_request,
+    )
+    # A frozen concept supplies its layer. The schema omits that response field;
+    # compilation and review must still preserve runtime participants and the
+    # generation obligation, rather than rejecting this legal response.
+    template_concepts = {row['concept_id'] for row in request['fixed_template']['concepts']}
+    catalog['semantic_layers'] = {
+        key: 'generation' if key in template_concepts or key == 'code.readable' else 'runtime'
+        for key in catalog['semantics'] if key != 'task.root'
+    }
+    request = record_request(contract_decision_request(task, catalog))
+    records = record_annotation(request, canonical)
+    for group in ('objects', 'operations', 'requirements'):
+        assert 'layer' not in record_response_format(request)['json_schema']['schema'][
+            'properties'][group]['items']['properties']['fact']['properties']
+        for row in records[group]:
+            row['fact'].pop('layer')
+    assert record_diagnostics(records, request) == []
+    contract = compile_records(records, request=request, task=task, catalog=catalog,
+        annotator_id='source_authored_fixture', review_status='development_exposed')
+    layers = contract.source_inventory['layers']
+    for fact in contract.facts:
+        assert layers[fact['local_id']] == catalog['semantic_layers'][fact['semantic_id']]
+    assert contract.source_inventory['operation_roles']
+    assert structural_readback(request, records)['operations']['q']['inputs'][0]['subject'] == 'x'
+    assert review_request(request, records, compiled_contract=contract)['request_kind'] == 'source_only_record_review'
+
+    sentence = 'Provide a Python module that imports os. Wrap the reply in a Markdown code block.'
+    task = prepare_task_input(dict(task_id='generation-targets', language='python', prompt=sentence))
+    catalog = open_concept_catalog()
+    request = record_request(contract_decision_request(task, catalog))
+    meanings = [('module', 'data_object', 'The requested Python module.'),
+                ('reply', 'data_object', 'The requested reply.'),
+                ('imports', 'constraint', 'Import os.'),
+                ('format', 'presentation_control', 'Use a Markdown code block.')]
+    canonical = dict(concepts=[dict(concept_id=k, node_type=t, definition=d) for k,t,d in meanings],
+        nodes=[dict(local_id=k, concept_id=k, layer='generation', evidence_text=sentence, occurrence=1)
+               for k,_,_ in meanings], edges=[], unresolved_notes=[])
+    records = record_annotation(request, canonical)
+    for row, target in zip(records['requirements'], ('module', 'reply')):
+        row.update(scope_kind='targets', subjects=[target], operations=[])
+    contract = compile_records(records, request=request, task=task, catalog=catalog,
+        annotator_id='source_authored_fixture', review_status='development_exposed')
+    targets = {(e['source'], e['target']) for e in contract.relations if e['edge_type']=='constrains'}
+    assert {t for s,t in targets if s=='fact.3'} == {'fact.1'}
+    assert {t for s,t in targets if s=='fact.4'} == {'fact.2'}
 
 
 def test_qualification_keeps_incomplete_inventory_in_denominator_and_cannot_pass(tmp_path):

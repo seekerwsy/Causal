@@ -137,6 +137,47 @@ ADD ranks expressed-minus-unexpressed; REMOVE reverses that orientation. Scores
 retain sign without requiring a favorable direction. FCI is not the score and
 neither score nor admission establishes a randomized causal effect.
 
+### Bounded development screening (prospective revision, 2026-09-23)
+
+Authorized development checks may use `paired_task_effect_screen_v1` in the
+existing development runner. This does not activate formal natural-state Discovery
+or remove its FCI comparison. Freeze the common task-frame size, primary selection
+contrast, minimum observed gain and Top-K before outcomes. The recommended starting
+gain is 0.05 (five percentage points), explicitly written into the plan; it is a
+budget decision, not a statistical or security guarantee.
+
+For each policy use one primary selection contrast (default TARGET minus NOOP);
+retain other listed contrasts as diagnostics. Average repetitions within tasks,
+then rank positive gains meeting the threshold by
+`applicable_task_units / frozen_common_task_units * observed_gain`. Keep harmful,
+unknown, missing and unselected rows. A missing assigned outcome blocks that policy's
+contrast, not other policies, and is never silently dropped. Correctly marked
+Oracle unknowns contribute zero observed secure yield, not an insecure label.
+
+The exact task sign-flip p-value and Holm adjustment remain descriptive outputs;
+neither controls screening admission. The selected list is a validation queue,
+not an adoption recommendation. Functionality, joint success and unknown outcomes
+remain in the saved assignment report and must accompany subsequent validation.
+No functionality-preservation claim follows merely from entering this queue.
+
+Example fields inside a new frozen development plan's `analysis` object:
+
+```json
+{
+  "method": "paired_task_effect_screen_v1",
+  "minimum_effect": 0.05,
+  "screening_task_units": 32,
+  "screening_control": "NOOP",
+  "top_k": 2
+}
+```
+
+Retain the existing contrasts, generation seeds, bootstrap parameters, alpha and
+`scientific_claim_allowed: false`. Old `paired_task_signflip_holm_bootstrap_v1`
+plans replay their original significance-gated signal; old results are not relabelled.
+The independent verifier uses exact grouped convolution instead of enumerating
+2^N sign allocations, so no twenty-task ceiling remains.
+
 ## 8. Selectors and fixed budgets
 
 The approved main RQ1/RQ4 roster is CausalGuide, Prompt Attribution (simple
@@ -243,20 +284,46 @@ model effects in the frozen confirmation union. Empty unions have
 `NO_ELIGIBLE_COORDINATES`, not fabricated zero effects. Secondary endpoints and
 contrasts require separately frozen and implemented families.
 
-For effect j, the variance is sum_(r,s) lambda_jrs^2 * sample_variance(D_jrs)/n_jrs.
-Each bootstrap draw samples the union of family task units with replacement within
-original source strata. All descendants of a sampled unit move together, including
-overlapping effects/models. Each effect uses its own frozen support and realization
-labels. Original lambda weights are not refit to bootstrap frequencies.
+The 2026-09-23 prospective revision uses `per_effect_bonferroni_bootstrap`.
+Each policy is estimated on its own frozen support. For effect j, variance is
+sum_(r,s) lambda_jrs^2 * sample_variance(D_jrs)/n_jrs. Resample task units within
+that policy's original source strata; all descendants move together and original
+lambda weights remain fixed. Policies may share tasks. No independence between
+policy estimates is required for the Bonferroni allocation.
 
-A draw is invalid when any coordinate loses its frozen cell/realization minimum
-or has zero standard error. Otherwise compute the maximum across coordinates of
-abs((bootstrap_estimate - estimate)/bootstrap_standard_error). Require at least
-ceil(B * minimum_valid_bootstrap_fraction) valid draws and use the sorted one-based
-ceil((1-alpha)*B_valid) maximum (the stored `higher` quantile rule). Intervals are
-estimate +/- critical * standard_error. Failed provenance, inadequate initial
-support, excessive unknown coverage, zero initial standard error or too few valid
-draws yields an explicit non-evaluable family. There is no unadjusted fallback.
+Allocate alpha/m to each of the m effects in the **original frozen union**, including
+untestable effects. For each effect independently, retain the existing studentized
+bootstrap and minimum-valid-draw rule; use the higher (1-alpha/m) quantile of
+absolute studentized deviations. Report each effect's critical value, valid/invalid
+draw counts and interval. Family draw counts are sums of these effect-level counts;
+there is no common family critical value. These bootstrap intervals are approximate,
+not a finite-sample coverage guarantee. Limited tail resolution is reported as a
+warning; adequate draws and coverage calibration must be planned before formal use.
+
+Zero-variance resamples are retained: their absolute studentized deviation is zero
+when the resampled point equals the observed point, and unbounded otherwise.
+If the required quantile is unbounded, report no finite interval for that policy
+(`unbounded_studentized_bootstrap_tail`), while retaining its point estimate and
+development-screen eligibility. Dropping these resamples can give spurious precision
+for rare events. `bootstrap_zero_variance=retain_unbounded_tail` is part of the
+inference-plan identity; older results retain their frozen implementation.
+
+Missing assigned outcomes, missing realization support, too few task units, zero
+standard error or insufficient valid draws limit only the affected policy's
+inference. Retain its point estimate whenever identifiable, task/assignment counts,
+reasons and original slots; never renormalize away missing support. The family is
+`PARTIALLY_EVALUABLE` when some effects have intervals and others do not. Shared
+measurement or provenance defects still invalidate every affected policy.
+
+Exceeding `maximum_unknown_fraction_among_valid` is a coverage warning, not an
+observed secure-yield inference gate. Unknowns remain in the denominator. Always
+report latent-yield bounds and arm-specific measurement coverage; an observed
+yield increase does not alone establish a latent security improvement.
+
+Existing frozen outputs retain their old rules. The new inference-method field and
+power-method identity prevent interpreting an old max-|T| plan as this revision.
+Historical target result reproduction requires its saved implementation; no formal
+reference result is replaced by this draft revision.
 
 With prospectively frozen practical margin epsilon, the five statuses are:
 
@@ -266,7 +333,7 @@ With prospectively frozen practical margin epsilon, the five statuses are:
 | NEGATIVE_MEANINGFUL | interval upper < -epsilon |
 | PRACTICALLY_NULL | entire interval lies within [-epsilon, epsilon] |
 | INCONCLUSIVE | evaluable interval meeting none of the above |
-| NON_EVALUABLE | failed provenance, support, coverage or inference |
+| NON_EVALUABLE | affected policy lacks provenance, support or valid inference |
 
 Margins, alpha, minima, draw count/seed and validity criteria come from the frozen
 power-and-margin memo, never from inspected effects. Meaningful Yield@K counts

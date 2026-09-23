@@ -1,115 +1,75 @@
 # Reviewer guide
 
 The single active method is the [Atomic protocol](protocol.md),
-`phase-context-policy-v3`, still `SPECIFIED_DRAFT`. The implementation is a
-research prototype; no formal effect-bearing result or qualified automatic TSG
-accuracy is claimed. Pair research and its original reproduction path live on
-[`codex/pair-interaction-research`](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research)
-at `e6833027`.
+`phase-context-policy-v3`, currently `SPECIFIED_DRAFT`. The runnable artifact is
+an offline seven-stage smoke, **not** a formal effect result. It makes no model
+provider calls and consumes no protected evaluation tasks. Historical development
+outputs are preserved on local branch `codex/pre-artifact-scope-20260923` at
+`f1cd0011`; they are outside this default reviewer path.
 
-## Entry point and reproduction
+## Reproduce the current result
 
-With Python 3.12 and `dev,selectors,languages` extras installed:
+Use Python 3.12 from the repository root:
 
 ```text
+python -m pip install -e ".[dev,selectors,languages]"
 python -m pytest -q
 prompt-mechanism-study study smoke NEW_OUTPUT_DIRECTORY
 prompt-mechanism-study study verify-result NEW_OUTPUT_DIRECTORY
 ```
 
-The suite already includes both smoke and independent verification. Run the
-standalone commands only when a saved package is useful. The smoke calls
-`target_workflow.run_target_reviewer_smoke`, writes all seven stages, and makes
-zero provider calls. Its synthetic inputs and offline responses come from
-`fixtures/reviewer_smoke.json`. It executes parsing, local security measurement
-and functional-response validation. Prioritization now executes causal-learn FCI
-on 24 synthetic task units with ten task-unit bootstrap draws; adjacency is no
-longer supplied by the fixture. The CLI JSON retains the input matrix, sampled
-rows, PAG endpoints, failures and gate decisions. Save that output alongside the
-result package when inspecting Discovery. The independent result verifier replays
-the downstream freezes and ITT, not FCI itself. This run does not establish
-automatic TSG accuracy, evaluator accuracy, FCI qualification, natural support
-or formal statistical power.
+Choose a new output directory for each standalone smoke. The default tests also
+run the smoke and independent result verifier. The smoke uses bundled synthetic
+task units and offline code/review responses in `src/fixtures/reviewer_smoke.json`.
+It performs a real FCI fit on fixture observations, freezes policies, creates
+all four assigned arms, measures saved code, accounts for failures/unknowns and
+computes task-unit results. The verifier independently replays the saved
+downstream freezes and arithmetic; it does not certify the FCI output or model
+quality. The result is marked `NON_CLAIM_TEST_ARTIFACT`.
 
-An explicit offline fixture can also be supplied to the same smoke function.
-The [42-task development replay](../data/method/full-chain-development-v1/README.md)
-uses this to connect an author-derived candidate to real bound prompt variants,
-FCI and downstream inference. Its natural source-support results and synthetic
-continuation are separate; all simulated results retain the non-claim boundary.
-
-`study development OUTPUT --development-plan PLAN` executes an explicitly
-bounded, authorized Atomic development plan. `study verify-development SAVED_RUN`
-checks saved responses, assignment accounting and descriptive statistics without
-provider calls. Development sign-flip/Holm tests are not the formal simultaneous
-family. Historical Pair plans are not accepted by main.
-
-## Seven stages
-
-| Stage | Inputs | Outputs and boundary |
+| Stage | Input | Saved output |
 | --- | --- | --- |
-| Representation | Actual system/user input, language, source-only semantic reference and catalog | Requirements with condition/object bindings; Atomic policies with exact source scope. TSG edges are not causal. |
-| Prioritization | Frozen population, support/folds and qualified profiles; separate Discovery outcomes | Full and RD-only fixed-K ledgers. Only Full uses the FCI adjacency gate; both share RD scores. |
-| Hypothesis freeze | Fixed slots, unique model effects, intervention/Oracle qualifications, power and budget | Shared dispatch, realizations and pre-outcome freeze. Empty/failure slots stay in K. |
-| Intervention/randomization | Original task pool, allocated realization, complete four-arm bundles | Reproducible task/arm/model/seed assignments; failed allocations are retained without replacement. |
-| Measurement | Assigned prompts and blinded evaluator contracts | Raw code, validity, secure/insecure/unknown, functionality and measurement failures. |
-| Outcome assembly | Every assignment plus measurement or infrastructure failure | Complete assigned-arm ledger; no post-assignment denominator filter. |
-| Inference/reporting | Frozen ITT plan, total ledger and fixed realization weights | Atomic effects, simultaneous intervals, statuses, Yield@K tables and independently verified provenance. |
+| Representation | Original prompt and frozen source records | TSG requirements, objects, conditions and candidate bindings |
+| Prioritization | Task-unit factor states, qualified scope and fixture outcomes | Full/RD-only fixed-slot decisions; FCI adjacency is a selection input, not a causal effect |
+| Hypothesis freeze | Candidate slots, task/model scope and policies | Pre-outcome policy and comparison identities |
+| Intervention/randomization | Frozen task-policy pairs and arms | Task/arm/seed assignments and edited prompts |
+| Measurement | Raw generated code and blinded evaluators | Code validity, security secure/insecure/unknown, functionality pass/fail/unknown |
+| Outcome assembly | Every assignment and its measurement/failure | Complete assigned-arm ledger |
+| Inference/reporting | Frozen task-unit ledger | ITT effects, uncertainty/status, result table and independent replay |
 
-Optional D0 is one bounded, outcome- and selector-blind round of natural source
-preparation before Discovery. It cannot use feature states, candidate support,
-ranks or outcomes to fill cells. Protected evaluation inputs stay protected.
+The [scope preflight](artifact-scope-preflight.md) is a separate, outcome-blind
+inventory check. Run `python scripts/scope_inventory.py` to recount it from the
+bundled v4 task pool. It makes **zero formal admissions**. Its generated-code
+comparison is explicitly a development diagnostic on the archived branch.
 
-## Source semantics and current limits
+## Scientific boundaries
 
-The [TSG workflow](tsg-workflow-stability.md) is the detailed implementation guide.
-Source records preserve requirement composition, direct targets, subjects,
-conditions and evidence before compilation. Ordinary source review may request
-one local patch. Debug readings expose the structure; they do not prove the
-model checked it correctly. The experimental detailed binding audit is not a
-default paid component.
+- One complete editable Atomic requirement defines a policy. TSG edges express
+  source meaning; they are not FCI causal edges.
+- The deduplicated task unit is the independent analysis unit. Repeated seeds,
+  arms and prompt variants remain linked to it.
+- The primary comparison uses all assigned task units. Post-assignment fidelity,
+  model compliance, code validity, functionality and non-target drift do not
+  remove observations from its denominator.
+- A valid code sample can be security-unknown. Unknown contributes no observed
+  secure-code yield, is not labeled insecure, and remains visible by arm.
+  Functionality and secure-and-functional success are separate results.
+- The same frozen comparison rules and independent verifier must be used for
+  any future claim-bearing package. This draft artifact supports no such claim.
 
-The [candidate guide](tsg-candidate-construction.md) covers equivalent-factor
-normalization and exact, state-blind scope binding. It never splits source nodes,
-repairs missing bindings or infers absence from unknown. Shared/unlocalized
-unknowns can still block several candidates; unrelated localized unknowns need
-not reject the whole task. An Atomic record is not automatically independently
-editable: the intervention bridge must qualify the concrete edit.
+## Read the implementation
 
-Independent qualification freezes a source reference, profiles and thresholds
-before extraction. Assertion review covers both missing meanings and unsupported
-extra bindings; extractor self-approval is not the reference. Positivity consumes
-that qualified representation and exact Atomic scope bindings. Unknown tasks
-remain visible in coverage and failed support blocks selection. Existing exposed
-diagnostic cases cannot retrospectively qualify a new method.
+1. [Protocol](protocol.md): active decisions and remaining formal gates.
+2. [Workflow](../src/target_workflow.py): linear seven-stage call graph.
+3. [Source representation](../src/tsg/prompt_contract.py): bound requirements.
+4. [Candidate construction](../src/tsg/candidate_construction.py): Atomic scope.
+5. [Prioritization](../src/discovery/prioritization.py): FCI and RD-only slots.
+6. [Study design](../src/experiment/study_design.py): frozen study identities.
+7. [Assignment](../src/experiment/randomization.py): task/arm/seed replay.
+8. [Measurement](../src/measurement/evaluate.py): independent outcomes.
+9. [Inference](../src/experiment/inference.py): task-unit ITT.
+10. [Independent verification](../src/verification/verifier.py): saved-result replay.
 
-## What must remain invariant
-
-- The task unit, deduplicated across sources, is the independent analysis unit.
-- Policy identity is model independent; confirmation dispatch is model bound.
-- ADD and REMOVE have different source-state requirements and identities.
-- Every selector keeps its original K; shared effects run once and fan back to slots.
-- Every committed assignment has exactly one measurement or recorded failure.
-- Task/instance/seed averaging and original realization weights define ITT.
-- Secure-code yield does not conflate Oracle support, functionality or joint success.
-- Bootstrap draws move all descendants of a task together and retain frozen weights.
-- Invalid support, unknown coverage or resampling never triggers an unadjusted fallback.
-- Context modifiers and robustness/adoption labels require prospectively frozen rules;
-  missing rules remain blocked. Tests cannot authorize formal reporting.
-
-## Reading order
-
-1. `docs/protocol.md`: scientific decisions and unresolved activation requirements.
-2. `src/prompt_mechanism_study/target_workflow.py`: linear seven-stage entry.
-3. `src/prompt_mechanism_study/prompt_contract.py`: source semantic records and compilation.
-4. `src/prompt_mechanism_study/candidate_construction.py`: Atomic factors and scope binding.
-5. `src/prompt_mechanism_study/prioritization.py`: discoverability, shared scores and fixed slots.
-6. `src/prompt_mechanism_study/study_design.py`: pre-outcome freezes and budget/assignment checks.
-7. `src/prompt_mechanism_study/randomization.py`: deterministic complete-block assignment.
-8. `src/prompt_mechanism_study/measurement.py`: independent outcome measurement.
-9. `src/prompt_mechanism_study/inference.py`: task-unit ITT and simultaneous family.
-10. `src/prompt_mechanism_study/verification/`: independent saved-input/statistical replay.
-
-The [test guide](../tests/README.md) gives focused commands. Historical attempts,
-provider administration and local caches are outside the default reviewer path.
-Frozen Pair outputs retain their original interpretation on the preserved branch;
-main's smaller mutable smoke fixture is not a revision of those results.
+The [test guide](../tests/README.md) identifies scientific boundaries checked by
+the default suite. Source preparation and historical experiment administration
+are not prerequisites to reproduce the smoke.

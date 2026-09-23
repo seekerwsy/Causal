@@ -4,11 +4,12 @@ import json
 from copy import deepcopy
 import pytest
 from annotation_fixture import indexed_annotation
-from prompt_mechanism_study.prompt_contract import open_concept_catalog
-from prompt_mechanism_study.prompt_contract_extract import extract_task_contract, contract_decision_request
-from prompt_mechanism_study.prompt_tsg import validate_prompt_tsg
+from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
+from prompt_mechanism_study.tsg.prompt_contract_extract import extract_task_contract
+from prompt_mechanism_study.tsg.source_codec import contract_decision_request
+from prompt_mechanism_study.tsg.prompt_tsg import validate_prompt_tsg
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.task_input import (
+from prompt_mechanism_study.tsg.task_input import (
     prepare_task_input,
     generation_input_for_prompt,
     input_evidence_text,
@@ -58,7 +59,7 @@ def test_actual_messages_are_the_graph_evidence_and_raw_source_survives():
     quotes = {prepared["prompt"][n.evidence_start:n.evidence_end] for n in graph.nodes}
     assert {"Preserve the requested return value.", "python", "Read the file"} <= quotes
     changed = {**task, "cwe": "different", "task_family": "different", "outcome": 0, "arm": "BASELINE", "seed": 1}
-    from prompt_mechanism_study.source_records import record_request
+    from prompt_mechanism_study.tsg.source_records import record_request
     assert record_request(contract_decision_request(changed, catalog)) == request
 
 

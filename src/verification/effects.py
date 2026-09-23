@@ -1,0 +1,565 @@
+"""Independent Atomic effect, status, and Yield@K reconstruction."""
+
+from __future__ import annotations
+
+import math
+import random
+from collections import Counter, defaultdict
+from functools import lru_cache
+
+from prompt_mechanism_study.experiment.inference import (
+    ConfirmatoryEffectStatus,
+    ContextAnalysisStatus,
+    SharedEvidenceRecord,
+    TargetFamilyStatus,
+    TargetSelectorYieldResult,
+)
+from prompt_mechanism_study.discovery.prioritization import BridgeStatus
+from prompt_mechanism_study.experiment.randomization import (
+    ATOMIC_CONFIRMATORY_ARMS,
+    ConfirmatoryArm,
+)
+from prompt_mechanism_study.records import content_hash
+
+
+def verify_target_shared_evidence(
+    evidence: SharedEvidenceRecord, yields: TargetSelectorYieldResult
+) -> dict[str, object]:
+    """Independently replay target v3 ITT, per-effect multiplicity, five statuses, and Yield@K."""
+    if type(evidence) is not SharedEvidenceRecord or type(yields) is not TargetSelectorYieldResult:
+        raise TypeError("target verifier requires typed shared evidence and yield records")
+    if yields.shared_evidence_record_id != evidence.shared_evidence_record_id:
+        raise ValueError("target yield record is not bound to the shared evidence")
+    ledger = evidence.ledger
+    plan = evidence.plan
+    if plan.context_analysis.status is not ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
+        raise ValueError("context analysis lacks an independently implemented frozen rule")
+    outcome_by_id = {item.assignment_id: item for item in ledger.outcomes}
+    failed = {item.assignment_id for item in ledger.infrastructure_failures}
+    assignments_by_candidate = defaultdict(list)
+    for item in ledger.assignments:
+        assignments_by_candidate[item.candidate_record_id].append(item)
+    track_by_candidate = {
+        item.candidate_record_id: item.track for item in ledger.dispatch.union.entries
+    }
+    work = {}
+    for dispatch in ledger.dispatch.records:
+        if dispatch.status is not BridgeStatus.SUCCESS:
+            continue
+        work[dispatch.candidate_record_id] = _v3_work(
+            track_by_candidate[dispatch.candidate_record_id],
+            tuple(assignments_by_candidate[dispatch.candidate_record_id]),
+            outcome_by_id,
+            failed,
+            plan,
+        )
+    status_by_candidate = {}
+    for family in evidence.families:
+        family_work = {
+            candidate_id: value
+            for candidate_id, value in work.items()
+            if value["track"] is family.track
+        }
+        expected = _v3_family(family.track, family_work, plan, family_size=len(ledger.dispatch.union.entries))
+        if family.status is not expected["family_status"]:
+            raise ValueError("target family status does not independently recompute")
+        _v3_same(family.simultaneous_critical_value, expected["critical"], "critical value")
+        if (
+            family.valid_bootstrap_draws != expected["valid"]
+            or family.invalid_bootstrap_draws != expected["invalid"]
+        ):
+            raise ValueError("target bootstrap accounting does not independently recompute")
+        reported = {item.candidate_record_id: item for item in family.estimates}
+        if set(reported) != set(family_work):
+            raise ValueError("target family estimate membership drift")
+        for candidate_id, value in family_work.items():
+            item = reported[candidate_id]
+            expected_status = expected["statuses"][candidate_id]
+            if item.status is not expected_status:
+                raise ValueError("target five-level status does not independently recompute")
+            status_by_candidate[candidate_id] = item.status
+            margin = plan.atomic_practical_margin
+            _v3_same(item.practical_margin, margin, "practical margin")
+            _v3_same(item.point, value["point"], "point estimate")
+            _v3_same(item.standard_error, value["standard_error"], "standard error")
+            _v3_same(item.latent_lower, value["latent_lower"], "latent lower bound")
+            _v3_same(item.latent_upper, value["latent_upper"], "latent upper bound")
+            _v3_same(
+                item.simultaneous_lower, expected["intervals"][candidate_id][0], "interval lower"
+            )
+            _v3_same(
+                item.simultaneous_upper, expected["intervals"][candidate_id][1], "interval upper"
+            )
+            critical, valid, invalid, warnings = expected["diagnostics"][candidate_id]
+            _v3_same(item.critical_value, critical, "effect critical value")
+            if (item.valid_bootstrap_draws, item.invalid_bootstrap_draws, item.warnings) != (valid, invalid, warnings):
+                raise ValueError("effect bootstrap diagnostics or warnings drift")
+            if item.reasons != expected["reasons"][candidate_id]:
+                raise ValueError("target non-evaluable reasons do not independently recompute")
+            if item.assignments != value["assignments"] or item.task_units != len(
+                value["contributions"]
+            ):
+                raise ValueError("target assignment or task-unit accounting drift")
+            _v3_check_contributions(item.task_unit_contributions, value["contributions"])
+            _v3_check_arm_summaries(item.arm_summaries, value["arm_summaries"])
+    _v3_verify_yields(evidence, yields, status_by_candidate)
+    return {
+        "status": "TARGET_SHARED_EVIDENCE_VERIFIED",
+        "assignments": len(ledger.assignments),
+        "outcomes": len(ledger.outcomes),
+        "repair_failures": len(ledger.infrastructure_failures),
+        "unique_effects": len(status_by_candidate),
+        "fixed_slots": len(yields.slots),
+        "shared_evidence_record_id": evidence.shared_evidence_record_id,
+    }
+
+
+def _v3_work(track, assignments, outcomes, failed, plan):
+    assignment_ids = {item.assignment_id for item in assignments}
+    reasons = set()
+    if assignment_ids & failed or not assignment_ids <= set(outcomes):
+        reasons.add("missing_or_failed_assigned_outcome")
+        return {
+            "track": track,
+            "point": None,
+            "standard_error": None,
+            "latent_lower": None,
+            "latent_upper": None,
+            "contributions": (),
+            "weights": (),
+            "assignments": len(assignments),
+            "reasons": tuple(sorted(reasons)),
+            "arm_summaries": (),
+        }
+    local = {assignment_id: outcomes[assignment_id] for assignment_id in assignment_ids}
+    arms = ATOMIC_CONFIRMATORY_ARMS
+    lower = _v3_unit_values(assignments, local, lambda item: float(item.secure_yield))
+    upper = _v3_unit_values(assignments, local, lambda item: float(item.latent_secure_upper))
+    strata = defaultdict(set)
+    for item in assignments:
+        strata[item.task_unit_id].add(item.stratum_id)
+    if any((len(values) != 1 for values in strata.values())):
+        raise ValueError("independent verifier found cross-stratum task units")
+    allocations, unit_weights = _v3_mixture(assignments)
+    contributions = tuple(
+        (
+            (
+                task_unit_id,
+                next(iter(strata[task_unit_id])),
+                _v3_contrast(track, values, values),
+                _v3_contrast(track, lower[task_unit_id], upper[task_unit_id]),
+                _v3_upper_contrast(track, lower[task_unit_id], upper[task_unit_id]),
+                *allocations[task_unit_id],
+            )
+            for task_unit_id, values in sorted(lower.items())
+        )
+    )
+    counts = Counter(((item[5], item[1]) for item in contributions))
+    if any((count < plan.minimum_task_units_per_stratum for count in counts.values())):
+        reasons.add("insufficient_task_units_per_stratum")
+    r_counts = Counter((item[5] for item in contributions))
+    minimum = plan.atomic_minimum_task_units_per_realization
+    if any((count < minimum for count in r_counts.values())):
+        reasons.add("insufficient_task_units_per_realization")
+    q = {item[5]: item[6] for item in contributions}
+    if not math.isclose(sum(q.values()), 1.0, abs_tol=1e-12):
+        return {
+            "track": track,
+            "point": None,
+            "standard_error": None,
+            "latent_lower": None,
+            "latent_upper": None,
+            "contributions": contributions,
+            "weights": (),
+            "assignments": len(assignments),
+            "reasons": ("incomplete_realization_support",),
+            "arm_summaries": (),
+        }
+    point, error, weights = _v3_point_error(contributions)
+    if error == 0:
+        reasons.add("zero_standard_error")
+    summaries = _v3_arm_summaries(assignments, local, arms)
+    if any(
+        (
+            arm[3] and (arm[3] - arm[4]) / arm[3] > plan.maximum_unknown_fraction_among_valid
+            for arm in summaries
+        )
+    ):
+        reasons.add("maximum_unknown_fraction_exceeded")
+    return {
+        "track": track,
+        "point": point,
+        "standard_error": error,
+        "latent_lower": sum((unit_weights[item[0]] * item[3] for item in contributions)),
+        "latent_upper": sum((unit_weights[item[0]] * item[4] for item in contributions)),
+        "contributions": contributions,
+        "weights": weights,
+        "assignments": len(assignments),
+        "reasons": tuple(sorted(reasons)),
+        "arm_summaries": summaries,
+    }
+
+
+def _v3_family(track, work, plan, *, family_size=None):
+    if not work:
+        return {
+            "family_status": TargetFamilyStatus.NO_ELIGIBLE_COORDINATES,
+            "critical": None,
+            "valid": 0,
+            "invalid": 0,
+            "statuses": {},
+            "intervals": {},
+            "reasons": {},
+        }
+    family_size = len(work) if family_size is None else family_size
+    statuses, intervals, reasons, diagnostics = {}, {}, {}, {}
+    failures = []
+    total_valid = total_invalid = 0
+    for candidate_id, value in work.items():
+        warnings = tuple(r for r in value["reasons"] if r == "maximum_unknown_fraction_exceeded")
+        remaining = set(value["reasons"]) - set(warnings)
+        failure = label = None
+        if "missing_or_failed_assigned_outcome" in remaining:
+            failure, label = TargetFamilyStatus.INVALID_PROVENANCE, "missing_or_failed_assigned_outcome"
+        elif remaining & {"insufficient_task_units_per_stratum", "insufficient_task_units_per_realization",
+                          "incomplete_realization_support"}:
+            failure, label = TargetFamilyStatus.INSUFFICIENT_SUPPORT, "insufficient_effect_support"
+        elif "zero_standard_error" in remaining:
+            failure, label = TargetFamilyStatus.ZERO_STANDARD_ERROR, "zero_standard_error"
+        samples, invalid, critical = [], 0, None
+        if failure is None:
+            samples, invalid = _v3_bootstrap(track, {candidate_id: value}, plan)
+            if len(samples) < math.ceil(plan.bootstrap_draws * plan.minimum_valid_bootstrap_fraction):
+                failure, label = TargetFamilyStatus.INSUFFICIENT_VALID_BOOTSTRAP, "insufficient_valid_bootstrap"
+            elif not math.isfinite(_q(samples, 1 - plan.alpha / family_size)):
+                failure, label = TargetFamilyStatus.INSUFFICIENT_VALID_BOOTSTRAP, "unbounded_studentized_bootstrap_tail"
+        if failure is None:
+            critical = _q(samples, 1 - plan.alpha / family_size)
+            interval = (value["point"] - critical * value["standard_error"],
+                        value["point"] + critical * value["standard_error"])
+            intervals[candidate_id] = interval
+            statuses[candidate_id] = _v3_classify(*interval, plan.atomic_practical_margin)
+            reasons[candidate_id] = ()
+            if len(samples) * plan.alpha / family_size < 5:
+                warnings += ("limited_bootstrap_tail_resolution",)
+        else:
+            failures.append(failure)
+            intervals[candidate_id] = (None, None)
+            statuses[candidate_id] = ConfirmatoryEffectStatus.NON_EVALUABLE
+            reasons[candidate_id] = tuple(sorted(remaining | {label}))
+        diagnostics[candidate_id] = (critical, len(samples), invalid, tuple(sorted(warnings)))
+        total_valid += len(samples)
+        total_invalid += invalid
+    valid = sum(s is not ConfirmatoryEffectStatus.NON_EVALUABLE for s in statuses.values())
+    status = (TargetFamilyStatus.EVALUABLE if valid == len(work) else
+              TargetFamilyStatus.PARTIALLY_EVALUABLE if valid else
+              failures[0] if len(set(failures)) == 1 else TargetFamilyStatus.NON_EVALUABLE)
+    return dict(family_status=status, critical=None, valid=total_valid, invalid=total_invalid,
+                statuses=statuses, intervals=intervals, reasons=reasons, diagnostics=diagnostics)
+
+
+def _v3_mixture(assignments):
+    allocation = {}
+    q = {}
+    for item in assignments:
+        pair = (item.realization_id, float(item.realization_weight))
+        if item.task_unit_id in allocation and allocation[item.task_unit_id] != pair:
+            raise ValueError("independent verifier found multiple task realizations")
+        allocation[item.task_unit_id] = pair
+        if pair[0] in q and q[pair[0]] != pair[1]:
+            raise ValueError("independent verifier found realization weight drift")
+        if not 0 < pair[1] <= 1:
+            raise ValueError("independent verifier found invalid realization weight")
+        q[pair[0]] = pair[1]
+    counts = Counter(r for r, _ in allocation.values())
+    return allocation, {unit: weight / counts[r] for unit, (r, weight) in allocation.items()}
+
+
+@lru_cache(maxsize=128)
+def _v3_descendant_index(assignments):
+    """Build an independent, outcome-free index of fixed assignment cells."""
+    _v3_mixture(assignments)
+    grouped, task_weights, arms_by_unit = defaultdict(list), defaultdict(set), defaultdict(set)
+    instances_by_unit = defaultdict(set)
+    for item in assignments:
+        grouped[(item.task_unit_id, item.task_instance_id, item.arm)].append(item.assignment_id)
+        task_weights[(item.task_unit_id, item.task_instance_id)].add(float(item.task_instance_weight))
+        arms_by_unit[item.task_unit_id].add(item.arm)
+        instances_by_unit[item.task_unit_id].add(item.task_instance_id)
+    if any(len(values) != 1 for values in task_weights.values()):
+        raise ValueError("independent verifier found descendant weight drift")
+    index = []
+    for unit_id in sorted(arms_by_unit):
+        instances = sorted(instances_by_unit[unit_id])
+        weights = {value: next(iter(task_weights[(unit_id, value)])) for value in instances}
+        total = sum(weights.values())
+        arm_index = []
+        for arm in sorted(arms_by_unit[unit_id], key=lambda item: item.value):
+            instance_index = []
+            for instance in instances:
+                keys = grouped.get((unit_id, instance, arm))
+                if not keys:
+                    raise ValueError("independent verifier found incomplete assigned-arm support")
+                instance_index.append((weights[instance], tuple(keys)))
+            arm_index.append((arm, tuple(instance_index)))
+        index.append((unit_id, total, tuple(arm_index)))
+    return tuple(index)
+
+
+def _v3_unit_values(assignments, outcomes, getter):
+    result = {}
+    for unit_id, total, arm_index in _v3_descendant_index(tuple(assignments)):
+        result[unit_id] = {}
+        for arm, instance_index in arm_index:
+            sums = []
+            for weight, keys in instance_index:
+                values = [getter(outcomes[key]) for key in keys]
+                sums.append(weight * sum(values) / len(values))
+            result[unit_id][arm] = sum(sums) / total
+    return result
+
+
+def _v3_contrast(track, lower, upper):
+    return lower[ConfirmatoryArm.ATOMIC_TARGET] - upper[ConfirmatoryArm.ATOMIC_NOOP]
+
+
+def _v3_upper_contrast(track, lower, upper):
+    return upper[ConfirmatoryArm.ATOMIC_TARGET] - lower[ConfirmatoryArm.ATOMIC_NOOP]
+
+
+def _v3_point_error(contributions):
+    cells = defaultdict(list)
+    by_r = Counter(row[5] for row in contributions)
+    policy_weights = {row[5]: row[6] for row in contributions}
+    for _, stratum, point, _, _, r, _ in contributions:
+        cells[(r, stratum)].append(point)
+    weights = tuple((r, stratum, policy_weights[r] * len(values) / by_r[r])
+                    for (r, stratum), values in sorted(cells.items()))
+    means = {cell: sum(values) / len(values) for cell, values in cells.items()}
+    point = sum(weight * means[(r, stratum)] for r, stratum, weight in weights)
+    if any(len(values) < 2 for values in cells.values()):
+        return point, 0.0, weights
+    variance = sum(weight ** 2 * sum((v - means[(r, stratum)]) ** 2 for v in cells[(r, stratum)])
+                   / (len(cells[(r, stratum)]) * (len(cells[(r, stratum)]) - 1))
+                   for r, stratum, weight in weights)
+    return point, math.sqrt(max(variance, 0.0)), weights
+
+
+def _v3_arm_summaries(assignments, outcomes, arms):
+    metric_getters = (
+        lambda item: float(item.secure_yield),
+        lambda item: float(item.code_valid),
+        lambda item: float(item.oracle_evaluable),
+        lambda item: float(item.functionality == 1),
+        lambda item: float(item.joint == 1),
+    )
+    values = tuple(_v3_unit_values(assignments, outcomes, getter) for getter in metric_getters)
+    _, weights = _v3_mixture(assignments)
+    summaries = []
+    for arm in arms:
+        assigned = [item for item in assignments if item.arm is arm]
+        arm_outcomes = [outcomes[item.assignment_id] for item in assigned]
+        summaries.append(
+            (
+                arm,
+                len(assigned),
+                *(sum(weights[uid] * unit[arm] for uid, unit in metric.items()) for metric in values),
+                sum(item.code_valid - item.oracle_evaluable for item in arm_outcomes),
+                sum(item.code_valid == 0 for item in arm_outcomes),
+            )
+        )
+    return tuple(summaries)
+
+
+def _v3_bootstrap(track, work, plan):
+    global_units = defaultdict(set)
+    for value in work.values():
+        for task_unit_id, stratum, *_ in value["contributions"]:
+            global_units[stratum].add(task_unit_id)
+    seed = int(
+        content_hash(
+            {
+                "domain": "target_max_t_task_unit_bootstrap_v1",
+                "seed": plan.bootstrap_seed,
+                "track": track,
+                "plan_id": plan.target_itt_plan_id,
+            }
+        )[-16:],
+        16,
+    )
+    populations = tuple(
+        ((stratum, tuple(sorted(values))) for stratum, values in sorted(global_units.items()))
+    )
+    indexed_work = [
+        (value, {item[0]: (item[5], item[2]) for item in value["contributions"]})
+        for value in work.values()
+    ]
+    maxima = []
+    invalid = 0
+    for sampled in _v3_resampling_draws(populations, seed, plan.bootstrap_draws):
+        draw_statistics = []
+        for value, contribution_by_unit in indexed_work:
+            means, variances, realization_counts = ({}, {}, Counter())
+            draw_valid = True
+            for r, stratum, weight in value["weights"]:
+                points = [
+                    contribution_by_unit[unit][1]
+                    for unit in sampled[stratum]
+                    if unit in contribution_by_unit and contribution_by_unit[unit][0] == r
+                ]
+                if len(points) < plan.minimum_task_units_per_stratum:
+                    draw_valid = False
+                    break
+                realization_counts[r] += len(points)
+                mean = sum(points) / len(points)
+                means[r, stratum] = mean
+                variances[r, stratum] = sum(((point - mean) ** 2 for point in points)) / (
+                    len(points) * (len(points) - 1)
+                )
+            minimum = plan.atomic_minimum_task_units_per_realization
+            if not draw_valid or any((n < minimum for n in realization_counts.values())):
+                draw_statistics = []
+                break
+            point = sum((weight * means[r, stratum] for r, stratum, weight in value["weights"]))
+            error = math.sqrt(
+                sum((weight**2 * variances[r, stratum] for r, stratum, weight in value["weights"]))
+            )
+            if error <= 0:
+                draw_statistics.append(0.0 if point == value["point"] else math.inf)
+            else:
+                draw_statistics.append(abs((point - value["point"]) / error))
+        if draw_statistics:
+            maxima.append(max(draw_statistics))
+        else:
+            invalid += 1
+    return (maxima, invalid)
+
+
+@lru_cache(maxsize=16)
+def _v3_resampling_draws(populations, seed, draws):
+    rng = random.Random(seed)
+    result = []
+    for _ in range(draws):
+        sample = {}
+        for stratum, population in populations:
+            sample[stratum] = tuple(population[rng.randrange(len(population))] for _ in population)
+        result.append(sample)
+    return tuple(result)
+
+
+def _v3_classify(lower, upper, margin):
+    if lower > margin:
+        return ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL
+    if upper < -margin:
+        return ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL
+    if -margin <= lower and upper <= margin:
+        return ConfirmatoryEffectStatus.PRACTICALLY_NULL
+    return ConfirmatoryEffectStatus.INCONCLUSIVE
+
+
+def _v3_check_contributions(reported, expected):
+    if len(reported) != len(expected):
+        raise ValueError("target task-unit contribution count drift")
+    for actual, values in zip(reported, expected, strict=True):
+        if (actual.task_unit_id, actual.stratum_id) != values[:2]:
+            raise ValueError("target task-unit contribution identity drift")
+        if actual.realization_id != values[5]:
+            raise ValueError("target task-unit realization drift")
+        _v3_same(actual.realization_weight, values[6], "realization policy weight")
+        for actual_value, expected_value in zip(
+            (actual.point, actual.latent_lower, actual.latent_upper),
+            values[2:5],
+            strict=True,
+        ):
+            _v3_same(actual_value, expected_value, "task-unit contribution")
+
+
+def _v3_check_arm_summaries(reported, expected):
+    if len(reported) != len(expected):
+        raise ValueError("target arm summary count drift")
+    for actual, values in zip(reported, expected, strict=True):
+        observed = (
+            actual.arm,
+            actual.assignments,
+            actual.secure_yield,
+            actual.code_validity,
+            actual.oracle_evaluability,
+            actual.functionality_yield,
+            actual.joint_success_yield,
+            actual.oracle_unknown_valid_assignments,
+            actual.terminal_assignments,
+        )
+        if observed[:2] != values[:2] or observed[-2:] != values[-2:]:
+            raise ValueError("target arm summary accounting drift")
+        for actual_value, expected_value in zip(observed[2:-2], values[2:-2], strict=True):
+            _v3_same(actual_value, expected_value, "arm endpoint summary")
+
+
+def _v3_verify_yields(evidence, yields, statuses):
+    dispatch = {item.candidate_record_id: item for item in evidence.ledger.dispatch.records}
+    reported = {item.slot_id: item for item in yields.slots}
+    ledger_slots = evidence.ledger.dispatch.union.ledger.slots
+    if set(reported) != {item.slot_id for item in ledger_slots}:
+        raise ValueError("target yield slots do not match the fixed ledger")
+    expected_counts = defaultdict(int)
+    expected_k = defaultdict(int)
+    for slot in ledger_slots:
+        item = reported[slot.slot_id]
+        status = (
+            None
+            if slot.candidate_record_id is None
+            else statuses.get(slot.candidate_record_id)
+        )
+        meaningful = int(
+            status
+            in {
+                ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL,
+                ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL,
+            }
+        )
+        if (
+            item.slot_status is not slot.status
+            or item.candidate_record_id != slot.candidate_record_id
+            or item.effect_status is not status
+            or item.meaningful_yield != meaningful
+        ):
+            raise ValueError("target slot yield does not independently recompute")
+        key = (slot.track, slot.selector_id, slot.model_id)
+        expected_counts[key] += meaningful
+        expected_k[key] += 1
+        if (
+            slot.candidate_record_id is not None
+            and dispatch[slot.candidate_record_id].status is not BridgeStatus.SUCCESS
+            and status is not None
+        ):
+            raise ValueError("a failed dispatch cannot acquire an effect status")
+    selector_map = {
+        (item.track, item.selector_id, item.model_id): item for item in yields.selectors
+    }
+    if set(selector_map) != set(expected_k):
+        raise ValueError("target selector yield membership drift")
+    for key, top_k in expected_k.items():
+        item = selector_map[key]
+        if (
+            item.top_k != top_k
+            or item.meaningful_slots != expected_counts[key]
+            or item.meaningful_yield_at_k != expected_counts[key] / top_k
+        ):
+            raise ValueError("target selector fixed-denominator Yield@K drift")
+
+
+def _v3_same(actual, expected, name):
+    if actual is None or expected is None:
+        if actual is not expected:
+            raise ValueError(f"target {name} nullability drift")
+        return
+    if not math.isclose(float(actual), float(expected), rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError(f"target {name} does not independently recompute")
+
+
+def _q(values, probability):
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, max(0, math.ceil(probability * len(ordered)) - 1))]
+
+
+__all__ = ["verify_target_shared_evidence"]

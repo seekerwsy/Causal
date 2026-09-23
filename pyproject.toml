@@ -28,8 +28,18 @@ languages = [
   "tree-sitter-rust==0.24.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = [
+  "prompt_mechanism_study",
+  "prompt_mechanism_study.data",
+  "prompt_mechanism_study.tsg",
+  "prompt_mechanism_study.discovery",
+  "prompt_mechanism_study.experiment",
+  "prompt_mechanism_study.measurement",
+  "prompt_mechanism_study.verification",
+  "prompt_mechanism_study.development",
+]
+package-dir = {prompt_mechanism_study = "src"}
 
 [tool.setuptools.package-data]
 prompt_mechanism_study = ["fixtures/*.json", "fixtures/*.html", "fixtures/*.js"]

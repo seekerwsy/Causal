@@ -54,6 +54,16 @@ Those reservations do not constitute a complete formal role manifest or permit
 an acceptance call. Their source labels, any subsequent development results,
 and role authorization are separate records.
 
+The pool snapshots below must also be checked against later task-use records.
+The [2026-09-19 source-support check](../data/method/local-full-chain-v1/natural-support-results.md)
+found 220 of the v4 pool's 684 Python identities in subsequent experiment or
+historical selection records. It conservatively withheld those identities and
+recorded 86 further development exposures before source review. Its remaining
+378 metadata identities are not certified independent evaluation capacity;
+the audit also found semantic variants missed by the old near-duplicate groups.
+Use its frozen identity exclusions and exposure record alongside v4, without
+rewriting the historical pool or interpreting every selection as an executed call.
+
 ## Full-source preparation and candidate sufficiency
 
 The current broad research pool is

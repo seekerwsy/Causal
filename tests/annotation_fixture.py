@@ -2,6 +2,60 @@
 from copy import deepcopy
 
 
+def authored_two_output_candidate():
+    """Small source-authored ADD fixture; no study generator or reference program."""
+    from prompt_mechanism_study.tsg.candidate_construction import knowledge_add_candidate
+
+    first = 'Read source_path and write first_path with the records unchanged.'
+    second = 'From the same input, write second_path with the reversed records.'
+    prompt = '\n'.join([
+        'Implement solve(source_path, first_path, second_path). All arguments are file paths.',
+        first, second, 'Return [first_path, second_path].',
+        'The records are confidential. Both outputs may be created or overwritten.',
+        'Preserve input content and permissions, directory modes and caller umask.',
+    ])
+
+    def fact(key, kind, definition, quote):
+        return dict(record_id=key, fact=dict(concept=dict(concept_id=key,
+            node_type=kind, definition=definition), evidence_text=quote, layer='runtime'))
+
+    objects = [fact(key, 'data_object', definition, quote) for key, definition, quote in [
+        ('input_file', 'The read-only input file at source_path.', 'source_path'),
+        ('first_file', 'The ordinary output file at first_path.', 'first_path'),
+        ('second_file', 'The ordinary output file at second_path.', 'second_path'),
+    ]]
+    operations, requirements = [], []
+    for suffix, clause in [('first', first), ('second', second)]:
+        target = suffix + '_file'
+        operation = fact('write_' + suffix, 'task_operation', clause, clause)
+        operation.update(inputs=[dict(subject='input_file', role='resource', evidence_text=clause)],
+            results=[dict(subject=target, evidence_text=clause)], execution_conditions=[],
+            scope_conditions=[], precedes=[])
+        operations.append(operation)
+        requirement = fact('content_' + suffix, 'task_requirement', clause, clause)
+        requirement.update(modality='obligation', structure=dict(kind='opaque', members=[]),
+            scope_kind='targets', subjects=[target], operations=[], conditions=[],
+            target_class=None, relations=[])
+        requirements.append(requirement)
+    records = dict(objects=objects, operations=operations, requirements=requirements,
+                   unit_impacts={}, unresolved_notes=[])
+    knowledge = dict(id='critical-file-access', version='test-fixture',
+        url='https://cwe.mitre.org/data/definitions/732.html',
+        principle='Restrict access to confidential files to the intended user.')
+    binding = dict(targets=['first_file', 'second_file'], operations=['write_first', 'write_second'],
+        conditions=[], time='normal return', scope='complete two-output set; new and overwritten',
+        requirement='Final ordinary output modes have no group/other permission bits.',
+        endpoint='final_file_access_and_permission_bits')
+    assessment = dict(author='source-authored test fixture', source_state='UNEXPRESSED',
+        compatibility='compatible', relevance='supported', complete_binding=True,
+        evidence=[first, second, 'The records are confidential.'],
+        non_target_invariants=['Both output contents and return paths; input, directories and umask.'],
+        rationale='One final permission property covers both outputs without changing their contents.')
+    proposal = knowledge_add_candidate(source_prompt=prompt, source_records=records,
+                                       knowledge=knowledge, binding=binding, assessment=assessment)
+    return dict(prompt=prompt, source_records=records, proposal=proposal), knowledge
+
+
 def _authored_roles(canonical):
     if "operation_roles" in canonical:
         return deepcopy(canonical["operation_roles"])
@@ -146,7 +200,7 @@ def indexed_annotation(request, canonical):
 
 def record_annotation(request, canonical):
     """Map independently authored fixture edges to complete source records."""
-    from prompt_mechanism_study.prompt_contract_extract import _source_tokens
+    from prompt_mechanism_study.tsg.source_codec import _source_tokens
     if request['request_kind'] == 'source_only_record_review':
         return dict(records={r['record_id']: dict(status='supported', reason='Source-authored fixture.', rejected_claims=[])
             for group in ('objects', 'operations', 'requirements') for r in request['records'][group]},

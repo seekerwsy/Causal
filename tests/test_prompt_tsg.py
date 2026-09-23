@@ -1,5 +1,5 @@
 from pathlib import Path
-from prompt_mechanism_study.prompt_tsg import (
+from prompt_mechanism_study.tsg.prompt_tsg import (
     QueryState,
     build_prompt_tsg,
     load_catalog,

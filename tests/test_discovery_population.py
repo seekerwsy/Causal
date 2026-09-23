@@ -1,6 +1,6 @@
 from dataclasses import replace
 import pytest
-from prompt_mechanism_study.discovery_population import (
+from prompt_mechanism_study.data.discovery_population import (
     CoverageAcquisitionMode,
     CoverageAcquisitionRequest,
     CoverageCellSupport,

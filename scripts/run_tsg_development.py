@@ -8,18 +8,21 @@ import json
 import sys
 from prompt_mechanism_study.artifact_io import read_json, write_bundle, bundle_digest
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.functional_judge import bailian_complete
+from prompt_mechanism_study.measurement.functional_judge import bailian_complete
 
 
 def run(base, output):
-    from prompt_mechanism_study.prompt_contract import task_context_contract_record
-    from prompt_mechanism_study.prompt_tsg import prompt_tsg_record
+    from prompt_mechanism_study.tsg.prompt_contract import task_context_contract_record
+    from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_record
     inputs=base/'inputs';plan=read_json(inputs/'plan.json')
     assert not output.exists();output.mkdir(parents=True)
     evaluators=read_json(inputs/'evaluators.json');catalog=read_json(inputs/'catalog.json')
     instruction=read_json(inputs/'instructions.json')['system_prompt']
     rows=read_json(inputs/'cases.json')
-    from prompt_mechanism_study.prompt_contract_extract import _attempt_source_graph, _assess_candidate_scopes
+    from prompt_mechanism_study.tsg.prompt_contract_extract import (
+        _attempt_source_graph,
+        _assess_candidate_scopes,
+    )
     name,=evaluators;calls=[];results=[];debited=0
     conditions=plan.get('conditions', ['single'])
     assert conditions == ['single']
@@ -100,10 +103,13 @@ def run(base, output):
             before=len(calls)
             if inventory_only:
                 # Component diagnostic only: no graph, repair, or semantic approval.
-                from prompt_mechanism_study.prompt_contract_extract import contract_decision_request
-                from prompt_mechanism_study.source_records import (record_request,
-                    obligation_inventory_request, obligation_inventory_response_format,
-                    validate_obligation_inventory)
+                from prompt_mechanism_study.tsg.source_codec import contract_decision_request
+                from prompt_mechanism_study.tsg.source_records import (
+                    record_request,
+                    obligation_inventory_request,
+                    obligation_inventory_response_format,
+                    validate_obligation_inventory,
+                )
                 request=obligation_inventory_request(
                     record_request(contract_decision_request(row['task'],catalog)), task=row['task'])
                 config={**evaluators[name], 'response_format':obligation_inventory_response_format(request)}

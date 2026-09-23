@@ -1,7 +1,7 @@
 """Schema-3 identity, scope, and outcome-blind source-gate invariants."""
 
 from __future__ import annotations
-from prompt_mechanism_study.representation import (
+from prompt_mechanism_study.tsg.representation import (
     AnalysisScope,
     AtomicPolicyKey,
     ModelBoundCandidateRecord,

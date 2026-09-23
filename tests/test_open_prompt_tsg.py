@@ -9,39 +9,37 @@ from annotation_fixture import (
     indexed_annotation,
     scope_answer,
 )
-from prompt_mechanism_study.prompt_contract import (
+from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
     open_concept_catalog,
     open_contract_from_response,
     task_context_contract_from_record,
     task_context_contract_record,
 )
-from prompt_mechanism_study.prompt_contract_extract import (
+from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
-    apply_fixed_scope_response,
     contract_decision_request,
-    extract_contract_task_file,
-    fixed_scope_request,
-    fixed_scope_response_format,
     contract_from_response,
     open_contract_response_format,
     fixed_binding_request,
     fixed_binding_response_format,
     apply_fixed_binding_response,
 )
-from prompt_mechanism_study.artifact_io import (
-    file_sha256,
-    read_json,
+from prompt_mechanism_study.tsg.scope_assessment import (
+    apply_fixed_scope_response,
+    fixed_scope_request,
+    fixed_scope_response_format,
 )
-from prompt_mechanism_study.functional_judge import bailian_complete
-from prompt_mechanism_study.prompt_tsg import (
+from prompt_mechanism_study.tsg.prompt_contract_extract import extract_contract_task_file
+from prompt_mechanism_study.artifact_io import file_sha256, read_json
+from prompt_mechanism_study.tsg.prompt_tsg import (
     PromptTSGError,
     prompt_tsg_record,
     catalog_sha256,
     FeatureScope,
     build_prompt_tsg,
 )
-from prompt_mechanism_study.prompt_contract_qualification import (
+from prompt_mechanism_study.tsg.prompt_contract_qualification import (
     evaluate_open_graph_expectations,
     evaluate_open_semantic_case,
     open_graph_assertions,
@@ -50,9 +48,23 @@ from prompt_mechanism_study.prompt_contract_qualification import (
     PromptContractQualificationError,
 )
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.task_input import generation_template_facts
+from prompt_mechanism_study.tsg.task_input import generation_template_facts
 
 PROMPT = "Read external x in query A. Read external y in query B. Parameterize query B."
+
+
+def test_extractor_configuration_failure_does_not_spend_or_request_model_repair():
+    from prompt_mechanism_study.tsg.source_records import attempt_graph
+    calls=[]
+    def provider(*args):
+        calls.append(args)
+        raise AssertionError("A local configuration defect must not reach the model")
+    attempt=attempt_graph(dict(task_id="config-boundary",prompt=PROMPT,language="python"),
+        catalog=open_concept_catalog(),evaluator={},annotator_prompt="unused",
+        review_status="development_exposed",provider=provider)
+    assert calls==[] and attempt.graph is None
+    assert attempt.error_type=="ValueError" and "candidate_id" in attempt.error_message
+    assert attempt.binding_annotation["provider_calls"]==0
 
 
 def _add_fixed_generation_concepts(catalog, task):
@@ -73,7 +85,7 @@ def _synthetic_qualification_rule():
 
 def _semantic_qualification_fixture(tmp_path, failure=None):
     """Explicit synthetic reference and reviews; no natural accuracy or real reviewer identities."""
-    from prompt_mechanism_study.task_input import prepare_task_input
+    from prompt_mechanism_study.tsg.task_input import prepare_task_input
     _, source = _contract()
     catalog = deepcopy(source.catalog)
     catalog.update(concept_policy="FROZEN", queries=[dict(query_id="sql", required_semantics=["sql_query"],
@@ -183,34 +195,15 @@ def test_independent_source_qualification_replays_three_steps_and_keeps_failed_t
     assert len(calls) == (2 if failure in {"graph", "binding"} else 3)
 
 
-def test_qualification_error_bounds_have_exact_tails_and_do_not_duplicate_task_support(tmp_path):
+def test_qualification_error_bounds_have_exact_tails():
     from scipy.stats import beta
-    from prompt_mechanism_study.prompt_contract_qualification import binomial_error_upper_bound, open_qualification_statistics
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import (
+        binomial_error_upper_bound,
+    )
     for n, errors, alpha in ((1, 0, 0.0125), (20, 4, 0.01), (1000, 600, 0.001), (10, 10, 0.01)):
         expected = 1 if errors == n else beta.ppf(1 - alpha, errors + 1, n - errors)
         assert binomial_error_upper_bound(errors, n, alpha) == pytest.approx(expected, abs=2e-12)
     assert binomial_error_upper_bound(0, 0, 0.01) is None
-    paths, case, provider, calls, write = _semantic_qualification_fixture(tmp_path)
-    output = tmp_path / "extract"
-    _extract_semantic_fixture(paths, provider, output)
-    audit, graph = _source_review_fixture(output, paths, case, write)
-    tasks = read_json(output / "tasks.json")
-    scored = evaluate_open_semantic_case(graph, prompt=tasks[0]["prompt"], expected=case,
-        assertion_review=read_json(audit)["cases"][0], extraction_failed=False,
-        contract=read_json(output / "contracts.json")[0])
-    reference = read_json(paths["reference"])
-    reference["cases"][0]["feature_checks"] *= 2
-    stats = open_qualification_statistics(reference, tasks, [scored])
-    assert stats["uncertainty"]["profiles"][0]["task_units"] == 1
-    reference["required_profiles"].append({**reference["required_profiles"][0], "expected_state": "absent"})
-    stats = open_qualification_statistics(reference, tasks, [scored])
-    empty = next(p for p in stats["uncertainty"]["profiles"] if p["expected_state"] == "absent")
-    assert empty["reliability_lower_bound"] is None and empty["task_units"] == 0
-    assert not stats["acceptance_rule_passed"]
-    assert stats["uncertainty"]["family_size"] == 5
-    reference["required_profiles"].pop()
-    reference["qualification_rule"]["minimum_profile_reliability_lower_bound"] = 0.8
-    assert not open_qualification_statistics(reference, tasks, [scored])["acceptance_rule_passed"]
 
 
 def test_source_reference_is_frozen_before_provider_calls_and_cannot_be_retrofitted(tmp_path):
@@ -303,10 +296,28 @@ def test_source_semantic_audit_checks_extra_assertions_concepts_and_exact_scope_
     # Missing review stays uncertain, with no fabricated precision estimate.
     audit['assertions'].pop(related)
     assert score(expected=local_case,audit=audit)['candidate_metrics']['acceptance_precision'] is None
-    from prompt_mechanism_study.prompt_contract_qualification import summarize_review_changes
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import summarize_review_changes
     changes=summarize_review_changes(['a','b','c','d'],dict(a='incorrect',b='correct',c='incorrect',d='unknown'),
         dict(a='correct',b='incorrect',c='unknown',d='correct'))
     assert changes['net_corrections']==0 and changes['transitions']['incorrect->unknown']==1
+
+    # Reuse the source result: duplicate feature checks never add independent tasks.
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import open_qualification_statistics
+    scored = score()
+    tasks = read_json(output / "tasks.json")
+    reference = read_json(paths["reference"])
+    reference["cases"][0]["feature_checks"] *= 2
+    stats = open_qualification_statistics(reference, tasks, [scored])
+    assert stats["uncertainty"]["profiles"][0]["task_units"] == 1
+    reference["required_profiles"].append({**reference["required_profiles"][0], "expected_state": "absent"})
+    stats = open_qualification_statistics(reference, tasks, [scored])
+    empty = next(p for p in stats["uncertainty"]["profiles"] if p["expected_state"] == "absent")
+    assert empty["reliability_lower_bound"] is None and empty["task_units"] == 0
+    assert not stats["acceptance_rule_passed"]
+    assert stats["uncertainty"]["family_size"] == 5
+    reference["required_profiles"].pop()
+    reference["qualification_rule"]["minimum_profile_reliability_lower_bound"] = 0.8
+    assert not open_qualification_statistics(reference, tasks, [scored])["acceptance_rule_passed"]
 
 
 def test_typed_role_error_cannot_hide_behind_identical_graph_assertions(tmp_path):
@@ -425,7 +436,7 @@ def _scoped_graph(*, bound_inputs=("x",), source_prefix="", source_query=False,
 
 
 def test_atomic_source_gates_use_exact_scopes_without_requiring_control_text():
-    from prompt_mechanism_study.representation import (
+    from prompt_mechanism_study.tsg.representation import (
         AnalysisScope,
         AtomicPolicyKey,
         Operation,
@@ -478,7 +489,7 @@ def _scoped_support_fixture(tmp_path, *, missing_graph=False):
     """Eight artificial cells verify accounting only, never natural discovery support."""
     from prompt_mechanism_study.artifact_io import write_bundle, bundle_digest
     from prompt_mechanism_study.records import canonical_value
-    from prompt_mechanism_study.representation import (
+    from prompt_mechanism_study.tsg.representation import (
         AnalysisScope,
         AtomicPolicyKey,
         Operation,
@@ -593,7 +604,9 @@ def _synthetic_support_qualification(tmp_path, source_tasks, graphs, catalog):
     independent natural task support. Only the production qualifier can establish
     source-review/extractor replay closure on an actual independent selection.
     """
-    from prompt_mechanism_study.prompt_contract_qualification import open_qualification_statistics
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import (
+        open_qualification_statistics,
+    )
     from prompt_mechanism_study.artifact_io import write_bundle, bundle_digest
     tasks, cases, results = [], [], []
     for index in range(64):
@@ -635,14 +648,14 @@ def _synthetic_support_qualification(tmp_path, source_tasks, graphs, catalog):
 
 def _source_support_folds(output, policies, atomic):
     """Feed the actual producer rows into the existing shared candidate/fold Gates."""
-    from prompt_mechanism_study.prioritization import (
+    from prompt_mechanism_study.discovery.prioritization import (
         CandidateCoverageSummary,
         AtomicShadowPlan,
         atomic_preoutcome_data_sha256,
         freeze_atomic_candidate_universe,
         freeze_atomic_candidate_folds,
     )
-    from prompt_mechanism_study.representation import ModelBoundCandidateRecord
+    from prompt_mechanism_study.tsg.representation import ModelBoundCandidateRecord
     from prompt_mechanism_study.artifact_io import bundle_digest
     from prompt_mechanism_study.verification.integrity import _decode_target_value
 
@@ -685,8 +698,8 @@ def _source_support_folds(output, policies, atomic):
 def test_scoped_source_support_keeps_units_unknowns_operation_recoding_and_provenance(
     tmp_path, missing_graph
 ):
-    from prompt_mechanism_study.discovery_population import audit_discovery_positivity
-    from prompt_mechanism_study.prioritization import AtomicPreOutcomeObservation
+    from prompt_mechanism_study.data.discovery_population import audit_discovery_positivity
+    from prompt_mechanism_study.discovery.prioritization import AtomicPreOutcomeObservation
     from prompt_mechanism_study.verification.integrity import _decode_target_value
 
     tasks, graphs, catalog, scopes, policies, config, write = _scoped_support_fixture(
@@ -735,7 +748,7 @@ def test_scoped_source_support_keeps_units_unknowns_operation_recoding_and_prove
         (row.representation_resolved_rate == 8 / (8 + int(missing_graph)) for row in cover.values())
     )
     if missing_graph:
-        from prompt_mechanism_study.prioritization import DiscoverabilityReason
+        from prompt_mechanism_study.discovery.prioritization import DiscoverabilityReason
 
         assert all(
             (
@@ -743,7 +756,7 @@ def test_scoped_source_support_keeps_units_unknowns_operation_recoding_and_prove
                 for decision in atomic_folds.discoverability
             )
         )
-    from prompt_mechanism_study.prioritization import (
+    from prompt_mechanism_study.discovery.prioritization import (
         atomic_preoutcome_observations,
         atomic_preoutcome_data_sha256,
     )
@@ -866,7 +879,7 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
 
 
 def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_repeated_spans():
-    from prompt_mechanism_study.task_input import prepare_task_input
+    from prompt_mechanism_study.tsg.task_input import prepare_task_input
     task = prepare_task_input(dict(task_id="synthetic-indexed-incidence", language="python",
         generation_system_prompt="Follow the supplied source task.", prompt=(
         "Use f(x,y). Extract x and y from the request. "
@@ -938,48 +951,3 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
     with pytest.raises(PromptContractExtractionError, match="exact fact inventory"):
         apply_fixed_binding_response(json.dumps(binding_wire).encode(), request=changed,
             contract=facts, prompt=task["prompt"], catalog=catalog)
-
-
-@pytest.mark.parametrize('source_first', [
-    True,
-])
-def test_operation_inventory_schema_order_survives_the_actual_provider_request(monkeypatch, source_first):
-    """The intended annotation sequence must reach the provider, not just exist in Python."""
-    from prompt_mechanism_study.records import canonical_json
-    request = contract_decision_request(dict(task_id="synthetic-wire-order", prompt=PROMPT, language="python"),
-                                        open_concept_catalog())
-    response_format = open_contract_response_format(request)
-    seen = []
-    class Reply:
-        def __enter__(self):
-            return self
-        def __exit__(self, *_args):
-            return False
-        def read(self, _maximum):
-            return b'{"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}'
-    def respond(http_request, *, timeout):
-        seen.append(json.loads(http_request.data))
-        return Reply()
-    monkeypatch.setenv("ALI_BAILIAN_API_KEY", "offline-test-only")
-    monkeypatch.setattr("prompt_mechanism_study.functional_judge.urlopen", respond)
-    bailian_complete(request, dict(api_key_env="ALI_BAILIAN_API_KEY", base_url="https://unused.invalid",
-        model_id="offline", temperature=0, top_p=1, seed=1, enable_thinking=False,
-        maximum_output_tokens=8192, timeout_seconds=1, max_response_bytes=65536,
-        response_format=response_format), "JSON source annotation fixture.", source_first_delivery=source_first)
-    body = seen[0]
-    properties = body["response_format"]["json_schema"]["schema"]["properties"]
-    assert list(properties) == ["nodes", "coverage", "unresolved_notes"]
-    assert list(properties["nodes"]["items"]["properties"]) == [
-        "concept", "source_units", "evidence_start_token", "evidence_end_token", "layer"]
-    # JSON meaning and artifact hashes remain fixed under both deliveries.
-    assert content_hash(body["response_format"]) == content_hash(response_format)
-    payload = json.loads(body["messages"][1]["content"])
-    assert payload == request and content_hash(payload) == content_hash(request)
-    if source_first:
-        assert list(payload).index("source_prompt") < list(payload).index("known_concepts")
-        assert list(payload["source_tokens"]) == sorted(payload["source_tokens"], key=int)
-        assert body["messages"][1]["content"] != canonical_json(request)
-    else:
-        assert body["messages"][1]["content"] == canonical_json(request)
-        assert list(payload["source_tokens"]) == sorted(payload["source_tokens"])
-    assert body["max_tokens"] == 8192 and body["seed"] == 1

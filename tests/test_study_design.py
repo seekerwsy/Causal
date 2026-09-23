@@ -2,14 +2,14 @@ from __future__ import annotations
 from dataclasses import replace
 from functools import cache
 import pytest
-from prompt_mechanism_study.randomization import (
+from prompt_mechanism_study.experiment.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
     TargetRandomizationPlan,
     TargetTaskArmVariant,
     TargetTaskBundle,
     randomize_target_confirmation,
 )
-from prompt_mechanism_study.prioritization import (
+from prompt_mechanism_study.discovery.prioritization import (
     FixedSlotSource,
     PolicyTrack,
     SelectorSlot,
@@ -18,7 +18,7 @@ from prompt_mechanism_study.prioritization import (
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
 )
-from prompt_mechanism_study.discovery_population import (
+from prompt_mechanism_study.data.discovery_population import (
     CoverageAcquisitionMode,
     CoverageCellSupport,
     CoverageCensusPhase,
@@ -35,28 +35,24 @@ from prompt_mechanism_study.verification import (
     verify_target_power_simulation,
     verify_target_randomization,
 )
-from prompt_mechanism_study.study_design import (
+from prompt_mechanism_study.experiment.study_design import (
     ConfirmationFreeze,
     DiscoveryDesignFreeze,
     StudyFreezeIndex,
     validate_formal_budget_preflight,
 )
-from prompt_mechanism_study.study_planning import (
+from prompt_mechanism_study.experiment.study_planning import (
     ATOMIC_POWER_ARMS,
     FreezeArtifactReference,
-    PowerAndMarginMemo,
     ProviderBudgetCeilings,
     ProviderCallKind,
     ProviderRate,
     ProviderTokenCostBasis,
-    QualificationBundle,
     QualificationPlan,
     QualificationPlanPhase,
     QualificationProfileKind,
     QualificationProfileResult,
     QualificationStatus,
-    RQ1BaselineQualification,
-    RQ1BudgetQualification,
     RQ1BudgetDimensions,
     RQ1BudgetScenario,
     StudyDesignError,
@@ -71,7 +67,7 @@ from prompt_mechanism_study.study_planning import (
     simulate_target_power,
 )
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.representation import (
+from prompt_mechanism_study.tsg.representation import (
     AnalysisScope,
     AtomicPolicyKey,
     DataRole,
@@ -330,7 +326,7 @@ def _baseline_qualification(
 
 
 def _power_plan(track: PolicyTrack, *, family_size: int = 2, task_units: int = 10):
-    from prompt_mechanism_study.inference import TargetITTPlan
+    from prompt_mechanism_study.experiment.inference import TargetITTPlan
 
     probabilities = tuple(zip(ATOMIC_POWER_ARMS, (0.79, 0.01, 0.1, 0.1), strict=True))
     assumption = TargetPowerAssumption(
@@ -373,7 +369,7 @@ def _power_result(track, *, family_size=2, task_units=10):
 
 
 def test_explicit_power_replays_partial_overlap_realizations_and_task_identity(monkeypatch):
-    from prompt_mechanism_study import study_planning
+    from prompt_mechanism_study.experiment import study_planning
     from prompt_mechanism_study.verification.qualification import _independent_power_assignments
     plan = _power_plan(PolicyTrack.ATOMIC, family_size=3, task_units=14)
     support = tuple((j, f"task-{i + j * 7:02d}", "stratum-synthetic", i // 7)
@@ -860,7 +856,7 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
 
 
 def test_actual_power_failure_blocks_preflight_and_retains_failed_results(monkeypatch):
-    from prompt_mechanism_study import study_planning
+    from prompt_mechanism_study.experiment import study_planning
 
     budget = _accepted_budget(_qualification_manifest())
     dispatch, _, _, assignments = _dispatch_and_assignments(partial_atomic=True)

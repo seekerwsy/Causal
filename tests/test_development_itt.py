@@ -5,18 +5,37 @@ from copy import deepcopy
 from pathlib import Path
 import pytest
 from prompt_mechanism_study.artifact_io import read_json
-from prompt_mechanism_study.inference import (
+from prompt_mechanism_study.experiment.inference import (
     summarize_development_itt,
     summarize_development_sampling,
 )
-from prompt_mechanism_study.target_workflow import prepare_development_assignments, run_target_development, DEVELOPMENT_CODE_RESPONSE_FORMAT
-from prompt_mechanism_study.target_security_profiles import evaluate_target_security_profile, target_security_profile_producer_sha256
+from prompt_mechanism_study.target_workflow import (
+    prepare_development_assignments,
+    run_target_development,
+    DEVELOPMENT_CODE_RESPONSE_FORMAT,
+)
+from prompt_mechanism_study.measurement.target_security_profiles import (
+    evaluate_target_security_profile,
+    target_security_profile_producer_sha256,
+)
 from prompt_mechanism_study.verification.reporting import verify_development_result
-from prompt_mechanism_study.measurement import measure_generated_code, OracleStatus, FunctionalStatus
-from prompt_mechanism_study.task_input import prepare_task_input, input_evidence_text
-from prompt_mechanism_study.prompt_contract import task_context_contract_from_record, compile_task_context_contract
-from prompt_mechanism_study.prompt_tsg import prompt_tsg_record, prompt_tsg_from_record, FeatureScope, ScopedFeatureAssessment
-from prompt_mechanism_study.mechanisms import bind_task_hypothesis
+from prompt_mechanism_study.measurement.evaluate import (
+    measure_generated_code,
+    OracleStatus,
+    FunctionalStatus,
+)
+from prompt_mechanism_study.tsg.task_input import prepare_task_input, input_evidence_text
+from prompt_mechanism_study.tsg.prompt_contract import (
+    task_context_contract_from_record,
+    compile_task_context_contract,
+)
+from prompt_mechanism_study.tsg.prompt_tsg import (
+    prompt_tsg_record,
+    prompt_tsg_from_record,
+    FeatureScope,
+    ScopedFeatureAssessment,
+)
+from prompt_mechanism_study.discovery.mechanisms import bind_task_hypothesis
 from dataclasses import replace
 from prompt_mechanism_study.records import canonical_json
 
@@ -84,6 +103,8 @@ def _scoped_synthetic_plan():
 
 def test_exact_scopes_reach_actual_requests_and_independent_verification(tmp_path):
     plan = _scoped_synthetic_plan()
+    plan["analysis"].update(method="paired_task_effect_screen_v1", minimum_effect=.05,
+                            screening_task_units=len(plan["tasks"]), top_k=2)
     wrapped_assignments = prepare_development_assignments(plan)
     # Both accepted single-factor spellings must retain identical assignments
     # and pass independent saved-result verification.
@@ -174,3 +195,33 @@ def test_sampling_uncertainty_keeps_seeds_inside_tasks_and_retains_duplicate_cod
     assert result['contrasts'][0]['fixed_tasks_effect_mean'] is None
     cell = next(c for c in result['cells'] if c['task_unit_id'] == 'a' and c['arm'] == 'TARGET')
     assert cell['assigned_samples'] == 2 and cell['failed_samples'] == 1 and cell['secure_yield'] is None
+
+
+def test_effect_screen_keeps_weak_evidence_and_ranks_signed_coverage():
+    rows = [dict(assignment_id=f'{p}-{unit}-{arm}', task_unit_id=f't-{unit}', policy_id=p,
+                 arm=arm, seed=1, secure_code_yield=int(arm == 'TARGET') if p != 'harm' else int(arm == 'BASELINE'), error=None)
+            for p, n in [('small', 2), ('broad', 8), ('harm', 8)] for unit in range(n)
+            for arm in ('BASELINE', 'TARGET')]
+    plan = dict(method='paired_task_effect_screen_v1', scientific_claim_allowed=False,
+                generation_seeds=[1], bootstrap_seed=1, bootstrap_draws=100, alpha=.05,
+                minimum_effect=.05, screening_task_units=32, top_k=1, screening_control='BASELINE',
+                contrasts=[dict(policy_id=p, treatment='TARGET', control='BASELINE')
+                           for p in ('small', 'broad', 'harm')])
+    effects = {e['policy_id']: e for e in summarize_development_itt(rows, plan)}
+    assert effects['small']['adjusted_p_value'] > .05 and effects['small']['development_signal']
+    assert effects['broad']['screening_selected'] and not effects['small']['screening_selected']
+    assert effects['broad']['screening_score'] == .25
+    assert effects['harm']['effect'] == -1 and not effects['harm']['development_signal']
+    rows[0].update(error='transport failure', secure_code_yield=None)
+    effects = {e['policy_id']: e for e in summarize_development_itt(rows, plan)}
+    assert effects['small']['task_units'] == 2 and effects['small']['screening_score'] is None
+    assert effects['broad']['screening_selected']
+
+    from prompt_mechanism_study.verification.reporting import _exact_task_randomization_probability
+    from itertools import product
+    # Independent grouped convolution agrees with enumeration on signed/zero data.
+    differences = [-.5, 0., .5, 1., 1.]
+    expected = sum(abs(sum(sign*d for sign, d in zip(signs, differences))) >= abs(sum(differences))
+                   for signs in product((-1, 1), repeat=5)) / 32
+    assert _exact_task_randomization_probability(differences, 2) == expected
+    assert _exact_task_randomization_probability([1.] * 128, 1) == 2 / 2**128

@@ -1,7 +1,6 @@
 from __future__ import annotations
-from pathlib import Path
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
-from prompt_mechanism_study.curation import assemble_semantic_clusters
+from prompt_mechanism_study.data.curation import assemble_semantic_clusters
 
 
 def test_exact_prompt_and_frozen_lineage_are_the_only_merge_authorities(

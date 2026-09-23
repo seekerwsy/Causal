@@ -5,6 +5,70 @@ prioritization. It replaces predesignated development policies as the source of
 new study candidates. Existing frozen development plans retain their original
 meaning. The protocol remains `SPECIFIED_DRAFT`; no formal Discovery is activated.
 
+The bounded development ADD path uses source-supported records plus a frozen
+public security principle. It produces untested proposals, not qualified formal
+policies. REMOVE still requires an identifiable source requirement.
+
+The current path is `development_record_request` → `knowledge_add_model_request`
+→ `compile_knowledge_add_response` → `render_add_policy`. It uses one extraction
+and one proposal call, with no added reviewer or semantic repair loop:
+
+- Record checks preserve identifiable local defects as diagnostics. Only an
+  unreadable envelope or ambiguous IDs stop the whole task. Unlocated quotations
+  are diagnostic, not automatic exclusions or evidence of absence.
+- Each complete proposal supplies its own full-source expression, compatibility,
+  relevance and non-target invariant assessment. Principle-wide census answers
+  do not admit or veto it; missing census cells remain unknown. The program
+  derives the endpoint from the selected principle, without a duplicate model field.
+- Direct targets, support records, participants, both directions of independent
+  order, owned relations and attached requirements form conservative dependencies.
+  Composite containers belong to their members, not automatically to the whole
+  task. Global or uncertain-scope constraints cannot be waived. Defective necessary
+  records block only the candidate; other defects require a source-based unrelated
+  judgment. This remains a fallible semantic judgment, not a graph-distance proof.
+- The program renders the single binding's property, targets, conditions, scope
+  and time. Located source quotations distinguish occurrences sharing a predicate;
+  unlocated quotations are not copied as asserted source text. No separate LLM
+  edit is used. Empty conditions mean no additional condition, never unknown.
+  Rendering prevents a second divergent text but cannot certify the original binding.
+- Malformed proposals remain in their fixed slots; extra proposals cannot replace
+  them. Frozen calls are reused only with the same request, configuration and system
+  prompt. Measurement reuse also checks its request, image and worker identity.
+
+The [pilot](../data/method/local-full-chain-v1/automatic-policy-pilot/results.md)
+made 180 code generations on 15 exposed tasks and did not establish an automatic
+policy advantage; a demonstrated Flask measurement defect limits effect claims.
+The [repair validation](../data/method/local-full-chain-v1/automatic-policy-pilot/repair-validation/results.md)
+remeasured all 12 affected programs separately. The
+[code review and simplification](../data/method/local-full-chain-v1/automatic-policy-pilot/refactor-review.md)
+records subsequent program checks. All 32 saved record responses remain requestable,
+with six retaining structural diagnostics; this is not 32 correct graphs or policies.
+No new LLM accuracy/effect result follows from these changes. Frozen results and
+the strict source-backed formal compiler retain their original interpretation.
+
+Semantic normalization does not certify behavioral equivalence of intervention
+wordings. Preserve the exact assigned edit and request identity through hypothesis
+freeze and reporting, using the existing text/hash records. A shared complete
+requirement may have several realizations; any averaging over those realizations
+must be fixed before outcomes. Do not replace a frozen realization with a better
+paraphrase after seeing its code, or report the measured effect as a universal
+effect of every text expressing that abstract requirement. Generated code
+compliance and non-target functionality remain independently measured outcomes.
+
+For inspection, `source_records.record_projection` indexes the existing records
+without duplicating their bindings as a second edge table. It retains every
+record and its conditions, order, composition, coverage and metadata. The full
+source remains authoritative. Exact known generation templates can reuse their
+source-backed facts; custom instructions still require annotation. This is a
+representation and display simplification, not evidence of improved extraction.
+
+The [equivalent-policy development check](../data/method/local-full-chain-v1/equivalent-policy-binding/README.md)
+completed a comparison of two global and two operation-bound expressions of the same complete
+requirement. Its author-reviewed partial TSGs, new authored tasks and five arms
+do not replace the formal four-arm protocol, activate context inference, or
+establish automatic TSG accuracy. The bound-wording upgrade failed its prospective
+budget rule and stops; the source-record view and separate ADD provenance remain.
+
 The chain is:
 
 ```text

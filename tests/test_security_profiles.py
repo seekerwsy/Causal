@@ -3,13 +3,31 @@ import json
 from pathlib import Path
 import pytest
 from prompt_mechanism_study.artifact_io import read_json
-from prompt_mechanism_study.eligibility import (
+from prompt_mechanism_study.data.eligibility import (
     EligibilityError,
     qualify_target_security_profiles,
 )
-from prompt_mechanism_study.target_security_profiles import (
+from prompt_mechanism_study.measurement.target_security_profiles import (
     evaluate_target_security_profile,
 )
+
+
+def test_xml_external_entity_endpoint_keeps_defaults_and_file_contents_unknown() -> None:
+    cases = [
+        ("import xml.etree.ElementTree as ET\nET.fromstring(data)", "secure"),
+        ("from lxml import etree\netree.parse('resources/c.xml')", "unknown"),
+        ("from lxml import etree\np=etree.XMLParser(resolve_entities=True)\netree.fromstring(data,p)", "insecure"),
+        ("from lxml import etree\np=etree.XMLParser(resolve_entities=False)\netree.fromstring(data,p)", "secure"),
+        ("from lxml import etree\np=etree.XMLParser(resolve_entities=False,load_dtd=True)\netree.fromstring(data,p)", "insecure"),
+        ("from lxml import etree\np=etree.XMLParser(resolve_entities=False)\nmutate(p)\netree.fromstring(data,p)", "unknown"),
+        ("from defusedxml.ElementTree import fromstring\nfromstring(data)", "secure"),
+        ("def parse(data):\n    return data", "unknown"),
+    ]
+    for code, expected in cases:
+        assert evaluate_target_security_profile(code, "python.cwe611.xml_external_entity.v2")["security_label"] == expected
+    # Historical results must retain their original interpretation.
+    assert evaluate_target_security_profile(cases[0][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "insecure"
+    assert evaluate_target_security_profile(cases[1][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "secure"
 
 
 @pytest.mark.parametrize('body, expected', [
@@ -55,10 +73,8 @@ def test_scoped_qualification_does_not_certify_unused_profiles(tmp_path: Path) -
                 profile_ids=scope,
             )
 
-
-def test_scoped_qualification_keeps_missing_unknown_and_errors_blocking(tmp_path: Path) -> None:
+    # The same admitted profile still needs unknown cases and correct measurements.
     root = Path.cwd()
-    profile = "python.cwe89.sql_values.v1"
     cases = [r for r in read_json(Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"))
              if r["profile_id"] == profile]
     # Qualification case files are required to remain inside the declared root.
