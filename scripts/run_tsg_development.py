@@ -28,8 +28,7 @@ def run(base, output):
     assert conditions == ['single']
     assert plan['fresh_complete'] and plan['atomic_source_records']
     assert not any(any(k.startswith('cached_') for k in row) for row in rows)
-    inventory_only=plan.get('obligation_inventory_only', False)
-    assert (1 if inventory_only else 5)*len(rows)<=plan['maximum_provider_calls']
+    assert 5*len(rows)<=plan['maximum_provider_calls']
     shared={};reuse=[]
     original_prompt=read_json(inputs/'instructions.json').get('stage_system_prompt') or Path('data/method/open-tsg-annotator-v15.md').read_text(encoding='utf-8').strip()
     def deliver(request,config,prompt,continuation=(), *, share=False):
@@ -101,30 +100,6 @@ def run(base, output):
         shared.clear()
         for condition_index,condition in enumerate(order):
             before=len(calls)
-            if inventory_only:
-                # Component diagnostic only: no graph, repair, or semantic approval.
-                from prompt_mechanism_study.tsg.source_codec import contract_decision_request
-                from prompt_mechanism_study.tsg.source_records import (
-                    record_request,
-                    obligation_inventory_request,
-                    obligation_inventory_response_format,
-                    validate_obligation_inventory,
-                )
-                request=obligation_inventory_request(
-                    record_request(contract_decision_request(row['task'],catalog)), task=row['task'])
-                config={**evaluators[name], 'response_format':obligation_inventory_response_format(request)}
-                record=dict(task_id=row['task']['task_id'], condition=condition,
-                    inventory=None, error_type=None, error_message=None)
-                try:
-                    raw=complete(request,config,instruction)
-                    value=json.loads(raw)
-                    record['inventory']=validate_obligation_inventory(value,request=request)
-                except Exception as error:
-                    record.update(error_type=type(error).__name__,error_message=str(error))
-                results.append(record)
-                write_bundle(output/'cases'/f'{case_index+1:02d}-{condition}',{'result.json':record})
-                print(f'CASE {case_index+1}: {record["error_type"] or "inventory retained"}',flush=True)
-                continue
             graph_attempt=_attempt_source_graph(row['task'],catalog=catalog,evaluator=evaluators[name],
                 annotator_prompt=original_prompt,review_status='development_exposed',provider=complete)
             # Candidate scopes follow the graph; source semantics are immutable across this boundary.

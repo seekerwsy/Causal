@@ -9,10 +9,8 @@ from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
-    apply_fixed_binding_response,
     contract_decision_request,
     contract_from_response,
-    fixed_binding_request,
 )
 from prompt_mechanism_study.tsg.prompt_contract_extract import _attempt_task_contract
 from prompt_mechanism_study.tsg.scope_assessment import fixed_scope_request
@@ -136,13 +134,10 @@ def test_declared_role_domains_preserve_unknown_and_separate_expression(role, ca
         feature_role_domains={'sql.binding': dict(applicable_roles=['value_input'],
             inapplicable_roles=['identifier_input', 'resource', 'destination'], caller_supplied_only=caller_required)})
     catalog_from_record(catalog)
-    wire = indexed_annotation(contract_decision_request(task, catalog), canonical)
-    facts, binding_request, response = _bindings(task, catalog, canonical, wire)
-    next(r for r in response['operation_roles'] if r['subject'] == 'fact.2')['role'] = role
-    bound = apply_fixed_binding_response(json.dumps(response).encode(), request=binding_request,
-        contract=facts, prompt=task['prompt'], catalog=catalog)
+    bound = _bound_records(task, catalog, canonical, roles={'x': role})
+    input_id = next(f['local_id'] for f in bound.facts if f['semantic_id'] == 'sql.input')
     request = fixed_scope_request(bound, prompt=task['prompt'], catalog=catalog)
-    key, scope = next((k, s) for k, s in request['scopes'].items() if s['subjects'] == ['fact.2'])
+    key, scope = next((k, s) for k, s in request['scopes'].items() if s['subjects'] == [input_id])
     assert scope['role_domain_check']['applicability'] == expected
     schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
     assert set(schema[key]['properties']) == {'expression', 'requirements', 'applicability', 'applicability_rationale'}
@@ -153,30 +148,36 @@ def test_declared_role_domains_preserve_unknown_and_separate_expression(role, ca
         return apply_fixed_scope_response(json.dumps(dict(states=rows, unresolved_notes=[])).encode(),
             request=request, contract=bound, prompt=task['prompt'], catalog=catalog)
     result = apply(answers)
-    actual = next(r for r in result.feature_states if r['subjects'] == ['fact.2'])['state']
+    actual = next(r for r in result.feature_states if r['subjects'] == [input_id])['state']
     assert actual == ('absent' if expected == 'applicable' else expected)
     # Even a definite value-input role cannot certify an unstated SQL context
     # or a required caller origin. Concept membership cannot override this.
     answers[key]['applicability'] = 'unresolved'
     answers[key]['applicability_rationale'] = 'The source leaves the required operation context or caller origin unspecified.'
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == ['fact.2'])['state'] == 'unresolved'
+    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     answers[key]['applicability'] = expected
     answers[key]['expression'] = 'unresolved'
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == ['fact.2'])['state'] == 'unresolved'
+    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     answers[key]['expression'] = 'not_expressed'
     answers[key]['applicability'] = 'applicable' if expected != 'applicable' else 'invalid'
     contradiction = apply(answers)
-    assert next(r for r in contradiction.feature_states if r['subjects'] == ['fact.2'])['state'] == 'unresolved'
+    assert next(r for r in contradiction.feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     assert any('unresolved_fixed_scope' in note for note in contradiction.unresolved_notes)
     answers.pop(key)
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == ['fact.2'])['state'] == 'unresolved'
+    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     assert result.facts == bound.facts and result.relations == bound.relations
 
 
-def _bindings(task, catalog, canonical, wire):
-    facts = _compile(task, catalog, wire)
-    request = fixed_binding_request(facts, prompt=task["prompt"], catalog=catalog)
-    return facts, request, indexed_annotation(request, canonical)
+def _bound_records(task, catalog, canonical, *, roles):
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.tsg.source_records import record_request, compile_records
+    request = record_request(contract_decision_request(task, catalog))
+    records = record_annotation(request, canonical)
+    for operation in records['operations']:
+        for claim in operation['inputs']:
+            claim['role'] = roles.get(claim['subject'], claim['role'])
+    return compile_records(records, request=request, task=task, catalog=catalog,
+        annotator_id='source-authored-offline-fixture', review_status='development_exposed')
 
 
 def _property_scope_fixture(kind, *, conditional=False):
@@ -218,14 +219,8 @@ def _property_scope_fixture(kind, *, conditional=False):
         for source, edge_type, target in [('length','constrains','q'), ('length','constrains','x'), ('safe','conditions','length')]:
             canonical['edges'].append(dict(source_node_local_id=source, target_node_local_id=target,
                 edge_type=edge_type, evidence_text=conditional_text, occurrence=1))
-    wire = indexed_annotation(contract_decision_request(task, catalog), canonical)
-    facts, binding_request, binding = _bindings(task, catalog, canonical, wire)
-    ids = {f['semantic_id']: f['local_id'] for f in facts.facts}
-    for row in binding['operation_roles']:
-        if row['role'] != 'result':
-            row['role'] = 'resource' if row['subject'] == ids['database'] else 'value_input'
-    bound = apply_fixed_binding_response(json.dumps(binding).encode(), request=binding_request,
-        contract=facts, prompt=task['prompt'], catalog=catalog)
+    bound = _bound_records(task, catalog, canonical, roles={'db': 'resource', 'x': 'value_input'})
+    ids = {f['semantic_id']: f['local_id'] for f in bound.facts}
     request = fixed_scope_request(bound, prompt=task['prompt'], catalog=catalog)
     states = {}
     for key, scope in request['scopes'].items():
@@ -779,15 +774,14 @@ def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider(
     assert not scopes()['scopes']
 
 
-def test_fixed_generation_facts_are_injected_once_and_never_become_model_binding_rows():
+def test_fixed_generation_facts_are_injected_once_and_never_redeclared_by_model():
     task, catalog, canonical, request, wire = _source_fixture()
     template_ids = {n["local_id"] for n in request["fixed_template"]["nodes"]}
     assert len(template_ids) == 5 and all("local_id" not in n for n in wire["nodes"])
-    facts, binding, _ = _bindings(task, catalog, canonical, wire)
+    facts = _compile(task, catalog, wire)
     assert template_ids <= {f["local_id"] for f in facts.facts}
     assert len(facts.facts) == len(wire["nodes"]) + 5
     assert len(facts.relations) == 4
-    assert not template_ids & set(binding["binding_rows"])
     assert all(facts.source_inventory["layers"][key] == "generation" for key in template_ids)
 
     # Same generation layer does not imply the same direct target. Keep the

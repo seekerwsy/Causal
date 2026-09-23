@@ -146,16 +146,6 @@ def indexed_annotation(request, canonical):
 
     template = request.get("fixed_template", {})
     template_ids = {n["concept_id"]: n["local_id"] for n in template.get("nodes", [])}
-    if request["request_kind"] == "source_only_fixed_bindings":
-        template_ids = {f["concept_id"]: f["local_id"] for f in request["facts"]
-                        if f["local_id"].startswith("template.")}
-    aliases = {}
-    if request["request_kind"] == "source_only_fixed_bindings":
-        for n in canonical["nodes"]:
-            matches = [f["local_id"] for f in request["facts"] if f["concept_id"] == n["concept_id"]
-                       and f["evidence_text"] == n["evidence_text"] and f["occurrence"] == n.get("occurrence", 1)]
-            aliases[n["local_id"]] = template_ids.get(n["concept_id"], matches[0] if len(matches) == 1 else n["local_id"])
-
     if request["request_kind"] == "source_only_fact_inventory":
         coverage, nodes = {}, []
         concepts = {c["concept_id"]: c for c in canonical["concepts"]}
@@ -173,29 +163,7 @@ def indexed_annotation(request, canonical):
                                  reason="Source-authored synthetic fixture segment disposition.")
         return dict(nodes=nodes, coverage=coverage,
                     unresolved_notes=deepcopy(canonical["unresolved_notes"]))
-    assert request["request_kind"] == "source_only_fixed_bindings"
-    result = dict(bindings={key: {column: [] for column in columns}
-                           for key, columns in request["binding_rows"].items()},
-                  operation_roles=[dict(operation=aliases[r["operation"]], subject=aliases[r["subject"]],
-                                        role=r["role"], **evidence(r)) for r in _authored_roles(canonical)],
-                  unit_impacts={key: dict(effect="global", operations=[], complete=True,
-                      reason="Complete source-authored synthetic fixture; no localized exemption.")
-                      for key in request["source_inventory"]["source_units"]}, unresolved_notes=[])
-    kinds = {f["local_id"]: f["node_type"] for f in request["facts"]}
-    for edge in canonical["edges"]:
-        source_id, target_id, kind = (edge[key] for key in ("source_node_local_id", "target_node_local_id", "edge_type"))
-        source_id, target_id = aliases[source_id], aliases[target_id]
-        if source_id.startswith("template."):
-            continue  # The source-authored template edges were already injected.
-        if kind in {"used_by", "produces"}:
-            continue  # The authored local roles now supply this incidence once.
-        elif kind == "precedes":
-            key, column, target = source_id, "precedes", target_id
-        else:
-            key, target = source_id, target_id
-            column = "operations" if kinds[target_id] == "task_operation" else "subjects" if kind == "constrains" else "requirements"
-        result["bindings"][key][column].append(dict(target=target, **evidence(edge)))
-    return result
+    raise AssertionError("unsupported fixture annotation format")
 
 
 def record_annotation(request, canonical):
@@ -217,7 +185,16 @@ def record_annotation(request, canonical):
         # Cross-sentence authored spans use all their source premises. The anchor
         # itself must fit in one unit; the complete premises stay in source_units.
         value = row['evidence_text']
-        unit = next((k for k,u in request['source_units'].items() if value in u['evidence_text']), None)
+        source = request['source_prompt']
+        position = -1
+        for _ in range(row.get('occurrence', 1)):
+            position = source.index(value, position + 1)
+        def contains(unit):
+            start = -1
+            for _ in range(unit['occurrence']):
+                start = source.index(unit['evidence_text'], start + 1)
+            return start <= position and position + len(value) <= start + len(unit['evidence_text'])
+        unit = next((k for k,u in request['source_units'].items() if contains(u)), None)
         if unit is None:
             unit = next(k for k,u in request['source_units'].items() if u['evidence_text'] in value)
             value = request['source_units'][unit]['evidence_text']

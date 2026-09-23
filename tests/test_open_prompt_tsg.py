@@ -21,9 +21,6 @@ from prompt_mechanism_study.tsg.source_codec import (
     contract_decision_request,
     contract_from_response,
     open_contract_response_format,
-    fixed_binding_request,
-    fixed_binding_response_format,
-    apply_fixed_binding_response,
 )
 from prompt_mechanism_study.tsg.scope_assessment import (
     apply_fixed_scope_response,
@@ -853,21 +850,6 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
     scopes = fixed_scope_request(contract, prompt=source, catalog=catalog)["scopes"]
     assert {tuple(s["conditions"]) for s in scopes.values()} == {(), ("c",)}
     assert all("lang" not in s["conditions"] for s in scopes.values())
-    inventory = replace(contract, relations=(), source_inventory=authored_source_inventory(source, raw))
-    binding_request = fixed_binding_request(inventory, prompt=source, catalog=catalog)
-    assert set(binding_request["binding_rows"]["lang"]) == {"operations", "subjects"}
-    assert set(binding_request["binding_rows"]["c"]) == {"operations", "requirements"}
-    assert "x" not in binding_request["binding_rows"]  # Objects cannot emit requirements or conditions.
-    wire = indexed_annotation(binding_request, raw)
-    bound = apply_fixed_binding_response(json.dumps(wire).encode(), request=binding_request,
-        contract=inventory, prompt=source, catalog=catalog)
-    assert {(r["source"], r["edge_type"], r["target"]) for r in bound.relations} == {
-        (r["source"], r["edge_type"], r["target"]) for r in contract.relations}
-    broken_wire = deepcopy(wire)
-    broken_wire["bindings"]["c"]["requirements"][0]["evidence_end_token"] = 0
-    with pytest.raises(PromptContractExtractionError, match="source-token"):
-        apply_fixed_binding_response(json.dumps(broken_wire).encode(), request=binding_request,
-            contract=inventory, prompt=source, catalog=catalog)
     invalid = deepcopy(raw)
     invalid["edges"][1]["edge_type"] = "conditions"
     with pytest.raises(PromptTSGError, match="condition binding"):
@@ -914,15 +896,20 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
                                       annotator_id="synthetic-offline", review_status="development_exposed")
     facts = compile_wire(wire)
     assert facts.relations == ()
-    binding = fixed_binding_request(facts, prompt=task["prompt"], catalog=catalog)
-    binding_wire = indexed_annotation(binding, raw_graph)
-    contract = apply_fixed_binding_response(json.dumps(binding_wire).encode(), request=binding,
-        contract=facts, prompt=task["prompt"], catalog=catalog)
-    assert contract.facts == facts.facts
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.tsg.source_records import record_request, compile_records
+    records_request = record_request(request)
+    records = record_annotation(records_request, raw_graph)
+    def compile_bound(value):
+        return compile_records(value, request=records_request, task=task, catalog=catalog,
+            annotator_id="synthetic-offline", review_status="development_exposed")
+    contract = compile_bound(records)
+    ids = {f["evidence_text"]: f["local_id"] for f in contract.facts}
     assert {(r["source"], r["edge_type"], r["target"]) for r in contract.relations} == {
-        ("fact.1", "produces", "fact.4"), ("fact.1", "produces", "fact.5"),
-        ("fact.4", "used_by", "fact.2"), ("fact.5", "used_by", "fact.3")}
-    later = next(f for f in contract.facts if f["local_id"] == "fact.6")
+        (ids["Extract x and y from the request"], "produces", ids["x"]),
+        (ids["Extract x and y from the request"], "produces", ids["y"]),
+        (ids["x"], "used_by", ids["query A"]), (ids["y"], "used_by", ids["query B"])}
+    later = next(f for f in contract.facts if f["semantic_id"] == "result")
     assert later["evidence_text"] == "the value" and later["occurrence"] == 2
     graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
     assert next(n for n in graph.nodes if n.semantic_id == "result").evidence_start == task["prompt"].rindex("the value")
@@ -930,24 +917,15 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
     damaged["nodes"][3]["evidence_end_token"] = len(request["source_tokens"]) + 1
     broken = compile_wire(damaged)
     assert "fact.4" not in {f["local_id"] for f in broken.facts}
-    next_binding = fixed_binding_request(broken, prompt=task["prompt"], catalog=catalog)
-    assert "fact.4" not in fixed_binding_response_format(next_binding)["json_schema"]["schema"]["properties"]["operation_roles"]["items"]["properties"]["subject"].get("enum", [])
     assert any("unbound_source_token_span: fact.4" in note for note in broken.unresolved_notes)
     with pytest.raises(PromptContractExtractionError, match="fields"):
         compile_wire(raw_graph)  # Frozen historical responses use their captured implementation.
-    for bad_target in ["fact.2", "undefined"]:
-        bad = deepcopy(binding_wire)
-        bad["operation_roles"][0]["subject"] = bad_target
-        with pytest.raises(PromptTSGError, match="endpoint"):
-            apply_fixed_binding_response(json.dumps(bad).encode(), request=binding,
-                contract=facts, prompt=task["prompt"], catalog=catalog)
-    missing = deepcopy(binding_wire)
-    del missing["bindings"]["fact.3"]
-    with pytest.raises(PromptContractExtractionError, match="incomplete"):
-        apply_fixed_binding_response(json.dumps(missing).encode(), request=binding,
-            contract=facts, prompt=task["prompt"], catalog=catalog)
-    changed = deepcopy(binding)
-    changed["facts"][0]["evidence_text"] = "invented"
-    with pytest.raises(PromptContractExtractionError, match="exact fact inventory"):
-        apply_fixed_binding_response(json.dumps(binding_wire).encode(), request=changed,
-            contract=facts, prompt=task["prompt"], catalog=catalog)
+    for bad_target in ["a", "undefined"]:
+        bad = deepcopy(records)
+        bad["operations"][0]["results"][0]["subject"] = bad_target
+        with pytest.raises(PromptContractExtractionError):
+            compile_bound(bad)
+    missing = deepcopy(records)
+    missing["unit_impacts"].pop(next(iter(missing["unit_impacts"])))
+    with pytest.raises(PromptContractExtractionError):
+        compile_bound(missing)

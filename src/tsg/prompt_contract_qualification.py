@@ -628,9 +628,6 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         fixed_scope_response_format,
     )
     from prompt_mechanism_study.tsg.source_codec import (
-        apply_fixed_binding_response,
-        fixed_binding_request,
-        fixed_binding_response_format,
         PromptContractExtractionError,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
