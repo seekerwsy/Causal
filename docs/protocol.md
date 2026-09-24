@@ -69,10 +69,13 @@ External CWE labels cannot replace source evidence or decide extraction scope.
 
 The [TSG workflow](tsg-workflow-stability.md) defines the current extraction path:
 source records with participants/composition/conditions/targets, mechanical checks,
-one ordinary source review with at most one local semantic patch, then deterministic
-compilation. The existing bounded mechanical repair limit is unchanged. There is
+one ordinary source review with at most one complete-record revision, then direct
+compilation. The revision uses the extraction schema and original source; it does
+not use field-level patches, alias merging or silent removal of invalid facts. The existing bounded mechanical repair limit is unchanged. There is
 no additional default readback or detailed binding reviewer. Debug readings remain
-available; a positive LLM review is not an independent semantic reference.
+available; a positive LLM review is not an independent semantic reference. A revised
+record set passing structural checks is not certified semantically correct; before/after
+records and the review are saved for independent evaluation.
 
 The owner-approved 2026-09-25 revision limits program checks to structural
 validity and faithful compilation: field/type validity, identities, references,
@@ -88,7 +91,7 @@ not a semantic support judgment.
 
 Each candidate's complete binding is assessed by the model against the full
 source. Independent reference evaluation, not acceptance by the parser, measures
-semantic correctness. The existing single review/patch path remains; no reviewer
+semantic correctness. The single review/revision path remains; no reviewer
 or new rule engine is introduced. Frozen inputs using the retired catalog rules
 must use their captured implementation, not silently discard those rules.
 

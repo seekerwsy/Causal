@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 import re
 from copy import deepcopy
 from dataclasses import replace
-from prompt_mechanism_study.tsg.prompt_contract import open_contract_from_response, OpenTaskContract
+from prompt_mechanism_study.tsg.prompt_contract import OpenTaskContract
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_template_facts
 
 
@@ -52,13 +51,11 @@ def _has_fixed_concept_layers(request: Mapping[str, Any]) -> bool:
             and all("layer" in concept for concept in known.values()))
 
 
-def source_fact_schema(request: Mapping[str, Any], *, group: str | None = None,
-                       quoted: bool = False, evidence_first: bool = False) -> dict[str, Any]:
+def source_fact_schema(request: Mapping[str, Any], *, group: str) -> dict[str, Any]:
     """Define a fact once; response adapters add their own references/participants."""
     text = {"type": "string"}
     def row(properties):
         return dict(type="object", additionalProperties=False, properties=properties, required=list(properties))
-    token = dict(type="integer", minimum=1, maximum=len(_source_tokens(request["source_prompt"])))
     concept = dict(type="string", description="Exact supplied or declared concept ID whose complete definition the source entails. Each requirement node expresses one atomic requirement, never a bundle of independently changeable requirements.")
     if request["concept_policy"] == "FROZEN" and request["known_concepts"]:
         concept["enum"] = list(request["known_concepts"])
@@ -66,16 +63,10 @@ def source_fact_schema(request: Mapping[str, Any], *, group: str | None = None,
         concept=row(dict(concept_id=text, node_type=dict(type="string", enum=request["allowed_node_types"]), definition=text)))
     citation_fields = dict(source_units=dict(type="array", minItems=1,
         items=dict(type="string", enum=list(request["source_units"]))),
-        evidence_start_token=token, evidence_end_token=token,
         layer=dict(type="string", enum=["generation", "runtime", "unresolved"]))
     if _has_fixed_concept_layers(request):
         del citation_fields["layer"]
-    if quoted:
-        citation_fields.pop("evidence_start_token")
-        citation_fields.pop("evidence_end_token")
-        fields = dict(**source_citation_schema(request), **citation_fields, **meaning)
-    else:
-        fields = dict(**citation_fields, **meaning) if evidence_first else dict(**meaning, **citation_fields)
+    fields = dict(**source_citation_schema(request), **citation_fields, **meaning)
     if group is not None:
         kinds = _INVENTORY_GROUPS[group]
         if request["concept_policy"] == "FROZEN":
@@ -110,19 +101,6 @@ def source_coverage_schema(request: Mapping[str, Any]) -> dict[str, Any]:
 def fact_layer(fact: Mapping[str, Any], request: Mapping[str, Any]) -> str | None:
     """Read the declared layer; a frozen concept may supply it without a response field."""
     return fact.get("layer", request["known_concepts"].get(fact.get("concept_id"), {}).get("layer"))
-
-
-def open_contract_response_format(request: Mapping[str, Any], *, evidence_first: bool = False) -> dict[str, Any]:
-    """Token-indexed inventory adapter; current records use source_fact_schema directly."""
-    properties = {
-        "nodes": dict(type="array", items=source_fact_schema(request, evidence_first=evidence_first)),
-        "coverage": source_coverage_schema(request),
-        "unresolved_notes": dict(type="array", items=dict(type="string")),
-    }
-    if request["concept_policy"] == "FROZEN" and not request["known_concepts"]:
-        properties["nodes"]["maxItems"] = 0
-    schema = dict(type="object", additionalProperties=False, properties=properties, required=list(properties))
-    return dict(type="json_schema", json_schema=dict(name="source_fact_inventory", strict=True, schema=schema))
 
 
 def _source_tokens(prompt: str) -> list[re.Match[str]]:
@@ -197,7 +175,7 @@ def _quoted_inventory_citation(row: Mapping[str, Any], request: Mapping[str, Any
 
 
 def quoted_source_request(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Source context shared by quoted-record extraction and historical adapters."""
+    """Prepare source quotes for the record interface; positions stay internal."""
     if (request.get("request_kind") != "source_only_fact_inventory"
         or request.get("concept_policy") not in {"FROZEN", "DEVELOPMENT_OPEN"}):
         raise PromptContractExtractionError("grouped inventory requires a source-fact request")
@@ -259,82 +237,6 @@ def _indexed_citation(prompt: str, tokens: list, row: Mapping[str, Any]) -> dict
     left, right = tokens[start - 1].start(), tokens[end - 1].end()
     quote = prompt[left:right]
     return dict(evidence_text=quote, occurrence=_literal_starts(prompt, quote).index(left) + 1)
-
-
-def _indexed_facts_response(value: Any, *, prompt: str, request: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Allocate IDs after source extraction; the response has no self-references."""
-    if (not isinstance(value, dict) or set(value) - {"operation_roles"} != {"nodes", "coverage", "unresolved_notes"}
-        or any(not isinstance(value[key], list) for key in ("nodes", "unresolved_notes"))):
-        raise PromptContractExtractionError("source fact inventory fields are invalid")
-    if not isinstance(value["coverage"], dict) or set(value["coverage"]) != set(request["source_units"]):
-        raise PromptContractExtractionError("source inventory coverage is incomplete")
-    template = request["fixed_template"]
-    template_concepts = {row["concept_id"] for row in template["concepts"]}
-    frozen = request["concept_policy"] == "FROZEN"
-    fixed_layers = _has_fixed_concept_layers(request)
-    tokens, nodes, notes, layers = _source_tokens(prompt), [], list(value["unresolved_notes"]), {}
-    coverage, concepts = {}, {}
-    for key, decision in value["coverage"].items():
-        if not isinstance(decision, dict) or set(decision) != {"status", "reason"}:
-            raise PromptContractExtractionError("source coverage fields are invalid")
-        coverage[key] = dict(**decision, facts=[])
-    for index, row in enumerate(value["nodes"], 1):
-        fields = {"concept_id" if frozen else "concept", "source_units", "evidence_start_token", "evidence_end_token"}
-        if not fixed_layers:
-            fields.add("layer")
-        if (not isinstance(row, dict) or set(row) != fields
-            or not fixed_layers and row["layer"] not in {"generation", "runtime", "unresolved"}
-            or not isinstance(row["source_units"], list) or not row["source_units"]
-            or any(not isinstance(key, str) or key not in coverage for key in row["source_units"])
-            or len(set(row["source_units"])) != len(row["source_units"])):
-            raise PromptContractExtractionError("indexed fact fields are invalid")
-        if not frozen:
-            c = _inventory_concept(row, request)
-            if c["concept_id"] in concepts and concepts[c["concept_id"]] != c:
-                raise PromptContractExtractionError("inline concept definitions disagree")
-            concepts[c["concept_id"]] = c
-        concept_id = row["concept_id"] if frozen else c["concept_id"]
-        if fixed_layers and (not isinstance(concept_id, str) or concept_id not in request["known_concepts"]):
-            raise PromptContractExtractionError("indexed fact has an unknown frozen concept")
-        if concept_id in template_concepts:
-            raise PromptContractExtractionError("fixed generation-template facts must not be redeclared")
-        local_id = f"fact.{index}"
-        layers[local_id] = request["known_concepts"][concept_id]["layer"] if fixed_layers else row["layer"]
-        try:
-            citation = _indexed_citation(prompt, tokens, row)
-        except PromptContractExtractionError:
-            notes.append(f"unbound_source_token_span: {local_id}; invalid inclusive token endpoints.")
-            citation = dict(evidence_text="", occurrence=1)
-        nodes.append(dict(local_id=local_id, concept_id=concept_id, **citation))
-        for key in row["source_units"]:
-            coverage[key]["facts"].append(local_id)
-    for decision in coverage.values():
-        if decision["status"] == "represented" and not decision["facts"]:
-            raise PromptContractExtractionError("represented source coverage requires an additional submitted fact")
-        # Occupancy is observable from the submitted facts. This does not add a
-        # fact or resolve a reported semantic gap; binding still reviews each
-        # unit's completeness independently against the source.
-        if (decision["status"] == "no_task_fact" and decision["facts"]
-            and isinstance(decision["reason"], str) and decision["reason"].strip()):
-            decision["status"] = "represented"
-            decision["reason"] = (
-                "Coverage label normalized from no_task_fact to represented because "
-                "this unit owns submitted facts. Original annotation: " + decision["reason"])
-    layers.update({row["local_id"]: "generation" for row in template["nodes"]})
-    roles = value.get("operation_roles", [])
-    if not isinstance(roles, list):
-        raise PromptContractExtractionError("inventory operation roles must be an array")
-    converted_roles = []
-    for row in roles:
-        if not isinstance(row, dict) or set(row) != {"operation", "subject", "role", "evidence_start_token", "evidence_end_token"}:
-            raise PromptContractExtractionError("inventory operation role fields are invalid")
-        converted_roles.append({**{k: row[k] for k in ("operation", "subject", "role")},
-            **_indexed_citation(prompt, tokens, row)})
-    metadata = dict(source_units={key: {k: row[k] for k in ("evidence_text", "occurrence")}
-                    for key, row in request["source_units"].items()}, coverage=coverage, layers=layers, operation_roles=converted_roles)
-    concept_rows = [*template["concepts"], *concepts.values()] if not frozen else []
-    return (dict(concepts=concept_rows, nodes=[*template["nodes"], *nodes], edges=template["edges"],
-                 concept_states=[], feature_states=[], unresolved_notes=notes), metadata)
 
 
 def _role_context_citation(prompt: str, tokens: list, row: Mapping[str, Any],
@@ -415,12 +317,10 @@ def _represented_unit_operations(contract: OpenTaskContract) -> dict[str, set[st
 
 
 def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the active source-inventory or atomic-record response schema."""
+    """Return the active atomic-record response schema."""
     if request.get("request_kind") == "source_only_atomic_records":
         from prompt_mechanism_study.tsg.source_records import record_response_format
         return record_response_format(request)
-    if request.get("request_kind") == "source_only_fact_inventory":
-        return open_contract_response_format(request)
     raise PromptContractExtractionError("unsupported source response request")
 
 
@@ -458,41 +358,6 @@ def contract_decision_request(
         "allowed_node_types": [value for value in catalog["node_types"] if value != "task"],
         "fixed_template": template,
         "source_units": _source_units(task, fixed_template=bool(template["nodes"])),
-        "annotation_phase": "source_covered_fact_draft",
-        "source_instance_policy": "Use an action-specific identity quote for each operation. Evidence spans may overlap: overlap alone neither merges instances nor invalidates a binding. Use the source meaning to distinguish operations. Exact duplicate instances may be merged. Different atomic concepts may share contextual evidence. Preserve object identity qualifiers, including whether a named result is an individual value or a whole collection. Role evidence may retain wider context independently of identity quotes.",
-        "fact_granularity": "Each node represents one source semantic unit. Each requirement node must express one independently specified requirement: split separately changeable requirements into distinct nodes during this inventory, before binding edges or constructing candidates. A sentence may support several atomic nodes, and their source-token spans may overlap. Preserve the whole meaning of each atom, including negation, quantifiers, comparison operators and thresholds; do not split a predicate into meaningless words or detach a condition from its obligation. Represent explicit conditions as their own facts and retain their source-supported bindings in the binding step. A single atomic requirement may apply to multiple explicitly stated operations or objects; scope multiplicity does not itself make the meaning composite. Under FROZEN, missing atomic meanings remain unresolved; do not substitute a composite or partially entailed known concept. If atomic decomposition is ambiguous, mark the source unit unresolved and explain the ambiguity. Semantic atomicity remains subject to source review, not a conclusion proved by valid JSON.",
         "operation_feature_checks": [],
-        "development_scope": "Inventory atomic source facts with generation/runtime layer and source-unit coverage. Nodes cite preassigned source-unit keys; the program assigns all fact IDs after this response. Do not output local_id, operation_roles or cross-references between new facts. Under DEVELOPMENT_OPEN, each node carries its complete inline concept; under FROZEN it selects a known concept_id. Coverage rows contain status and reason only; no_task_fact means no additional fact beyond the supplied fixed template. The fixed template facts/edges are already supplied by the program: never redeclare or replace them. Role declarations are source propositions, not code predictions or committed graph edges. Report missing meanings explicitly; do not substitute another object. Relation confirmation and scope judgments follow separately.",
         "arms_or_outcomes_included": False,
     }
-
-
-def contract_from_response(
-    raw: bytes,
-    *,
-    task: Mapping[str, Any],
-    catalog: Mapping[str, Any],
-    annotator_id: str,
-    review_status: str,
-) -> OpenTaskContract:
-    """Parse one source inventory response."""
-
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise PromptContractExtractionError("contract response is not JSON") from None
-    return contract_from_value(value, task=task, catalog=catalog,
-                               annotator_id=annotator_id, review_status=review_status)
-
-
-def contract_from_value(value: Any, *, task: Mapping[str, Any], catalog: Mapping[str, Any],
-                        annotator_id: str, review_status: str) -> OpenTaskContract:
-    """Compile parsed source facts with the same validation as external responses."""
-    if catalog.get("schema_version") != "2.0":
-        raise PromptContractExtractionError("open-graph catalog is required")
-    task = prepare_task_input(task)
-    value, inventory = _indexed_facts_response(value, prompt=task["prompt"], request=contract_decision_request(task, catalog))
-    contract = open_contract_from_response(value, task=task, catalog=catalog,
-                                          annotator_id=annotator_id, review_status=review_status,
-                                          source_inventory=inventory)
-    return contract

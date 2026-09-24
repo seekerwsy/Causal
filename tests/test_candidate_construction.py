@@ -1,3 +1,4 @@
+from annotation_fixture import authored_contract
 """Graph-derived hypotheses preserve semantic granularity and source-only boundaries."""
 
 import json
@@ -5,7 +6,6 @@ import pytest
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
     open_concept_catalog,
-    open_contract_from_response,
     task_context_contract_record,
 )
 from prompt_mechanism_study.tsg.candidate_construction import (
@@ -253,7 +253,7 @@ def _development_sources(*, include_template=False):
             template = generation_template_facts(task)
             for key in ("concepts", "nodes", "edges"):
                 response[key].extend(template[key])
-        contracts.append(open_contract_from_response(
+        contracts.append(authored_contract(
             response, task=task, catalog=open_concept_catalog(), annotator_id="synthetic-offline",
             review_status="development_exposed"))
         tasks.append(task)
@@ -439,7 +439,7 @@ def _one_requirement_request(*, compound):
         edges=[dict(source_node_local_id=source, edge_type=relation, target_node_local_id=target,
                     evidence_text=task["prompt"], occurrence=1) for source, relation, target in links],
         concept_states=[], feature_states=[], unresolved_notes=[])
-    contract = open_contract_from_response(response, task=task, catalog=open_concept_catalog(),
+    contract = authored_contract(response, task=task, catalog=open_concept_catalog(),
                                            annotator_id="synthetic-offline", review_status="development_exposed")
     request = candidate_request([task], [contract])
     nodes = {node["concept_id"]: node for node in request["sources"][0]["nodes"]}
@@ -660,7 +660,7 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
                     evidence_text=task["prompt"], occurrence=1) for a, relation, b in links],
         concept_states=[], feature_states=[], unresolved_notes=[])
     supplied_catalog = catalog or open_concept_catalog()
-    contract = open_contract_from_response(supplied, task=task, catalog=supplied_catalog,
+    contract = authored_contract(supplied, task=task, catalog=supplied_catalog,
         annotator_id="authored-projection-reference", review_status="development_exposed")
     retained = {"invariant": dict(kind="task", boundaries=[], target_class=None)}
     if present and kind not in {"targets", "objects"}:
@@ -990,7 +990,7 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
                         evidence_text=quote, occurrence=1) for a, kind, b, quote in links],
             concept_states=[], feature_states=[], unresolved_notes=[])
         source_catalog = catalog or open_concept_catalog()
-        contract = open_contract_from_response(response, task=task, catalog=source_catalog,
+        contract = authored_contract(response, task=task, catalog=source_catalog,
             annotator_id="authored-policy-support-reference", review_status="development_exposed")
         inventory = dict(source_units={"u": dict(evidence_text=task["prompt"], occurrence=1)},
             coverage={"u": dict(status="represented", facts=[key for key, _, _, _ in rows], reason="Authored edit boundary.")},

@@ -10,7 +10,6 @@ from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
     contract_decision_request,
-    contract_from_response,
 )
 from prompt_mechanism_study.tsg.prompt_contract_extract import _attempt_task_contract
 from prompt_mechanism_study.tsg.scope_assessment import fixed_scope_request
@@ -57,25 +56,26 @@ def _source_fixture(task_text="Run query A using input x. Return the selected ro
     return task, catalog, canonical, request, wire
 
 
-def _compile(task, catalog, wire):
-    return contract_from_response(json.dumps(wire).encode(), task=task, catalog=catalog,
-        annotator_id="source-authored-offline-fixture", review_status="development_exposed")
-
-
 def test_overlapping_evidence_is_not_a_semantic_rejection():
     from copy import deepcopy
-    task, catalog, canonical, request, _ = _source_fixture(
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.tsg.source_records import record_request, compile_records
+    task, catalog, canonical, base, _ = _source_fixture(
         'Run query A using input x. Return the selected rows. Produce readable code. Run query B using input x.')
     canonical['nodes'].append(dict(local_id='b', concept_id='sql.query', evidence_text='query B', occurrence=1))
-    wire = indexed_annotation(request, canonical)
-    good = _compile(task, catalog, wire)
-    assert sum(f['semantic_id']=='sql.query' for f in good.facts) == 2
-    operations = [n for n in wire['nodes'] if n['concept_id']=='sql.query']
-    operations[0]['evidence_end_token'] = operations[1]['evidence_end_token']
-    before = deepcopy(wire)
-    overlapping = _compile(task, catalog, wire)
-    assert sum(f['semantic_id']=='sql.query' for f in overlapping.facts) == 2
-    assert wire == before
+    request = record_request(base)
+    value = record_annotation(request, canonical)
+    operations = value['operations']
+    # Overlapping evidence does not merge distinct source instances.
+    previous_units = operations[1]['fact']['source_units']
+    operations[1]['fact'] = deepcopy(operations[0]['fact'])
+    operations[1]['fact']['source_units'] += previous_units
+    operations[1]['fact']['evidence_text'] = 'Run query A using input x'
+    before = deepcopy(value)
+    contract = compile_records(value, request=request, task=task, catalog=catalog,
+        annotator_id='authored-fixture', review_status='development_exposed')
+    assert sum(f['semantic_id']=='sql.query' for f in contract.facts) == 2
+    assert value == before
 
 
 def test_minimal_graph_validation_does_not_certify_source_meaning():
@@ -317,8 +317,7 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
         record_request,
         compile_records,
         review_request,
-        repair_request,
-        apply_record_patch,
+        revision_request,
         record_diagnostics,
     )
     catalog = open_concept_catalog()
@@ -360,43 +359,23 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
     decoded=structural_readback(request,missing_guard)['requirements']['binding']
     assert decoded['requirement_guards'].startswith('UNCONDITIONAL')
     assert decoded['direct_operation_bindings'][0]['structural_guard'].startswith('UNCONDITIONAL')
-    addresses=review_response_format(missing_check)['json_schema']['schema']['properties']['records']['properties']['binding']['properties']['rejected_claims']['items']['enum']
-    assert 'conditions' in addresses and 'conditions.0' not in addresses
+    assert set(review_response_format(missing_check)['json_schema']['schema']['properties']['records']
+               ['properties']['binding']['properties']) == {'status', 'reason'}
     guard_review=record_annotation(missing_check,canonical)
-    guard_review['records']['binding'].update(status='unsupported',rejected_claims=['conditions'])
-    guard_plan=repair_request(request,missing_guard,guard_review)
-    guard_patch=dict(objects=[],operations=[],requirements=[deepcopy(missing_guard['requirements'][0])],
-        coverage={k:records['coverage'][k] for k in guard_plan['affected_source_units']},
-        unit_impacts={k:records['unit_impacts'][k] for k in guard_plan['affected_source_units']},
-        delete_record_ids=[],unresolved_notes=[])
-    guard_patch['requirements'][0]['fact']['concept']['definition']+=' Same prose, still no guard.'
-    with pytest.raises(PromptContractExtractionError,match='repeats rejected claim'):
-        apply_record_patch(missing_guard,guard_patch,request=guard_plan,original_request=request)
-    guard_patch['requirements'][0]['conditions']=deepcopy(records['requirements'][0]['conditions'])
-    assert apply_record_patch(missing_guard,guard_patch,request=guard_plan,original_request=request)['requirements'][0]['conditions']
-    unit=next(iter(guard_patch['unit_impacts']))
-    guard_patch['unit_impacts'][unit]['reason']='Unrequested narrowing of source influence.'
-    held=apply_record_patch(missing_guard,guard_patch,request=guard_plan,original_request=request)
-    assert held['unit_impacts']==missing_guard['unit_impacts']
-    authorized=deepcopy(guard_plan)
-    authorized['source_review']['source_units'][unit]['complete']=False
-    changed=apply_record_patch(missing_guard,guard_patch,request=authorized,original_request=request)
-    assert changed['unit_impacts'][unit]==guard_patch['unit_impacts'][unit]
-    reviewed = record_annotation(check, canonical)
-    reviewed['records']['q'].update(status='unsupported', rejected_claims=['inputs.0'])
-    repair = repair_request(request, records, reviewed)
-    patch = dict(objects=[], operations=[deepcopy(records['operations'][0])], requirements=[],
-        coverage={k: records['coverage'][k] for k in repair['affected_source_units']},
-        unit_impacts={k: records['unit_impacts'][k] for k in repair['affected_source_units']},
-        unresolved_notes=[], delete_record_ids=[])
-    patch['operations'][0]['precedes'] = []
-    patch['operations'][0]['fact']['concept']['definition'] += ' Changed wording.'
-    patch['operations'][0]['inputs'][0]['evidence_text'] = sentence
-    with pytest.raises(PromptContractExtractionError, match='repeats rejected claim'):
-        apply_record_patch(records, patch, request=repair, original_request=request)
-    patch['operations'][0]['inputs'] = []
-    merged = apply_record_patch(records, patch, request=repair, original_request=request)
-    assert merged['objects'] == records['objects'] and merged['requirements'] == records['requirements']
+    guard_review['records']['binding'].update(status='unsupported',reason='Required external-request guard is missing.')
+    revision=revision_request(request,missing_guard,guard_review)
+    assert revision['original_records'] == missing_guard
+    assert revision['source_review'] == guard_review
+    assert revision_request(request, records, record_annotation(check, canonical)) is None
+    responses = iter([missing_guard, guard_review, records])
+    revised = _attempt_task_contract(task, catalog=catalog, evaluator=dict(candidate_id='offline'),
+        annotator_prompt='Authored revision fixture.', review_status='development_exposed',
+        provider=lambda *_: json.dumps(next(responses)).encode())
+    assert revised.succeeded and revised.provider_calls == 3
+    audit = revised.binding_annotation
+    assert audit['records'] == records and audit['pre_review_records'] == missing_guard
+    assert audit['calls'][-1]['request']['request_kind'] == 'source_only_record_revision'
+    assert audit['structural_readback']['requirements']['binding']['requirement_guards'][0]['predicate'] == 'The request is external.'
     # Freeze a normalized action predicate, then vary its bindings without
     # reinterpreting that immutable predicate or the research requirements.
     from prompt_mechanism_study.tsg.prompt_contract import freeze_open_concepts, catalog_sha256
@@ -575,8 +554,7 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
         compile_records,
         structural_readback,
         review_request,
-        repair_request,
-        apply_record_patch,
+        revision_request,
     )
     from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
     from prompt_mechanism_study.tsg.prompt_tsg import (
@@ -656,19 +634,15 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
     retract = deepcopy(records)
     retract['unit_impacts'][unit]['operations'] = ['prepare', 'publish']
     review = record_annotation(review_request(request, retract), canonical)
-    review['records']['publish'].update(status='unresolved', rejected_claims=['fact'])
-    repair = repair_request(request, retract, review)
-    patch = dict(objects=[], operations=[], requirements=[], delete_record_ids=['publish'],
-        coverage={u:deepcopy(retract['coverage'][u]) for u in repair['affected_source_units']},
-        unit_impacts={u:deepcopy(retract['unit_impacts'][u]) for u in repair['affected_source_units']},
-        unresolved_notes=[])
-    with pytest.raises(PromptContractExtractionError, match='dangling record references'):
-        apply_record_patch(retract, patch, request=repair, original_request=request)
-    patch['delete_record_ids'].append('order')
-    withdrawn = apply_record_patch(retract, patch, request=repair, original_request=request)
-    assert withdrawn['coverage'][unit]['status'] == 'unresolved'
-    assert withdrawn['unit_impacts'][unit]['effect'] == 'unresolved'
-    assert withdrawn['unit_impacts'][unit]['operations'] == []
+    review['records']['publish'].update(status='unresolved', reason='Operation meaning remains unresolved.')
+    assert revision_request(request, retract, review) is not None
+    withdrawn = deepcopy(retract)
+    withdrawn['operations'] = [r for r in withdrawn['operations'] if r['record_id'] != 'publish']
+    with pytest.raises(PromptContractExtractionError):
+        compile_value(withdrawn)  # Full revisions cannot leave dangling references.
+    withdrawn['requirements'] = [r for r in withdrawn['requirements'] if r['record_id'] != 'order']
+    withdrawn['coverage'][unit].update(status='unresolved', reason='Withdrawn meaning remains unresolved.')
+    withdrawn['unit_impacts'][unit].update(effect='unresolved', operations=[], reason='Unresolved operation.')
     assert withdrawn['requirements'] == [retract['requirements'][1]]
     withdrawn_contract, withdrawn_graph = compile_value(withdrawn)
     assert not withdrawn_graph.requirement_relations
@@ -792,10 +766,14 @@ def test_fixed_generation_facts_are_injected_once_and_never_redeclared_by_model(
     task, catalog, canonical, request, wire = _source_fixture()
     template_ids = {n["local_id"] for n in request["fixed_template"]["nodes"]}
     assert len(template_ids) == 5 and all("local_id" not in n for n in wire["nodes"])
-    facts = _compile(task, catalog, wire)
+    from annotation_fixture import record_annotation
+    from prompt_mechanism_study.tsg.source_records import record_request, compile_records
+    active = record_request(request)
+    facts = compile_records(record_annotation(active, canonical), request=active, task=task, catalog=catalog,
+        annotator_id='authored-template', review_status='development_exposed')
     assert template_ids <= {f["local_id"] for f in facts.facts}
     assert len(facts.facts) == len(wire["nodes"]) + 5
-    assert len(facts.relations) == 4
+    assert sum(r["source"].startswith("template.") for r in facts.relations) == 4
     assert all(facts.source_inventory["layers"][key] == "generation" for key in template_ids)
 
     # Same generation layer does not imply the same direct target. Keep the

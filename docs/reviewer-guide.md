@@ -192,31 +192,25 @@ profiles reduce evaluable coverage; no replacement behavioral endpoint has been
 qualified by this change. `src/` contains 54 Python files and 29,372 physical lines,
 149 fewer than before this revision.
 
-## Minimal TSG checking boundary
+## Current TSG construction boundary
 
-The 2026-09-25 change starts from `004829740`, preserved on
-`codex/pre-tsg-minimal-checks-20260925`. The current
-[representation protocol](protocol.md) separates program structure checks from
-model semantic judgments and independent reference evaluation. Retired catalog
-fields are rejected, not silently ignored; frozen runs retain their original
-implementation. Candidate projection still respects declared composition and
-scope, but role/type tables no longer determine applicability and incomplete
-source annotations no longer trigger a program locality veto.
+The [representation protocol](protocol.md) separates structural checks from model
+semantic judgments and independent reference evaluation. Records compile directly
+into the source contract and graph. The model uses one record schema for extraction
+and, when the single review finds problems, one complete revision. Old graph-response
+recovery, token-inventory responses and partial-patch machinery have been removed.
+Before/after records remain inspectable; successful compilation does not certify a
+semantic repair. See the [construction workflow](tsg-workflow-stability.md).
 
-The isolated Python 3.12 suite passed 102 cases in 29.01 seconds. All 20 smoke
-files are byte-identical to the preceding reference. A deliberately incorrect
-semantic interpretation passes structural compilation, while invalid evidence
-positions and dangling references fail. This verifies the intended responsibility
-boundary, not improved extraction accuracy. No live model call, protected input,
-paper edit or relabeling of frozen evidence was involved. TSG source decreased
-from 7,965 to 7,622 lines; all `src/` Python source totals 29,029 lines in 54 files.
+The pre-change implementation is preserved at `2d397e6fa` on
+`codex/pre-tsg-linear-refactor-20260925`. Frozen historical runs use their captured
+implementation. No paper, discovery rule, intervention arm, measurement endpoint,
+ITT denominator or independent verifier is changed by this refactor.
 
-The following bounded simplification, backed up at `3761fdef3` on
-`codex/pre-tsg-compact-20260925`, consolidates the public compiler entry point,
-removes redundant in-progress compilation and self-checks of program-generated
-assessment fields, and assembles inventory metadata together. Model requests,
-review/patch behavior and saved record formats are unchanged. In the isolated
-Python 3.12 environment, all 102 tests passed (29.28 seconds); 109 captured
-compiler/assessment outputs and all 20 smoke files match the preceding version
-exactly. TSG source is 7,581 lines; total Python source is 28,988 lines. This is
-implementation simplification, not a new semantic accuracy or effect result.
+Validation in the isolated Python 3.12 reviewer environment passed all 102 cases
+in 29.28 seconds. The independent result replay ran within the smoke test; all
+20 smoke files are byte-identical to the preceding reference. TSG Python source
+falls from 7,581 to 7,082 lines; total source is 28,489 lines in 54 files. The
+suite retains 81 test functions and updates their repair checks to the complete
+revision interface. These are implementation checks, not live-model accuracy
+results. No provider call or protected evaluation task was used.

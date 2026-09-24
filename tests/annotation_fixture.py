@@ -89,37 +89,6 @@ def scope_answer(scope, *, expression="not_expressed", applicability="applicable
     return answer
 
 
-def quoted_inventory(request, value):
-    """Convert authored token fixtures to the model's source-unit quote format."""
-    source, tokens, offset = request['source_prompt'], {}, 0
-    for key, word in sorted(request['source_tokens'].items(), key=lambda item: int(item[0])):
-        left = source.index(word, offset)
-        offset = left + len(word)
-        tokens[int(key)] = (left, offset)
-    units = {}
-    for key, unit in request['source_units'].items():
-        left = -1
-        for _ in range(unit['occurrence']):
-            left = source.index(unit['evidence_text'], left + 1)
-        units[key] = (left, left + len(unit['evidence_text']))
-
-    def convert(item):
-        if isinstance(item, list):
-            return [convert(v) for v in item]
-        if not isinstance(item, dict):
-            return item
-        result = {k: convert(v) for k, v in item.items()}
-        if 'evidence_start_token' in result and 'evidence_end_token' in result:
-            if request['known_concepts'].get(result.get('concept_id'), {}).get('node_type') == 'data_object':
-                result['entity_key'] = 'entity_' + result['concept_id'] + '_' + str(result['evidence_start_token'])
-            left = tokens[result.pop('evidence_start_token')][0]
-            right = tokens[result.pop('evidence_end_token')][1]
-            unit = next(k for k, (a, b) in units.items() if a <= left < right <= b)
-            result.update(evidence_source_unit=unit, evidence_text=source[left:right])
-        return result
-    return convert(value)
-
-
 def indexed_annotation(request, canonical):
     """Test data conversion only; this is not an extractor or semantic reference."""
     if request['request_kind'] in {'source_only_atomic_records', 'source_only_record_review'}:
@@ -169,7 +138,7 @@ def record_annotation(request, canonical):
     """Map independently authored fixture edges to complete source records."""
     from prompt_mechanism_study.tsg.source_codec import _source_tokens
     if request['request_kind'] == 'source_only_record_review':
-        return dict(records={r['record_id']: dict(status='supported', reason='Source-authored fixture.', rejected_claims=[])
+        return dict(records={r['record_id']: dict(status='supported', reason='Source-authored fixture.')
             for group in ('objects', 'operations', 'requirements') for r in request['records'][group]},
             source_units={key: dict(complete=True, reason='Source-authored fixture coverage.')
                           for key in request['source_units']})
@@ -235,3 +204,24 @@ def record_annotation(request, canonical):
                 row.update(scope_kind='composite',operations=[],subjects=[])
             result['requirements'].append(row)
     return result
+
+
+def authored_contract(value, *, task, catalog, annotator_id, review_status, source_inventory=None):
+    """Build a strict authored graph fixture; no repair, aliasing or dropped facts."""
+    from prompt_mechanism_study.tsg.prompt_contract import OpenTaskContract, compile_task_context_contract
+    from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
+    from prompt_mechanism_study.records import content_hash
+    derived = deepcopy(catalog)
+    for row in value['concepts']:
+        derived['semantics'][row['concept_id']] = row['node_type']
+        derived['semantic_guidance'][row['concept_id']] = row['definition']
+    facts = tuple(dict(local_id=row['local_id'], semantic_id=row['concept_id'],
+        node_type=derived['semantics'][row['concept_id']], attributes={},
+        evidence_text=row['evidence_text'], occurrence=row['occurrence']) for row in value['nodes'])
+    edges = tuple(dict(source=row['source_node_local_id'], target=row['target_node_local_id'],
+        **{key:row[key] for key in ('edge_type','evidence_text','occurrence')}) for row in value['edges'])
+    contract = OpenTaskContract('3.0', task['task_id'], content_hash(task['prompt']), catalog_sha256(catalog),
+        annotator_id, review_status, False, derived, facts, edges, tuple(value.get('concept_states', [])),
+        tuple(value.get('feature_states', [])), tuple(value['unresolved_notes']), source_inventory)
+    compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
+    return contract

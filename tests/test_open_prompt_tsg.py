@@ -1,3 +1,4 @@
+from annotation_fixture import authored_contract
 """Scientific boundaries of source-only open concepts and operation-bound hypotheses."""
 
 import json
@@ -11,15 +12,12 @@ from annotation_fixture import (
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
     open_concept_catalog,
-    open_contract_from_response,
     task_context_contract_from_record,
     task_context_contract_record,
 )
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
     contract_decision_request,
-    contract_from_response,
-    open_contract_response_format,
 )
 from prompt_mechanism_study.tsg.scope_assessment import (
     apply_fixed_scope_response,
@@ -373,7 +371,7 @@ def _contract():
     value['nodes'] = [{k:v for k,v in n.items() if k not in {'node_type','definition'}} for n in value['nodes']]
     value['edges'] = [{('source_node_local_id' if k=='source' else 'target_node_local_id' if k=='target' else k):v for k,v in e.items()} for e in value['edges']]
     catalog = open_concept_catalog()
-    contract = open_contract_from_response(value, task={"task_id": "synthetic-multi-operation", "prompt": PROMPT},
+    contract = authored_contract(value, task={"task_id": "synthetic-multi-operation", "prompt": PROMPT},
                                           catalog=catalog, annotator_id="test", review_status="development_exposed")
     return catalog, contract
 
@@ -851,7 +849,7 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
                e("c", "conditions", "p", "If remote, parameterize x in A"),
                e("p", "constrains", "a", "parameterize x in A"), e("p", "constrains", "x", "parameterize x in A")])
     def compile_raw(value):
-        return open_contract_from_response(value, task=dict(task_id="synthetic-condition-role", prompt=source),
+        return authored_contract(value, task=dict(task_id="synthetic-condition-role", prompt=source),
             catalog=catalog, annotator_id="source-fixture", review_status="development_exposed")
     contract = compile_raw(raw)
     scopes = fixed_scope_request(contract, prompt=source, catalog=catalog)["scopes"]
@@ -859,11 +857,11 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
     assert all("lang" not in s["conditions"] for s in scopes.values())
     invalid = deepcopy(raw)
     invalid["edges"][1]["edge_type"] = "conditions"
-    with pytest.raises(PromptTSGError, match="condition binding"):
+    with pytest.raises(PromptTSGError):
         compile_raw(invalid)
     unresolved = deepcopy(raw)
     unresolved["nodes"][3]["evidence_text"] = "Unstated predicate"
-    with pytest.raises(PromptTSGError, match="condition binding"):
+    with pytest.raises(PromptTSGError):
         compile_raw(unresolved)
 
 
@@ -894,15 +892,6 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
         edge("extract", "produces", "y", "Extract x and y from the request"),
         edge("x", "used_by", "a", "Use x in query A"),
         edge("y", "used_by", "b", "Use y in query B")])
-    wire = indexed_annotation(request, raw_graph)
-    schema = open_contract_response_format(request)["json_schema"]["schema"]["properties"]
-    assert set(schema) == {"nodes", "coverage", "unresolved_notes"}
-    assert set(schema["nodes"]["items"]["properties"]["concept_id"]["enum"]) == {"extract", "query", "argument", "result"}
-    def compile_wire(value):
-        return contract_from_response(json.dumps(value).encode(), task=task, catalog=catalog,
-                                      annotator_id="synthetic-offline", review_status="development_exposed")
-    facts = compile_wire(wire)
-    assert facts.relations == ()
     from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import record_request, compile_records
     records_request = record_request(request)
@@ -920,13 +909,6 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
     assert later["evidence_text"] == "the value" and later["occurrence"] == 2
     graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
     assert next(n for n in graph.nodes if n.semantic_id == "result").evidence_start == task["prompt"].rindex("the value")
-    damaged = deepcopy(wire)
-    damaged["nodes"][3]["evidence_end_token"] = len(request["source_tokens"]) + 1
-    broken = compile_wire(damaged)
-    assert "fact.4" not in {f["local_id"] for f in broken.facts}
-    assert any("unbound_source_token_span: fact.4" in note for note in broken.unresolved_notes)
-    with pytest.raises(PromptContractExtractionError, match="fields"):
-        compile_wire(raw_graph)  # Frozen historical responses use their captured implementation.
     for bad_target in ["a", "undefined"]:
         bad = deepcopy(records)
         bad["operations"][0]["results"][0]["subject"] = bad_target

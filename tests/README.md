@@ -39,7 +39,11 @@ source spans and a deliberately incorrect but structurally valid interpretation
 are accepted, while dangling references and invalid locations are rejected.
 Model-reported uncertainty remains explicit. Domain/role inference tests have
 been replaced with direct model-assessment tests; the independent semantic
-qualification test still fails an incomplete representation.
+qualification test still fails an incomplete representation. The bounded revision
+test exercises extraction, source review and a full-record correction while saving
+both versions; dangling references and explicit unknown coverage remain checked.
+Authored graph fixtures use a strict test-only constructor, not the removed
+production graph-response recovery adapter.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the
