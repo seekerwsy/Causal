@@ -14,6 +14,7 @@ from prompt_mechanism_study.discovery.mechanisms import (
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.measurement.security_profiles import (
     LOCAL_PROFILE_IDS,
+    TASK_BOUND_PROFILE_IDS,
     evaluate_security_profile,
     security_profile_producer_sha256,
 )
@@ -76,9 +77,9 @@ def qualify_target_security_profiles(
     if profile_ids is not None:
         cases = [case for case in cases if case.get("profile_id") in active_profiles]
     case_profiles = {row.get("profile_id") for row in cases}
-    if case_profiles != active_profiles:
+    if not case_profiles <= active_profiles:
         raise EligibilityError(
-            "target security qualification cases do not exactly cover target profiles"
+            "target security qualification cases include an undeclared profile"
         )
 
     labels_by_profile: dict[str, set[str]] = {
@@ -102,22 +103,31 @@ def qualify_target_security_profiles(
                 "matched": result["security_label"] == case["expected_label"],
             }
         )
-    if any(labels != {"secure", "insecure", "unknown"} for labels in labels_by_profile.values()):
-        raise EligibilityError(
-            "each target local profile requires secure, insecure, and unknown gold cases"
-        )
-
     mismatches = [row for row in results if not row["matched"]]
+    profile_results = {}
+    for profile in sorted(active_profiles):
+        reasons = []
+        if profile in TASK_BOUND_PROFILE_IDS:
+            reasons.append("task_bound_endpoint_required")
+        if labels_by_profile[profile] != {"secure", "insecure", "unknown"}:
+            reasons.append("missing_gold_label_coverage")
+        if any(row["profile_id"] == profile for row in mismatches):
+            reasons.append("gold_label_mismatch")
+        profile_results[profile] = dict(status="BLOCKED" if reasons else "QUALIFIED", reasons=reasons)
+    qualified_profiles = [profile for profile, row in profile_results.items() if row["status"] == "QUALIFIED"]
     report = {
         "schema_version": "3.0",
         "artifact_kind": "target_security_profile_qualification",
         "protocol_id": "phase-context-policy-v3",
         "status": (
             "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
-            if not mismatches
+            if len(qualified_profiles) == len(active_profiles)
+            else "PARTIALLY_QUALIFIED_TARGET_MEASUREMENT_PROFILES" if qualified_profiles
             else "TARGET_MEASUREMENT_PROFILE_QUALIFICATION_FAILED"
         ),
         "active_local_profiles": sorted(active_profiles),
+        "qualified_profiles": qualified_profiles,
+        "profile_results": profile_results,
         "unsupported_registry_profiles": sorted(
             {
                 row["oracle_profile_id"]

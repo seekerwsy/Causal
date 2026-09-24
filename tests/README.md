@@ -6,7 +6,7 @@ Use Python 3.12 with the repository's `dev,selectors,languages` extras:
 python -m pytest -q
 ```
 
-The default suite contains **100 cases in 79 test functions**. Its end-to-end
+The default suite contains **101 cases in 80 test functions**. Its end-to-end
 smoke executes all seven stages with offline model responses and a real FCI fit
 on synthetic observations. It also runs the independent saved-result verifier.
 These checks make no paid provider calls and cannot establish real-model TSG or
@@ -28,6 +28,11 @@ source evidence while updating hashes. The verifier must still reject them.
 The fixture contains three invented tasks, captured from the former compiler's
 passing test at `6b0e8b220`; it is neither natural evaluation data nor a scientific
 result. Tests no longer rebuild a historical curation pipeline to check inputs.
+
+Task-bound security tests retain unknown assignments and independent functionality
+when permission targets or credential meaning are unavailable. Qualification tests
+preserve separately valid profiles when another lacks support. Mocked proposal
+calls exercise the real configurable evaluator boundary without network access.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the

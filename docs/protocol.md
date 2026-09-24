@@ -106,6 +106,13 @@ constraints remain blocking. Required target endpoints cannot be waived. Preserv
 software lacks that protection. Evaluation reports critical meanings, extra
 assertions, candidate correctness and coverage alongside whole-graph diagnostics.
 
+Model identity, endpoint, credential-environment coordinate, thinking mode and
+sampling settings are supplied by the frozen evaluator configuration rather than
+a source-code restriction to one vendor/model. Supported transports remain explicit;
+input/output limits and one attempt are retained. Configuration and raw responses
+are saved, including failed candidate proposals. This does not authorize spending
+or changing the model during a frozen comparison.
+
 ## 6. Context-conditioned hypotheses
 
 `AnalysisScope` contains exactly `security_pattern_id`, `context_query_id`,
@@ -276,6 +283,33 @@ U = L + I(valid and Oracle-unevaluable). Report the contrast bounds
 mean(L_target)-mean(U_noop) through mean(U_target)-mean(L_noop).
 Differential code production or Oracle coverage must not be called improved
 underlying software security. Functionality and joint claims need their own evidence.
+
+### Measurement scope correction (prospective revision, 2026-09-24)
+
+New executions cannot infer complete file-permission protection from recognized
+`chmod` calls, or infer actual credentials from variable-name substrings. The
+local AST routes for `owner_only_file_permissions.v1` and `credential_source.v1`
+now return `unknown` with `task_bound_endpoint_required`. Their identifiers remain
+readable in supplied registries; this is not an accepted measurement endpoint.
+The removed heuristics are preserved at `7d5a42ad2` on
+`codex/pre-semantic-boundary-simplification-20260924` for historical replay.
+Implementation hashes change; frozen results and gold references are not relabelled.
+
+A file endpoint must use a source-reviewed target set fixed before generation and
+observe the declared final-state property on that set. A credential endpoint needs
+an independently specified security boundary; identifier spelling is insufficient.
+The existing isolated file-access worker remains available for its declared finite
+access witnesses. Access denial and permission-bit requirements are distinct
+endpoints and must not be substituted for one another. This revision does not
+supply a general credential Oracle or activate a new behavior experiment.
+
+Profile qualification now records each declared profile separately, including
+missing gold coverage and unavailable endpoints. A blocked profile cannot qualify;
+it also cannot erase another profile's verified result. A partial aggregate report
+is not approval of the whole requested scope. Formal inclusion still requires a
+prospective, explicit scope choice; no output-dependent reassignment is allowed.
+Already assigned Oracle-unknown cases remain in ITT, with independent functional
+review and unknown coverage reported as above.
 
 ## 12. Multiplicity and simultaneous inference
 

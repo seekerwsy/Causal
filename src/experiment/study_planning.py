@@ -1587,59 +1587,12 @@ class RQ1BudgetQualification:
             or self.protocol_id != self.baseline_qualification.protocol_id
         ):
             raise ValueError("RQ1 budget protocol lineage drift")
-        power_profile = next(
-            (
-                profile
-                for profile in self.qualification_bundle.profiles
-                if profile.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
-            )
-        )
-        power_profile_lineage_matches = (
-            power_profile.artifact.artifact_id
-            == self.power_and_margin_memo.power_and_margin_memo_id
-            and power_profile.artifact.sha256 == content_hash(self.power_and_margin_memo)
-            and (
-                power_profile.qualification_accept_data_id
-                == self.power_and_margin_memo.qualification_accept_data_id
-            )
-            and (power_profile.code_commit == self.power_and_margin_memo.code_commit)
-            and (
-                self.qualification_bundle.data_role_manifest.artifact_id
-                == self.power_and_margin_memo.data_role_manifest_id
-            )
-            and (
-                self.qualification_bundle.qualification_accept_data_id
-                == self.power_and_margin_memo.qualification_accept_data_id
-            )
-        )
-        baseline_profile = next(
-            (
-                profile
-                for profile in self.qualification_bundle.profiles
-                if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
-            )
-        )
+        power_profile_lineage_matches = _power_profile_matches(
+            self.qualification_bundle, self.power_and_margin_memo)
         baseline_profile_lineage_matches = (
             self.baseline_qualification.scenario is self.scenario
             and self.baseline_qualification.model_ids == self.dimensions.model_ids
-            and (
-                baseline_profile.selected_profile_id
-                == self.baseline_qualification.selected_profile_id
-            )
-            and (
-                baseline_profile.artifact.artifact_id
-                == self.baseline_qualification.rq1_baseline_qualification_id
-            )
-            and (baseline_profile.artifact.sha256 == content_hash(self.baseline_qualification))
-            and (
-                baseline_profile.qualification_accept_data_id
-                == self.baseline_qualification.qualification_accept_data_id
-            )
-            and (baseline_profile.code_commit == self.baseline_qualification.code_commit)
-            and (
-                self.qualification_bundle.qualification_accept_data_id
-                == self.baseline_qualification.qualification_accept_data_id
-            )
+            and _baseline_profile_matches(self.qualification_bundle, self.baseline_qualification)
         )
         passing = (
             not self.blockers
@@ -1662,6 +1615,28 @@ class RQ1BudgetQualification:
     @property
     def rq1_budget_qualification_id(self) -> str:
         return content_id("rq1_budget_qualification_", self)
+
+
+def _power_profile_matches(bundle, memo):
+    profile = next(p for p in bundle.profiles if p.profile_kind is QualificationProfileKind.POWER_AND_MARGIN)
+    return (
+        profile.artifact == FreezeArtifactReference(memo.power_and_margin_memo_id, content_hash(memo))
+        and profile.qualification_accept_data_id == memo.qualification_accept_data_id
+        and profile.code_commit == memo.code_commit
+        and bundle.data_role_manifest.artifact_id == memo.data_role_manifest_id
+        and bundle.qualification_accept_data_id == memo.qualification_accept_data_id
+    )
+
+
+def _baseline_profile_matches(bundle, baseline):
+    profile = next(p for p in bundle.profiles if p.profile_kind is QualificationProfileKind.RQ1_BASELINES)
+    return (
+        profile.selected_profile_id == baseline.selected_profile_id
+        and profile.artifact == FreezeArtifactReference(baseline.rq1_baseline_qualification_id, content_hash(baseline))
+        and profile.qualification_accept_data_id == baseline.qualification_accept_data_id
+        and profile.code_commit == baseline.code_commit
+        and bundle.qualification_accept_data_id == baseline.qualification_accept_data_id
+    )
 
 
 def qualify_rq1_budget(
@@ -1693,53 +1668,9 @@ def qualify_rq1_budget(
         and (baseline_qualification.model_ids == dimensions.model_ids)
     ):
         blockers.add("baseline_qualification_scope_mismatch")
-    power_profile = next(
-        (
-            profile
-            for profile in qualification_bundle.profiles
-            if profile.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
-        )
-    )
-    if not (
-        power_profile.artifact.artifact_id == power_and_margin_memo.power_and_margin_memo_id
-        and power_profile.artifact.sha256 == content_hash(power_and_margin_memo)
-        and (
-            power_profile.qualification_accept_data_id
-            == power_and_margin_memo.qualification_accept_data_id
-        )
-        and (power_profile.code_commit == power_and_margin_memo.code_commit)
-        and (
-            qualification_bundle.data_role_manifest.artifact_id
-            == power_and_margin_memo.data_role_manifest_id
-        )
-        and (
-            qualification_bundle.qualification_accept_data_id
-            == power_and_margin_memo.qualification_accept_data_id
-        )
-    ):
+    if not _power_profile_matches(qualification_bundle, power_and_margin_memo):
         blockers.add("power_profile_lineage_mismatch")
-    baseline_profile = next(
-        (
-            profile
-            for profile in qualification_bundle.profiles
-            if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
-        )
-    )
-    if not (
-        baseline_profile.selected_profile_id == baseline_qualification.selected_profile_id
-        and baseline_profile.artifact.artifact_id
-        == baseline_qualification.rq1_baseline_qualification_id
-        and (baseline_profile.artifact.sha256 == content_hash(baseline_qualification))
-        and (
-            baseline_profile.qualification_accept_data_id
-            == baseline_qualification.qualification_accept_data_id
-        )
-        and (baseline_profile.code_commit == baseline_qualification.code_commit)
-        and (
-            qualification_bundle.qualification_accept_data_id
-            == baseline_qualification.qualification_accept_data_id
-        )
-    ):
+    if not _baseline_profile_matches(qualification_bundle, baseline_qualification):
         blockers.add("baseline_profile_lineage_mismatch")
     if independent_verifier_status != "PASS":
         blockers.add("independent_budget_verifier_failed")

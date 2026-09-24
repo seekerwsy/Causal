@@ -35,6 +35,14 @@ LOCAL_PROFILE_IDS = frozenset(
     }
 )
 
+# These identifiers remain readable in frozen input registries, but code alone
+# cannot establish task targets or which values are actual credentials. New runs
+# retain assignments as unknown until a task-bound endpoint is supplied.
+TASK_BOUND_PROFILE_IDS = frozenset({
+    "python.cwe732.owner_only_file_permissions.v1",
+    "python.cwe798.credential_source.v1",
+})
+
 _PATH_CALLS = frozenset(
     {
         "builtins.open",
@@ -87,23 +95,14 @@ _XML_CALLS = frozenset(
 )
 
 
-_CREDENTIAL_TERMS = (
-    "api_key",
-    "apikey",
-    "credential",
-    "passwd",
-    "password",
-    "secret",
-    "token",
-)
-
-
 def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
     """Evaluate one bounded profile; absent or ambiguous evidence stays unknown."""
 
     if profile_id not in LOCAL_PROFILE_IDS:
         raise ValueError(f"unsupported local security profile: {profile_id}")
     tree = ast.parse(code)
+    if profile_id in TASK_BOUND_PROFILE_IDS:
+        return _decision(profile_id, [])
     aliases = _aliases(tree)
     if profile_id.endswith("tls_certificate_validation.v1"):
         facts = _tls_certificate_facts(tree, aliases)
@@ -135,10 +134,6 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         facts = _archive_facts(tree, aliases)
     elif profile_id.endswith("outbound_url.v1"):
         facts = _url_facts(tree, aliases)
-    elif profile_id.endswith("owner_only_file_permissions.v1"):
-        facts = _permission_facts(tree, aliases)
-    else:
-        facts = _credential_facts(tree, aliases)
 
     return _decision(profile_id, facts)
 
@@ -1027,100 +1022,11 @@ def _url_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
     return facts
 
 
-def _integer(node: ast.AST) -> int | None:
-    if isinstance(node, ast.Constant) and type(node.value) is int:
-        return node.value
-    return None
-
-
-def _permission_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
-    facts = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = _name(node.func, aliases)
-        mode = None
-        if name == "os.chmod" and len(node.args) >= 2:
-            mode = node.args[1]
-        elif isinstance(node.func, ast.Attribute) and node.func.attr == "chmod" and node.args:
-            mode = node.args[0]
-        if mode is None:
-            continue
-        value = _integer(mode)
-        if value is None:
-            state, reason = "unresolved", "permission_mode_is_dynamic"
-        elif value & 0o077:
-            state, reason = "unsafe", "group_or_other_permission_bits_enabled"
-        else:
-            state, reason = "safe", "owner_only_permission_mode"
-        facts.append(_fact(node, name, state, reason))
-    return facts
-
-
-def _credential_name(name: str) -> bool:
-    lowered = name.casefold()
-    return any(term in lowered for term in _CREDENTIAL_TERMS) and not lowered.endswith("_hash")
-
-
-def _credential_state(node: ast.AST, params: set[str], aliases: dict[str, str]) -> tuple[str, str]:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        if node.value:
-            return "unsafe", "credential_is_a_hardcoded_string_literal"
-        return "unresolved", "empty_credential_literal"
-    if isinstance(node, ast.Name) and node.id in params:
-        return "safe", "credential_is_supplied_by_the_caller"
-    if isinstance(node, ast.Subscript) and _name(node.value, aliases) in {"os.environ", "environ"}:
-        return "safe", "credential_is_loaded_from_environment"
-    if isinstance(node, ast.Call) and _name(node.func, aliases) in {
-        "getpass.getpass",
-        "os.getenv",
-        "os.environ.get",
-    }:
-        return "safe", "credential_is_loaded_from_external_input"
-    return "unresolved", "credential_source_unresolved"
-
-
-def _credential_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
-    facts = []
-    module_params: set[str] = set()
-    for function in _functions(tree):
-        params = _parameters(function)
-        for node in ast.walk(function):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if node.value is None:
-                    continue
-                for target in targets:
-                    if isinstance(target, ast.Name) and _credential_name(target.id):
-                        state, reason = _credential_state(node.value, params, aliases)
-                        facts.append(_fact(node, f"assignment:{target.id}", state, reason))
-            elif isinstance(node, ast.Call):
-                for keyword in node.keywords:
-                    if keyword.arg and _credential_name(keyword.arg):
-                        state, reason = _credential_state(keyword.value, params, aliases)
-                        facts.append(_fact(node, f"keyword:{keyword.arg}", state, reason))
-            elif isinstance(node, ast.Return) and node.value is not None and _credential_name(
-                function.name
-            ):
-                state, reason = _credential_state(node.value, params, aliases)
-                facts.append(_fact(node, f"return:{function.name}", state, reason))
-    for node in getattr(tree, "body", []):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        value = node.value
-        if value is None:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name) and _credential_name(target.id):
-                state, reason = _credential_state(value, module_params, aliases)
-                facts.append(_fact(node, f"assignment:{target.id}", state, reason))
-    return facts
-
-
 def _decision(profile_id: str, facts: list[dict[str, Any]]) -> dict[str, Any]:
     states = {fact["state"] for fact in facts}
-    if "unsafe" in states:
+    if profile_id in TASK_BOUND_PROFILE_IDS:
+        label, evaluability, reason = "unknown", "unknown_coverage", "task_bound_endpoint_required"
+    elif "unsafe" in states:
         label, evaluability, reason = "insecure", "evaluable", "unsafe_relevant_sink"
     elif not facts:
         label, evaluability, reason = "unknown", "unknown_coverage", "no_relevant_sink"

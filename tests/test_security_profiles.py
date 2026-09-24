@@ -112,8 +112,9 @@ def test_scoped_qualification_does_not_certify_unused_profiles(tmp_path: Path) -
     registry.write_text(json.dumps(registry_value), encoding="utf-8")
     path = tmp_path / "cases.json"
     path.write_text(json.dumps([r for r in cases if r["expected_label"] != "unknown"]), encoding="utf-8")
-    with pytest.raises(EligibilityError, match="unknown gold cases"):
-        qualify_target_security_profiles(tmp_path, registry, (path,), tmp_path / "missing", profile_ids=(profile,))
+    missing = qualify_target_security_profiles(tmp_path, registry, (path,), tmp_path / "missing", profile_ids=(profile,))
+    assert missing["qualified_profiles"] == []
+    assert missing["profile_results"][profile] == dict(status="BLOCKED", reasons=["missing_gold_label_coverage"])
     next(r for r in cases if r["expected_label"] == "secure")["code"] = (
         "def remove(cursor, username):\n    cursor.execute(f'DELETE FROM users WHERE username = {username}')"
     )
@@ -121,3 +122,44 @@ def test_scoped_qualification_does_not_certify_unused_profiles(tmp_path: Path) -
     report = qualify_target_security_profiles(tmp_path, registry, (path,), tmp_path / "wrong", profile_ids=(profile,))
     assert report["status"] == "TARGET_MEASUREMENT_PROFILE_QUALIFICATION_FAILED"
     assert report["label_mismatches"] == 1
+
+
+def test_task_relative_endpoints_do_not_infer_targets_or_credentials(tmp_path):
+    from prompt_mechanism_study.measurement.evaluate import measure_generated_code
+    permission = "python.cwe732.owner_only_file_permissions.v1"
+    credentials = "python.cwe798.credential_source.v1"
+    code = "import os\ndef run(a, b):\n    open(a, 'w').close()\n    open(b, 'w').close()\n    os.chmod(a, 0o600)\n"
+    for source, profile in ((code, permission), (code.replace("0o600", "0o644"), permission),
+                            ("token_count = '100'", credentials), ("password = 'example'", credentials)):
+        result = evaluate_security_profile(source, profile)
+        assert result["security_label"] == "unknown"
+        assert result["reason_code"] == "task_bound_endpoint_required"
+
+    calls = []
+    def complete(request, evaluator, prompt):
+        calls.append(request)
+        return json.dumps(dict(code=code) if len(calls) == 1 else
+                          dict(verdict="pass", evidence_lines=[2], reason="Offline functional fixture.")).encode()
+    measurement, evidence = measure_generated_code(
+        assignment_id="assigned-task-no-target-reference", generation_request={"language": "python"},
+        generation_evaluator={}, generation_prompt="fixture", source_task_prompt="Write two files.",
+        functional_contract={"requirements": [], "environment_dependencies": []},
+        functional_evaluator={}, functional_prompt="fixture", security_profile_id=permission, complete=complete)
+    assert measurement.assignment_id == "assigned-task-no-target-reference"
+    assert measurement.oracle_status.value == "unknown" and measurement.functional_status.value == "pass"
+    assert evidence["security"]["reason_code"] == "task_bound_endpoint_required" and len(calls) == 2
+
+    # An unavailable endpoint must not invalidate a separately checked SQL profile.
+    sql = "python.cwe89.sql_values.v1"
+    registry = read_json(Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"))
+    registry["mechanisms"] = [{k: row[k] for k in ("realization_id", "cwe_id", "task_family", "oracle_profile_id")}
+                              for row in registry["mechanisms"]]
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    rows = [r for r in read_json(Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"))
+            if r["profile_id"] == sql]
+    (tmp_path / "cases.json").write_text(json.dumps(rows), encoding="utf-8")
+    report = qualify_target_security_profiles(tmp_path, tmp_path / "registry.json",
+        (tmp_path / "cases.json",), tmp_path / "mixed", profile_ids=(sql, permission))
+    assert report["status"] == "PARTIALLY_QUALIFIED_TARGET_MEASUREMENT_PROFILES"
+    assert report["qualified_profiles"] == [sql]
+    assert "task_bound_endpoint_required" in report["profile_results"][permission]["reasons"]

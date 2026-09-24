@@ -64,6 +64,13 @@ code; the result package saves assignments, measured labels, unknowns and the
 independently checked result.
 There is not yet a claim-bearing natural-task result table in `main`.
 
+The static file-permission and credential-source profiles currently return
+`unknown`: recognizing a permission-setting call or a credential-like name does
+not establish the task's complete security boundary. Those endpoints require
+task-bound measurement before use; qualification reports each profile separately.
+See the [measurement scope amendment](docs/protocol.md) for the prospective
+boundary and preservation of earlier frozen results.
+
 The [outcome-blind scope preflight](docs/artifact-scope-preflight.md) recounts the
 released v4 task inventory and earlier candidate-screen coverage for four Python
 CWE labels. It also records why existing AST examples alone do not qualify an

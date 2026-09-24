@@ -1115,6 +1115,7 @@ def build_candidate_catalog(
                 "request.json": request,
                 "model-request.json": model_request,
                 "design.json": design,
+                "evaluator.json": evaluator,
                 "response-text.json": (
                     raw.decode("utf-8", errors="replace") if raw is not None else None
                 ),
@@ -1206,16 +1207,10 @@ def _candidate_catalog(contracts, proposal, design, review):
 def _proposal_evaluator(path):
     from prompt_mechanism_study.tsg.prompt_contract_extract import _evaluator
     evaluator = _evaluator(read_json_exact(path), path)
-    if (evaluator["provider"] != "ali_bailian_pay_as_you_go"
-            or evaluator["model_id"] != "qwen3.7-flash-2026-07-15"
-            or evaluator["base_url"] != "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            or evaluator["enable_thinking"] is not False):
-        raise ValueError("candidate proposal must use the current fixed development model and region")
     if any(type(evaluator.get(key)) is not int or evaluator[key] <= 0
-           for key in ("maximum_input_bytes", "maximum_output_tokens", "max_response_bytes")):
+           for key in ("maximum_input_bytes", "max_response_bytes")) or not any(
+               evaluator.get(key) for key in ("maximum_output_tokens", "maximum_completion_tokens")):
         raise ValueError("candidate proposal requires explicit finite input and output ceilings")
-    if type(evaluator["timeout_seconds"]) not in (int, float) or not 0 < evaluator["timeout_seconds"] <= 3600:
-        raise ValueError("candidate proposal requires a finite timeout")
     return evaluator
 
 

@@ -381,7 +381,7 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
         "max_attempts",
     }
     structured_fields = {"response_format_path", "response_format_sha256"}
-    optional_fields = {"maximum_output_tokens", "maximum_input_bytes", "maximum_completion_tokens", "thinking_budget"}
+    optional_fields = {"maximum_output_tokens", "maximum_input_bytes", "maximum_completion_tokens", "thinking_budget", "chat_template_kwargs"}
     present_fields = set(value) if isinstance(value, dict) else set()
     if (
         not isinstance(value, dict)
@@ -390,11 +390,20 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
         or bool(present_fields & structured_fields)
         != bool(structured_fields <= present_fields)
         or value["schema_version"] != "1.0"
-        or value["api_key_env"] != "ALI_BAILIAN_API_KEY"
-        or value["temperature"] != 0.0
+        or value["provider"] not in {"ali_bailian_pay_as_you_go", "deepseek", "local_vllm"}
+        or any(not isinstance(value[key], str) or not value[key].strip()
+               for key in ("candidate_id", "model_id", "base_url"))
+        or (value["api_key_env"] is not None and not isinstance(value["api_key_env"], str))
+        or (value["provider"] != "local_vllm" and not value["api_key_env"])
+        or type(value["temperature"]) not in (int, float) or not 0 <= value["temperature"] <= 2
+        or type(value["top_p"]) not in (int, float) or not 0 < value["top_p"] <= 1
+        or type(value["seed"]) is not int or type(value["enable_thinking"]) is not bool
+        or type(value["timeout_seconds"]) not in (int, float) or not 0 < value["timeout_seconds"] <= 3600
+        or type(value["max_response_bytes"]) is not int or value["max_response_bytes"] <= 0
+        or ("chat_template_kwargs" in value and not isinstance(value["chat_template_kwargs"], dict))
         or value["max_attempts"] != 1
         or any(key in value and (type(value[key]) is not int or value[key] <= 0)
-               for key in optional_fields)
+               for key in optional_fields - {"chat_template_kwargs"})
     ):
         raise PromptContractExtractionError("contract evaluator is invalid")
     if not structured_fields <= set(value):

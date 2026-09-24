@@ -158,3 +158,36 @@ equivalence, not universal Oracle accuracy or real-model performance.
 `src/` now has 29,521 Python lines, 149 fewer than the preceding contraction.
 The statistical estimators, arm design and independent result arithmetic were
 not changed. No provider calls or paper edits were made.
+
+## Task-bound measurement and explicit model configuration
+
+The subsequent revision starts from `7d5a42ad2`, preserved on
+`codex/pre-semantic-boundary-simplification-20260924`. New AST evaluation of file
+permissions and credential source returns `unknown` until a task-bound endpoint
+is supplied. The name/write-pattern heuristics are removed; no generic verifier
+is added. See the prospective measurement amendment in [the protocol](protocol.md).
+Qualification exposes `qualified_profiles` and per-profile reasons; a partial
+report does not approve blocked profiles or silently narrow a planned experiment.
+
+Candidate proposal and TSG extraction accept the frozen model/provider settings
+through the existing supported transports. A particular vendor, model name,
+credential variable and zero-temperature setting are no longer coded into the
+candidate path. Responses and evaluator configuration remain bound to the saved
+request, with one attempt and finite call limits.
+
+The duplicated power/baseline lineage predicates in budget construction and its
+record validation are shared. Budget qualification requirements and independent
+statistical verification remain in place; this is not a claim that the entire
+research-administration layer has been retired. The specialized TSG property
+checks and diagnostic scope enumeration also remain pending a separately
+validated change to semantic assessment. No paper change or live model call is
+part of this implementation revision.
+
+Validation used the isolated Python 3.12 review environment with a fresh output
+directory: 101 cases passed in 28.82 seconds. All 20 smoke files remain
+byte-identical to the preceding reference. Across 54 exposed calibration snippets,
+the 16 unchanged profiles returned identical full decisions (864 comparisons).
+This is a preservation check, not an accuracy estimate. The two withdrawn static
+profiles reduce evaluable coverage; no replacement behavioral endpoint has been
+qualified by this change. `src/` contains 54 Python files and 29,372 physical lines,
+149 fewer than before this revision.

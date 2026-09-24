@@ -570,8 +570,19 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
         assert set(schema["properties"]["decisions"]["required"]) == set(response["decisions"])
         return json.dumps(response).encode()
     monkeypatch.setattr("prompt_mechanism_study.llm.complete_chat", fake_complete)
-    monkeypatch.setattr("prompt_mechanism_study.tsg.candidate_construction._proposal_evaluator", lambda path: {})
-    proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=paths[1])
+    from prompt_mechanism_study.tsg.candidate_construction import _proposal_evaluator
+    config = dict(schema_version="1.0", candidate_id="frozen-test-proposer", provider="local_vllm",
+        model_id="test-local-model", base_url="http://127.0.0.1:9999/v1", api_key_env=None,
+        temperature=0.3, top_p=0.9, seed=7, enable_thinking=True, timeout_seconds=60,
+        max_response_bytes=1000000, max_attempts=1, maximum_input_bytes=1000000, maximum_output_tokens=4096)
+    config_path = tmp_path / "proposer.json"
+    for provider, credential in (("deepseek", "TEST_DEEPSEEK_KEY"), ("ali_bailian_pay_as_you_go", "TEST_CLOUD_KEY")):
+        alternative = dict(config, provider=provider, api_key_env=credential, base_url="https://example.invalid/v1")
+        config_path.write_text(json.dumps(alternative), encoding="utf-8")
+        assert _proposal_evaluator(config_path) == alternative
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=config_path)
+    assert read_json(tmp_path / "mock-provider-proposal/evaluator.json") == config
     assert sent == [candidate_model_request(request)]
     assert proposed["status"] == "PENDING_SEMANTIC_REVIEW" and proposed["accepted_factors"] == 0
     catalog = read_json(output / "catalog.json")
