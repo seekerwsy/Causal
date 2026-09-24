@@ -129,7 +129,7 @@ def bind_task_hypothesis(
         if target is None or target.node_type != "task_operation":
             raise MechanismRegistryError("hypothesis target must identify one operation instance")
         operations = {target_operation_node_id}
-    context = query_context(graph, query=query, cwe="", task_family="")
+    context = query_context(graph, query=query)
     matches = [
         (nodes, edges)
         for nodes, edges in query_bindings(graph, query=query)

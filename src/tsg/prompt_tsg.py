@@ -103,21 +103,7 @@ class PromptTSG:
 
     @property
     def tsg_id(self) -> str:
-        payload = canonical_value(self)
-        if not self.scoped_feature_assessments:
-            payload.pop("scoped_feature_assessments")  # Keep frozen graph identities.
-        if not self.requirement_structures:
-            payload.pop("requirement_structures")
-        if not self.requirement_scopes:
-            payload.pop("requirement_scopes")
-        if not self.requirement_relations:
-            payload.pop("requirement_relations")
-        if self.schema_version != "3.0":
-            payload.pop("absent_semantics")
-            payload.pop("feature_assessments")
-        if self.schema_version == "1.0":
-            payload.pop("unresolved_relations")
-        return content_id("prompt_tsg_", payload)
+        return content_id("prompt_tsg_", _graph_payload(self))
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +311,7 @@ def requirement_owned_nodes(graph, requirements):
 
 
 def load_catalog(path: Path) -> dict[str, Any]:
-    """Load one closed, versioned Prompt TSG ontology and query catalog."""
+    """Load the current open-graph concept and query catalog."""
 
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -337,43 +323,30 @@ def load_catalog(path: Path) -> dict[str, Any]:
 def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
     """Validate an embedded Prompt TSG catalog without trusting a live path."""
 
+    if not isinstance(value, dict) or value.get("schema_version") != "2.0":
+        raise PromptTSGError("active Prompt TSG requires catalog schema 2.0")
     required = {
-        "schema_version",
-        "node_types",
-        "edge_types",
-        "attribute_names",
-        "semantic_guidance",
-        "source_realization_task_families",
-        "semantics",
-        "allowed_edges",
-        "queries",
+        "schema_version", "node_types", "edge_types", "attribute_names",
+        "semantic_guidance", "source_realization_task_families", "semantics",
+        "allowed_edges", "queries", "concept_policy", "normalization_map",
+        "development_task_ids",
     }
-    if isinstance(value, dict) and value.get("schema_version") == "2.0":
-        required |= {"concept_policy", "normalization_map", "development_task_ids"}
-        if "feature_scope_domains" in value:
-            required.add("feature_scope_domains")
-        if "semantic_layers" in value:
-            required.add("semantic_layers")
-        if "existing_value_return_operations" in value:
-            required.add("existing_value_return_operations")
-        if "feature_role_domains" in value:
-            required |= {"feature_role_domains", "caller_supplied_concepts"}
-        if "feature_subject_properties" in value:
-            required.add("feature_subject_properties")
-        if "source_name_terms" in value:
-            required.add("source_name_terms")
-        if "feature_scope_selectors" in value:
-            required.add("feature_scope_selectors")
-    if not isinstance(value, dict) or set(value) != required or value["schema_version"] not in {"1.0", "2.0"}:
+    optional = {
+        "feature_scope_domains", "semantic_layers", "existing_value_return_operations",
+        "feature_subject_properties", "source_name_terms", "feature_scope_selectors",
+    }
+    expected = required | (optional & value.keys())
+    if "feature_role_domains" in value:
+        expected |= {"feature_role_domains", "caller_supplied_concepts"}
+    if set(value) != expected:
         raise PromptTSGError("Prompt TSG catalog envelope is invalid")
-    if value["schema_version"] == "2.0" and value["concept_policy"] not in {"DEVELOPMENT_OPEN", "FROZEN"}:
+    if value["concept_policy"] not in {"DEVELOPMENT_OPEN", "FROZEN"}:
         raise PromptTSGError("open concepts may change only during development")
-    if value["schema_version"] == "2.0":
-        _unique_strings(value["development_task_ids"], "development task IDs")
-        if (not isinstance(value["normalization_map"], dict)
-            or any(not isinstance(key, str) or not isinstance(target, str)
-                   or not key or target not in value["semantics"] for key, target in value["normalization_map"].items())):
-            raise PromptTSGError("concept normalization map is invalid")
+    _unique_strings(value["development_task_ids"], "development task IDs")
+    if (not isinstance(value["normalization_map"], dict)
+        or any(not isinstance(key, str) or not isinstance(target, str)
+               or not key or target not in value["semantics"] for key, target in value["normalization_map"].items())):
+        raise PromptTSGError("concept normalization map is invalid")
     node_types = _unique_strings(value["node_types"], "node types")
     edge_types = _unique_strings(value["edge_types"], "edge types")
     _unique_strings(value["attribute_names"], "attribute names")
@@ -414,7 +387,6 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
     source_families = value["source_realization_task_families"]
     if (
         not isinstance(source_families, dict)
-        or (not source_families and value["schema_version"] == "1.0")
         or any(
             not isinstance(realization_id, str)
             or not realization_id.strip()
@@ -438,14 +410,12 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
     if len(allowed) != len(value["allowed_edges"]):
         raise PromptTSGError("Prompt TSG edge matrix contains duplicates")
     queries = value["queries"]
-    if not isinstance(queries, list) or (not queries and value["schema_version"] == "1.0"):
+    if not isinstance(queries, list):
         raise PromptTSGError("Prompt TSG queries are missing")
     query_ids = set()
     realization_ids = set()
     for query in queries:
-        _validate_query(query, semantics, edge_types, allowed,
-                        actionable_types=("safety_requirement", "task_requirement", "presentation_control", "constraint")
-                        if value["schema_version"] == "2.0" else ("safety_requirement",))
+        _validate_query(query, semantics, edge_types, allowed)
         if query["query_id"] in query_ids or query["realization_id"] in realization_ids:
             raise PromptTSGError("Prompt TSG query identities are not unique")
         query_ids.add(query["query_id"])
@@ -567,27 +537,23 @@ def catalog_sha256(catalog: Mapping[str, Any]) -> str:
 def prompt_tsg_record(graph: PromptTSG) -> dict[str, Any]:
     """Return the canonical JSON record, including its content identity."""
 
+    return {"tsg_id": graph.tsg_id, **_graph_payload(graph)}
+
+
+def _graph_payload(graph: PromptTSG) -> dict[str, Any]:
     payload = canonical_value(graph)
-    if not graph.scoped_feature_assessments:
-        payload.pop("scoped_feature_assessments")
-    if not graph.requirement_structures:
-        payload.pop("requirement_structures")
-    if not graph.requirement_scopes:
-        payload.pop("requirement_scopes")
-    if not graph.requirement_relations:
-        payload.pop("requirement_relations")
-    if graph.schema_version != "3.0":
-        payload.pop("absent_semantics")
-        payload.pop("feature_assessments")
-    if graph.schema_version == "1.0":
-        payload.pop("unresolved_relations")
-    return {"tsg_id": graph.tsg_id, **payload}
+    for field in ("scoped_feature_assessments", "requirement_structures",
+                  "requirement_scopes", "requirement_relations"):
+        if not payload[field]:
+            payload.pop(field)
+    return payload
+
 
 
 def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
     """Reconstruct a graph record before prompt- and catalog-aware validation."""
 
-    if not isinstance(value, Mapping) or value.get("schema_version") not in {"1.0", "2.0", "3.0"}:
+    if not isinstance(value, Mapping) or value.get("schema_version") != "3.0":
         raise PromptTSGError("Prompt TSG serialized schema is invalid")
     expected = {
         "tsg_id",
@@ -600,18 +566,16 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
         "edges",
         "unresolved_semantics",
     }
-    if value["schema_version"] in {"2.0", "3.0"}:
-        expected.add("unresolved_relations")
-    if value["schema_version"] == "3.0":
-        expected |= {"absent_semantics", "feature_assessments"}
-        if "scoped_feature_assessments" in value:
-            expected.add("scoped_feature_assessments")
-        if "requirement_structures" in value:
-            expected.add("requirement_structures")
-        if "requirement_scopes" in value:
-            expected.add("requirement_scopes")
-        if "requirement_relations" in value:
-            expected.add("requirement_relations")
+    expected.add("unresolved_relations")
+    expected |= {"absent_semantics", "feature_assessments"}
+    if "scoped_feature_assessments" in value:
+        expected.add("scoped_feature_assessments")
+    if "requirement_structures" in value:
+        expected.add("requirement_structures")
+    if "requirement_scopes" in value:
+        expected.add("requirement_scopes")
+    if "requirement_relations" in value:
+        expected.add("requirement_relations")
     if set(value) != expected:
         raise PromptTSGError("Prompt TSG serialized fields are invalid")
     try:
@@ -695,7 +659,7 @@ def build_prompt_tsg(
     relations: Sequence[Mapping[str, Any]],
     unresolved_semantics: Sequence[str] = (),
     unresolved_relations: Sequence[Sequence[str]] = (),
-    schema_version: str = "1.0",
+    schema_version: str = "3.0",
     absent_semantics: Sequence[str] = (),
     feature_assessments: Sequence[Sequence[str]] = (),
     scoped_feature_assessments: Sequence[Mapping[str, Any]] = (),
@@ -830,10 +794,8 @@ def build_prompt_tsg(
         unresolved_relation_values.append(tuple(relation))
     if len(unresolved_relation_values) != len(set(unresolved_relation_values)):
         raise PromptTSGError("Prompt TSG unresolved relations are duplicated")
-    if schema_version not in {"1.0", "2.0", "3.0"} or (
-        schema_version == "1.0" and unresolved_relation_values
-    ):
-        raise PromptTSGError("Prompt TSG schema cannot represent unresolved relations")
+    if schema_version != "3.0":
+        raise PromptTSGError("active Prompt TSG requires schema 3.0")
     ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
     ordered_edges = tuple(sorted(edges, key=lambda item: item.edge_id))
     policy_relations = requirement_relations or {}
@@ -885,9 +847,7 @@ def validate_prompt_tsg(
     """Revalidate graph identity, evidence, endpoints, ordering, and catalog closure."""
 
     if (
-        graph.schema_version not in {"1.0", "2.0", "3.0"}
-        or (graph.schema_version != "3.0" and (graph.absent_semantics or graph.feature_assessments or graph.scoped_feature_assessments or graph.requirement_relations))
-        or (graph.schema_version == "1.0" and graph.unresolved_relations)
+        graph.schema_version != "3.0"
         or graph.prompt_sha256 != content_hash(prompt)
         or graph.catalog_sha256 != catalog_sha256(catalog)
         or not graph.nodes
@@ -953,117 +913,116 @@ def validate_prompt_tsg(
     if any(not guard_owners.get(parent, set()) <= guard_owners.get(child, set())
            for parent, _, members in graph.requirement_structures for child in members):
         raise PromptTSGError('a composite member lost an inherited requirement condition')
-    if graph.schema_version == "3.0":
-        present = {node.semantic_id for node in graph.nodes}
-        if (graph.absent_semantics != tuple(sorted(set(graph.absent_semantics)))
-            or set(graph.absent_semantics) - set(semantics)
-            or set(graph.absent_semantics) & (present | set(graph.unresolved_semantics))
-            or present & set(graph.unresolved_semantics)):
-            raise PromptTSGError("explicit concept states conflict")
-        keys = [(target, feature) for target, feature, _ in graph.feature_assessments]
-        if len(keys) != len(set(keys)):
-            raise PromptTSGError("operation feature assessments are duplicated")
-        for target, feature, state in graph.feature_assessments:
-            if state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==feature for k in retained):
-                raise PromptTSGError('unprojected requirement cannot establish a local negative')
-            if (target not in node_by_id or node_by_id[target].node_type != "task_operation"
-                or feature not in semantics or state not in {"present", "absent", "unresolved", "not_applicable"}):
-                raise PromptTSGError("operation feature assessment is invalid")
-            mentioned = {edge.source_id for edge in graph.edges if edge.edge_type == 'constrains'
-                         and edge.target_id == target and node_by_id[edge.source_id].semantic_id == feature}
-            if state == 'present' and not mentioned & atomic_requirements:
-                raise PromptTSGError('operation presence needs an asserted atomic requirement')
-            if state in {'absent','not_applicable'} and mentioned:
-                raise PromptTSGError('operation negative contradicts a source requirement expression')
-            if state != "unresolved" and catalog.get("feature_scope_domains", {}).get(feature) == "subjects":
-                raise PromptTSGError("feature scope domain requires named subjects")
-        scoped = graph.scoped_feature_assessments
-        if (scoped != tuple(sorted(scoped, key=lambda item: canonical_json(item)))
-            or len({(item.scope, item.feature_id) for item in scoped}) != len(scoped)):
-            raise PromptTSGError("scoped feature assessments must be ordered and unique")
-        for item in scoped:
-            selector = catalog.get("feature_scope_selectors", {}).get(item.feature_id)
-            if not selector and item.state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==item.feature_id for k in retained):
-                raise PromptTSGError('unprojected requirement cannot establish a local negative')
-            validate_feature_scope(graph, item.scope)
-            if node_by_id[item.scope.operation_node_id].node_type == "task" and not selector:
-                raise PromptTSGError("a whole-task feature scope needs a frozen policy selector")
-            if (node_by_id[item.scope.operation_node_id].node_type == "task" and item.scope.subject_node_ids
-                    and selector.get("scope_kind") != "objects"):
-                raise PromptTSGError("root with subjects requires an explicit object policy selector")
-            domain = catalog.get("feature_scope_domains", {}).get(item.feature_id)
-            if item.state != "unresolved" and (
-                domain == "subjects" and not item.scope.subject_node_ids
-                or domain == "operation" and item.scope.subject_node_ids
-            ):
-                raise PromptTSGError("feature scope domain does not match its subject binding")
-            if (semantics.get(item.feature_id) not in
-                    {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
-                or item.state not in {state.value for state in QueryState}
-                or item.requirement_node_ids != tuple(sorted(set(item.requirement_node_ids)))
-                or (item.state == "present") != bool(item.requirement_node_ids)):
-                raise PromptTSGError("scoped feature state or evidence is invalid")
-            allowed_requirements = asserted_requirements if selector else atomic_requirements
-            if set(item.requirement_node_ids) - allowed_requirements:
-                raise PromptTSGError("scoped presence needs an asserted atomic requirement, not a composite member")
-            links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
-            if selector:
-                # A state assessment is about a complete policy at a state-blind
-                # boundary. Its internal guards need not exist in an ABSENT graph.
-                if select_feature_scope(graph, selector) != item.scope:
-                    raise PromptTSGError("feature assessment differs from its frozen candidate boundary")
-                for key in item.requirement_node_ids:
-                    if (node_by_id[key].semantic_id != item.feature_id
-                        or not requirement_matches_policy(graph, key, item.scope, selector)):
-                        raise PromptTSGError("scoped presence lacks the complete policy binding")
-                if item.state in {"absent", "not_applicable"}:
-                    for node in graph.nodes:
-                        if node.semantic_id != item.feature_id:
-                            continue
-                        envelope = requirement_binding(node.node_id, links=links,
-                            node_types={k: n.node_type for k, n in node_by_id.items()},
-                            structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes,
-                            owned_relations=graph.requirement_relations)
-                        if (envelope is None or item.scope.operation_node_id in envelope["operations"]
-                            or roots[0].node_id in envelope["operations"]
-                            or "applicability_scope" in selector and (
-                                item.scope.operation_node_id in {endpoint for a, _, b in envelope["relations"]
-                                                                  for endpoint in (a, b)}
-                                or any(node_by_id[key].semantic_id == selector["operation_semantic_id"]
-                                       for key in envelope["operations"]))
-                            or selector["scope_kind"] == "objects" and (
-                                set(item.scope.subject_node_ids) & envelope["subjects"] or not envelope["subjects"])):
-                            raise PromptTSGError("negative policy state contradicts a source expression at this boundary")
-                continue
-            if item.state in {"absent", "not_applicable"}:
-                for requirement in graph.nodes:
-                    key = requirement.node_id
-                    if (requirement.semantic_id != item.feature_id
-                        or (key, "constrains", item.scope.operation_node_id) not in links):
-                        continue
-                    covered = {target for source, relation, target in links
-                               if source == key and relation == "constrains"
-                               and node_by_id[target].node_type == "data_object"}
-                    fixed = {source for source, relation, target in links if relation == "conditions"
-                             and target in {key, item.scope.operation_node_id}}
-                    subjects = set(item.scope.subject_node_ids)
-                    conditions = set(item.scope.condition_node_ids)
-                    # A partial or conditional positive cannot be relabeled as
-                    # an unqualified negative for the whole operation/input set.
-                    if ((not subjects or not covered or subjects & covered)
-                        and (fixed <= conditions or conditions <= fixed)):
-                        raise PromptTSGError("scoped negative contradicts source requirement coverage")
+    present = {node.semantic_id for node in graph.nodes}
+    if (graph.absent_semantics != tuple(sorted(set(graph.absent_semantics)))
+        or set(graph.absent_semantics) - set(semantics)
+        or set(graph.absent_semantics) & (present | set(graph.unresolved_semantics))
+        or present & set(graph.unresolved_semantics)):
+        raise PromptTSGError("explicit concept states conflict")
+    keys = [(target, feature) for target, feature, _ in graph.feature_assessments]
+    if len(keys) != len(set(keys)):
+        raise PromptTSGError("operation feature assessments are duplicated")
+    for target, feature, state in graph.feature_assessments:
+        if state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==feature for k in retained):
+            raise PromptTSGError('unprojected requirement cannot establish a local negative')
+        if (target not in node_by_id or node_by_id[target].node_type != "task_operation"
+            or feature not in semantics or state not in {"present", "absent", "unresolved", "not_applicable"}):
+            raise PromptTSGError("operation feature assessment is invalid")
+        mentioned = {edge.source_id for edge in graph.edges if edge.edge_type == 'constrains'
+                     and edge.target_id == target and node_by_id[edge.source_id].semantic_id == feature}
+        if state == 'present' and not mentioned & atomic_requirements:
+            raise PromptTSGError('operation presence needs an asserted atomic requirement')
+        if state in {'absent','not_applicable'} and mentioned:
+            raise PromptTSGError('operation negative contradicts a source requirement expression')
+        if state != "unresolved" and catalog.get("feature_scope_domains", {}).get(feature) == "subjects":
+            raise PromptTSGError("feature scope domain requires named subjects")
+    scoped = graph.scoped_feature_assessments
+    if (scoped != tuple(sorted(scoped, key=lambda item: canonical_json(item)))
+        or len({(item.scope, item.feature_id) for item in scoped}) != len(scoped)):
+        raise PromptTSGError("scoped feature assessments must be ordered and unique")
+    for item in scoped:
+        selector = catalog.get("feature_scope_selectors", {}).get(item.feature_id)
+        if not selector and item.state in {'absent','not_applicable'} and any(node_by_id[k].semantic_id==item.feature_id for k in retained):
+            raise PromptTSGError('unprojected requirement cannot establish a local negative')
+        validate_feature_scope(graph, item.scope)
+        if node_by_id[item.scope.operation_node_id].node_type == "task" and not selector:
+            raise PromptTSGError("a whole-task feature scope needs a frozen policy selector")
+        if (node_by_id[item.scope.operation_node_id].node_type == "task" and item.scope.subject_node_ids
+                and selector.get("scope_kind") != "objects"):
+            raise PromptTSGError("root with subjects requires an explicit object policy selector")
+        domain = catalog.get("feature_scope_domains", {}).get(item.feature_id)
+        if item.state != "unresolved" and (
+            domain == "subjects" and not item.scope.subject_node_ids
+            or domain == "operation" and item.scope.subject_node_ids
+        ):
+            raise PromptTSGError("feature scope domain does not match its subject binding")
+        if (semantics.get(item.feature_id) not in
+                {"task_requirement", "safety_requirement", "constraint", "presentation_control"}
+            or item.state not in {state.value for state in QueryState}
+            or item.requirement_node_ids != tuple(sorted(set(item.requirement_node_ids)))
+            or (item.state == "present") != bool(item.requirement_node_ids)):
+            raise PromptTSGError("scoped feature state or evidence is invalid")
+        allowed_requirements = asserted_requirements if selector else atomic_requirements
+        if set(item.requirement_node_ids) - allowed_requirements:
+            raise PromptTSGError("scoped presence needs an asserted atomic requirement, not a composite member")
+        links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+        if selector:
+            # A state assessment is about a complete policy at a state-blind
+            # boundary. Its internal guards need not exist in an ABSENT graph.
+            if select_feature_scope(graph, selector) != item.scope:
+                raise PromptTSGError("feature assessment differs from its frozen candidate boundary")
             for key in item.requirement_node_ids:
-                if (key not in node_by_id or node_by_id[key].semantic_id != item.feature_id
-                    or not requirement_covers_scope(key, item.scope.operation_node_id,
-                        item.scope.subject_node_ids, item.scope.condition_node_ids, links=links,
-                        node_types={k: n.node_type for k, n in node_by_id.items()})):
-                    raise PromptTSGError("scoped presence lacks exact requirement-to-scope evidence")
-            # Mixing a new operation-scoped assessment with a frozen triple must agree.
-            if not item.scope.subject_node_ids and not item.scope.condition_node_ids:
-                old = {(target, feature): state for target, feature, state in graph.feature_assessments}
-                if old.get((item.scope.operation_node_id, item.feature_id), item.state) != item.state:
-                    raise PromptTSGError("operation and scoped feature states conflict")
+                if (node_by_id[key].semantic_id != item.feature_id
+                    or not requirement_matches_policy(graph, key, item.scope, selector)):
+                    raise PromptTSGError("scoped presence lacks the complete policy binding")
+            if item.state in {"absent", "not_applicable"}:
+                for node in graph.nodes:
+                    if node.semantic_id != item.feature_id:
+                        continue
+                    envelope = requirement_binding(node.node_id, links=links,
+                        node_types={k: n.node_type for k, n in node_by_id.items()},
+                        structures=graph.requirement_structures, retained_scopes=graph.requirement_scopes,
+                        owned_relations=graph.requirement_relations)
+                    if (envelope is None or item.scope.operation_node_id in envelope["operations"]
+                        or roots[0].node_id in envelope["operations"]
+                        or "applicability_scope" in selector and (
+                            item.scope.operation_node_id in {endpoint for a, _, b in envelope["relations"]
+                                                              for endpoint in (a, b)}
+                            or any(node_by_id[key].semantic_id == selector["operation_semantic_id"]
+                                   for key in envelope["operations"]))
+                        or selector["scope_kind"] == "objects" and (
+                            set(item.scope.subject_node_ids) & envelope["subjects"] or not envelope["subjects"])):
+                        raise PromptTSGError("negative policy state contradicts a source expression at this boundary")
+            continue
+        if item.state in {"absent", "not_applicable"}:
+            for requirement in graph.nodes:
+                key = requirement.node_id
+                if (requirement.semantic_id != item.feature_id
+                    or (key, "constrains", item.scope.operation_node_id) not in links):
+                    continue
+                covered = {target for source, relation, target in links
+                           if source == key and relation == "constrains"
+                           and node_by_id[target].node_type == "data_object"}
+                fixed = {source for source, relation, target in links if relation == "conditions"
+                         and target in {key, item.scope.operation_node_id}}
+                subjects = set(item.scope.subject_node_ids)
+                conditions = set(item.scope.condition_node_ids)
+                # A partial or conditional positive cannot be relabeled as
+                # an unqualified negative for the whole operation/input set.
+                if ((not subjects or not covered or subjects & covered)
+                    and (fixed <= conditions or conditions <= fixed)):
+                    raise PromptTSGError("scoped negative contradicts source requirement coverage")
+        for key in item.requirement_node_ids:
+            if (key not in node_by_id or node_by_id[key].semantic_id != item.feature_id
+                or not requirement_covers_scope(key, item.scope.operation_node_id,
+                    item.scope.subject_node_ids, item.scope.condition_node_ids, links=links,
+                    node_types={k: n.node_type for k, n in node_by_id.items()})):
+                raise PromptTSGError("scoped presence lacks exact requirement-to-scope evidence")
+        # Mixing a new operation-scoped assessment with a frozen triple must agree.
+        if not item.scope.subject_node_ids and not item.scope.condition_node_ids:
+            old = {(target, feature): state for target, feature, state in graph.feature_assessments}
+            if old.get((item.scope.operation_node_id, item.feature_id), item.state) != item.state:
+                raise PromptTSGError("operation and scoped feature states conflict")
     allowed = {tuple(item) for item in catalog["allowed_edges"]}
     unresolved_relation_set = set(graph.unresolved_relations)
     available_semantics = {node.semantic_id for node in graph.nodes} | set(
@@ -1218,13 +1177,9 @@ def query_context(
     graph: PromptTSG,
     *,
     query: Mapping[str, Any],
-    cwe: str,
-    task_family: str,
 ) -> QueryResult:
     """Evaluate one catalog query with total four-valued semantics."""
 
-    if graph.schema_version != "3.0" and (query["cwe_id"] != cwe or query["task_family"] != task_family):
-        return QueryResult(query["query_id"], QueryState.NOT_APPLICABLE, (), ())
     by_semantic: dict[str, list[TSGNode]] = {}
     asserted, _ = graph_requirement_membership(graph)
     for node in graph.nodes:
@@ -1235,8 +1190,7 @@ def query_context(
     forbidden = set(query["forbidden_semantics"])
     present = set(by_semantic)
     unresolved = set(graph.unresolved_semantics)
-    if graph.schema_version == "3.0":
-        unresolved |= (required | forbidden) - present - set(graph.absent_semantics)
+    unresolved |= (required | forbidden) - present - set(graph.absent_semantics)
 
     # A context is a conjunction of positive and negative predicates.  A known
     # false predicate is decisive even when another predicate is unresolved;
@@ -1253,51 +1207,14 @@ def query_context(
         )
         return QueryResult(query["query_id"], QueryState.UNRESOLVED, evidence, ())
 
-    if graph.schema_version == "3.0":
-        bindings = query_bindings(graph, query=query)
-        if not bindings:
-            # Open extraction records evidenced edges; an omitted relation is unknown.
-            return QueryResult(query["query_id"], QueryState.UNRESOLVED, (), ())
-        return QueryResult(query["query_id"], QueryState.PRESENT,
-                           tuple(sorted({node for nodes, _ in bindings for node in nodes})),
-                           tuple(sorted({edge for _, edges in bindings for edge in edges})))
+    bindings = query_bindings(graph, query=query)
+    if not bindings:
+        # Open extraction records evidenced edges; an omitted relation is unknown.
+        return QueryResult(query["query_id"], QueryState.UNRESOLVED, (), ())
+    return QueryResult(query["query_id"], QueryState.PRESENT,
+                       tuple(sorted({node for nodes, _ in bindings for node in nodes})),
+                       tuple(sorted({edge for _, edges in bindings for edge in edges})))
 
-    relation_matches = []
-    unresolved_relation_evidence: set[str] = set()
-    unresolved_relations = set(graph.unresolved_relations)
-    for source_semantic, edge_type, target_semantic in query["required_relations"]:
-        relation = (source_semantic, edge_type, target_semantic)
-        if relation in unresolved_relations:
-            unresolved_relation_evidence.update(
-                node.node_id
-                for semantic in (source_semantic, target_semantic)
-                for node in by_semantic.get(semantic, ())
-            )
-            continue
-        source_ids = {node.node_id for node in by_semantic[source_semantic]}
-        target_ids = {node.node_id for node in by_semantic[target_semantic]}
-        matches = [
-            edge
-            for edge in graph.edges
-            if edge.edge_type == edge_type
-            and edge.source_id in source_ids
-            and edge.target_id in target_ids
-        ]
-        if not matches:
-            return QueryResult(query["query_id"], QueryState.ABSENT, (), ())
-        relation_matches.extend(matches)
-    if unresolved_relation_evidence:
-        return QueryResult(
-            query["query_id"],
-            QueryState.UNRESOLVED,
-            tuple(sorted(unresolved_relation_evidence)),
-            (),
-        )
-    evidence_nodes = tuple(
-        sorted(node.node_id for semantic in required for node in by_semantic[semantic])
-    )
-    evidence_edges = tuple(sorted(edge.edge_id for edge in relation_matches))
-    return QueryResult(query["query_id"], QueryState.PRESENT, evidence_nodes, evidence_edges)
 
 
 def query_bindings(graph: PromptTSG, *, query: Mapping[str, Any]) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
@@ -1335,7 +1252,7 @@ def feature_state(graph: PromptTSG, feature_id: str, target_node_id: str | None 
             raise PromptTSGError("feature query contains conflicting operation coordinates")
         assessment = scoped_feature_assessment(graph, feature_id, scope)
         return QueryState(assessment.state) if assessment else QueryState.UNRESOLVED
-    if graph.schema_version == "3.0" and target_node_id is not None:
+    if target_node_id is not None:
         states = [state for target, feature, state in graph.feature_assessments
                   if target == target_node_id and feature == feature_id]
         if len(states) == 1:
@@ -1347,7 +1264,7 @@ def feature_state(graph: PromptTSG, feature_id: str, target_node_id: str | None 
     mentioned = [node for node in graph.nodes if node.semantic_id == feature_id]
     if mentioned and not any(n.node_type not in REQUIREMENT_TYPES or n.node_id in atoms for n in mentioned):
         return QueryState.UNRESOLVED
-    if graph.schema_version == "3.0" and not any(node.semantic_id == feature_id for node in graph.nodes):
+    if not any(node.semantic_id == feature_id for node in graph.nodes):
         return QueryState.ABSENT if feature_id in graph.absent_semantics else QueryState.UNRESOLVED
     return (
         QueryState.PRESENT
@@ -1430,7 +1347,6 @@ def _validate_query(
     semantics: Mapping[str, str],
     edge_types: Iterable[str],
     allowed_edges: set[tuple[str, str, str]],
-    actionable_types: Iterable[str] = ("safety_requirement",),
 ) -> None:
     required = {
         "query_id",
@@ -1454,7 +1370,7 @@ def _validate_query(
         not needed
         or set(needed) & set(forbidden)
         or any(item not in semantics for item in (*needed, *forbidden))
-        or semantics.get(feature) not in actionable_types
+        or semantics.get(feature) not in REQUIREMENT_TYPES
     ):
         raise PromptTSGError("Prompt TSG query semantics are invalid")
     relation_types = set(edge_types)

@@ -694,8 +694,8 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
         requirement_structures=tuple(r for r in graph.requirement_structures if r[0] != owned),
         requirement_relations=())
     assert choose_candidate_scope(removed, selector) == scope
-    assert query_context(graph,query=query,cwe='',task_family='').state.value == 'present'
-    assert query_context(removed,query=query,cwe='',task_family='').state.value == 'present'
+    assert query_context(graph,query=query).state.value == 'present'
+    assert query_context(removed,query=query).state.value == 'present'
 
     # Composites are authored structural controls, not model-accuracy samples.
     # Their guard stays with the owner expression; OR/NOT do not assert leaves.

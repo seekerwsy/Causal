@@ -29,7 +29,9 @@ TSG edges express source semantics, not causal relationships. An unexpressed
 requirement does not imply insecure generated code; unknown does not mean absent.
 Post-assignment compliance, generation success and drift never filter the ITT
 denominator. Secure-code yield, Oracle coverage, functionality and joint success
-remain separate. `main` is Atomic-only; [Pair research is deferred](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research).
+remain separate. Current TSG uses graph schema 3 and concept-catalog schema 2;
+older formats are replayed with their captured Git implementation.
+`main` is Atomic-only; [Pair research is deferred](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research).
 
 ## Reproduce the reviewer smoke
 

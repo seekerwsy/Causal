@@ -441,6 +441,14 @@ def test_atomic_source_gates_use_exact_scopes_without_requiring_control_text():
     )
 
     prompt, catalog, graph, ids = _scoped_graph(source_query=True)
+    from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record, prompt_tsg_from_record
+    record = prompt_tsg_record(graph)
+    assert prompt_tsg_record(prompt_tsg_from_record(record)) == record
+    for version in ("1.0", "2.0"):
+        with pytest.raises(PromptTSGError, match="serialized schema"):
+            prompt_tsg_from_record({**record, "schema_version": version})
+    with pytest.raises(PromptTSGError, match="catalog schema"):
+        catalog_from_record({**catalog, "schema_version": "1.0"})
     scope = AnalysisScope("sql-inputs", "sql", ("python",), ("database",), ("query",))
     common = dict(
         task_id=graph.task_id,

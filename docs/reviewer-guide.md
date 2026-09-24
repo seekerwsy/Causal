@@ -130,3 +130,31 @@ Python source under `src/` decreased from 35,115 to 29,670 physical lines
 (including comments and blank lines), across 54 files. The data modules decreased
 from 9,297 to 3,907 lines. These figures exclude fixtures, tests and documents;
 fixed synthetic input fixtures now replace tests of the retired producers.
+
+## Current-format cleanup
+
+The next contraction starts from `91f3ffd33`, preserved on
+`codex/pre-tsg-oracle-contraction-20260924`. Active TSG construction and loading
+now require graph schema 3 and concept-catalog schema 2. Earlier graph formats
+must use their captured Git implementation; there is no silent conversion.
+Current graph serialization and content identities remain unchanged. Context
+queries no longer accept unused CWE/task-family filters: they inspect the bound
+source structure, and missing relations remain unresolved rather than absent.
+
+The unused `python.cwe89.dynamic_identifier_and_values.v1` measurement profile
+is retired. Path and XML v1 profiles remain because the frozen registry still
+references them; their original interpretation is preserved, not upgraded in
+place. Path profiles share sink traversal while retaining their distinct guard
+rules and diagnostic reasons. Changing their scientific measurement rules would
+require a prospective configuration change, not a cleanup of code.
+
+The isolated Python 3.12 suite passed all 100 cases (29.18 seconds); a subsequent
+path-diagnostic preservation fix passed the 9 affected measurement cases. All 20
+smoke outputs match the preceding version byte for byte. Across 54 already exposed
+calibration snippets, all 18 retained profiles produced identical full decisions
+before and after the refactor (972 comparisons). This checks implementation
+equivalence, not universal Oracle accuracy or real-model performance.
+
+`src/` now has 29,521 Python lines, 149 fewer than the preceding contraction.
+The statistical estimators, arm design and independent result arithmetic were
+not changed. No provider calls or paper edits were made.

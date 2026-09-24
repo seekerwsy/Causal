@@ -47,9 +47,12 @@ def test_xml_external_entity_endpoint_keeps_defaults_and_file_contents_unknown()
     ]
     for code, expected in cases:
         assert evaluate_security_profile(code, "python.cwe611.xml_external_entity.v2")["security_label"] == expected
-    # Historical results must retain their original interpretation.
+    # Still referenced by the frozen registry: no silent change of interpretation.
     assert evaluate_security_profile(cases[0][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "insecure"
     assert evaluate_security_profile(cases[1][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "secure"
+    with pytest.raises(ValueError, match="unsupported local security profile"):
+        evaluate_security_profile(cases[0][0], "python.cwe89.dynamic_identifier_and_values.v1")
+
 
 
 @pytest.mark.parametrize('body, expected', [

@@ -500,7 +500,7 @@ def freeze_source_eligibility(
         if graph.task_id != task_id:
             raise ValueError("source graph belongs to a different task")
         validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
-        context_state = query_context(graph, query=query, cwe="", task_family="").state
+        context_state = query_context(graph, query=query).state
         if factor_scope is not None:
             validate_feature_scope(graph, factor_scope)
             if context_state is QueryState.PRESENT and (

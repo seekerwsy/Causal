@@ -16,6 +16,7 @@ LOCAL_PROFILE_IDS = frozenset(
     {
         "python.cwe295.tls_certificate_validation.v1",
         "python.cwe327.cipher_algorithm_selection.v1",
+        "python.cwe611.xml_external_entity.v1",
         "python.cwe611.xml_external_entity.v2",
         "python.cwe22.archive_extraction.v1",
         "python.cwe22.path_confinement.v1",
@@ -27,9 +28,7 @@ LOCAL_PROFILE_IDS = frozenset(
         "python.cwe502.function_parameter_deserialization.v2",
         "python.cwe328.message_hashing.v1",
         "python.cwe338.security_randomness.v1",
-        "python.cwe89.dynamic_identifier_and_values.v1",
         "python.cwe89.dynamic_identifier_and_values.v2",
-        "python.cwe611.xml_external_entity.v1",
         "python.cwe732.owner_only_file_permissions.v1",
         "python.cwe798.credential_source.v1",
         "python.cwe918.outbound_url.v1",
@@ -86,6 +85,8 @@ _XML_CALLS = frozenset(
         "xml.sax.parseString",
     }
 )
+
+
 _CREDENTIAL_TERMS = (
     "api_key",
     "apikey",
@@ -108,18 +109,20 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         facts = _tls_certificate_facts(tree, aliases)
     elif profile_id.endswith("cipher_algorithm_selection.v1"):
         facts = _cipher_algorithm_facts(tree, aliases)
+    elif profile_id.endswith("xml_external_entity.v1"):
+        facts = _xml_facts(tree, aliases)
     elif profile_id.endswith("xml_external_entity.v2"):
         facts = _xml_external_entity_facts(tree, aliases)
-    elif profile_id.endswith("path_confinement.v2"):
-        facts = _path_facts_v2(tree, aliases)
     elif profile_id.endswith("path_confinement.v1"):
+        facts = _path_facts(tree, aliases, legacy=True)
+    elif profile_id.endswith("path_confinement.v2"):
         facts = _path_facts(tree, aliases)
     elif profile_id.endswith(("fixed_executable_argv.v1", "function_parameter_subprocess.v2")):
         facts = _subprocess_facts(tree, aliases)
     elif profile_id.endswith("sql_values.v1"):
         facts = _sql_value_facts(tree, aliases)
     elif profile_id.endswith("function_parameter_sqlite_query.v2"):
-        facts = _sql_facts(tree, aliases, equivalent_allowlists=True)
+        facts = _sql_facts(tree, aliases)
     elif profile_id.endswith("function_parameter_deserialization.v2"):
         facts = _deserialization_facts(tree, aliases)
     elif profile_id.endswith("message_hashing.v1"):
@@ -127,13 +130,9 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
     elif profile_id.endswith("security_randomness.v1"):
         facts = _randomness_facts(tree, aliases)
     elif profile_id.endswith("dynamic_identifier_and_values.v2"):
-        facts = _sql_facts(tree, aliases, equivalent_allowlists=True)
-    elif profile_id.endswith("dynamic_identifier_and_values.v1"):
-        facts = _sql_facts(tree, aliases, equivalent_allowlists=False)
+        facts = _sql_facts(tree, aliases)
     elif profile_id.endswith("archive_extraction.v1"):
         facts = _archive_facts(tree, aliases)
-    elif profile_id.endswith("xml_external_entity.v1"):
-        facts = _xml_facts(tree, aliases)
     elif profile_id.endswith("outbound_url.v1"):
         facts = _url_facts(tree, aliases)
     elif profile_id.endswith("owner_only_file_permissions.v1"):
@@ -285,45 +284,11 @@ def _resolved_guarded_names(function: ast.AST) -> dict[str, int]:
     return guarded
 
 
-def _path_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
-    facts = []
-    for function in _functions(tree):
-        params = _parameters(function)
-        assignments = _assignments(function)
-        guarded = _resolved_guarded_names(function)
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Call):
-                continue
-            name = _name(node.func, aliases)
-            is_method = isinstance(node.func, ast.Attribute) and node.func.attr in _PATH_METHODS
-            if name not in _PATH_CALLS and not is_method:
-                continue
-            path = node.func.value if is_method else (node.args[0] if node.args else None)
-            if path is None:
-                facts.append(_fact(node, name, "unresolved", "path_argument_missing"))
-                continue
-            expanded = assignments.get(path.id, path) if isinstance(path, ast.Name) else path
-            if (
-                isinstance(path, ast.Name)
-                and path.id in guarded
-                and guarded[path.id] < node.lineno
-            ):
-                state, reason = "safe", "resolved_path_has_containment_guard"
-            elif _is_fixed_path(expanded, assignments):
-                state, reason = "safe", "path_is_independent_of_function_parameters"
-            elif _contains_external_input(expanded, params, aliases):
-                state, reason = "unsafe", "external_input_reaches_path_sink_without_guard"
-            else:
-                state, reason = "unresolved", "path_origin_or_containment_is_unresolved"
-            facts.append(_fact(node, name, state, reason))
-    return facts
-
-
 def _always_exits(nodes: list[ast.stmt]) -> bool:
     return bool(nodes) and isinstance(nodes[-1], (ast.Raise, ast.Return))
 
 
-def _guarded_path_names_v2(function: ast.AST) -> dict[str, int]:
+def _guarded_path_names(function: ast.AST) -> dict[str, int]:
     """Recognize only guards that stop execution before an unsafe path sink."""
 
     assignments = _assignments(function)
@@ -371,12 +336,12 @@ def _guarded_path_names_v2(function: ast.AST) -> dict[str, int]:
     return guarded
 
 
-def _path_facts_v2(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+def _path_facts(tree: ast.AST, aliases: dict[str, str], *, legacy: bool = False) -> list[dict[str, Any]]:
     facts = []
     for function in _functions(tree):
         params = _parameters(function)
         assignments = _assignments(function)
-        guarded = _guarded_path_names_v2(function)
+        guarded = (_resolved_guarded_names(function) if legacy else _guarded_path_names(function))
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
                 continue
@@ -394,7 +359,8 @@ def _path_facts_v2(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any
                 and path.id in guarded
                 and guarded[path.id] < node.lineno
             ):
-                state, reason = "safe", "resolved_path_has_stopping_containment_guard"
+                state, reason = "safe", ("resolved_path_has_containment_guard" if legacy
+                                         else "resolved_path_has_stopping_containment_guard")
             elif _is_fixed_path(expanded, assignments):
                 state, reason = "safe", "path_is_independent_of_function_parameters"
             elif _contains_external_input(expanded, params, aliases):
@@ -876,8 +842,6 @@ def _has_value_placeholder(node: ast.AST) -> bool:
 def _sql_facts(
     tree: ast.AST,
     aliases: dict[str, str],
-    *,
-    equivalent_allowlists: bool,
 ) -> list[dict[str, Any]]:
     """Bounded joint CWE-89 profile for dynamic identifiers and untrusted values."""
 
@@ -888,11 +852,7 @@ def _sql_facts(
         literal_maps = {
             name for name, value in assignments.items() if _literal_string_map(value)
         }
-        guarded_names = (
-            _guarded_identifier_names(function, assignments)
-            if equivalent_allowlists
-            else {}
-        )
+        guarded_names = _guarded_identifier_names(function, assignments)
         for node in ast.walk(function):
             if not isinstance(node, ast.Call) or not (
                 isinstance(node.func, ast.Attribute)
@@ -905,25 +865,13 @@ def _sql_facts(
             query = _resolved_expression(node.args[0], assignments)
             dynamic_parts = _dynamic_sql_parts(query)
             evidence_parts = {
-                id(part): (
-                    _resolved_expression(part, assignments)
-                    if equivalent_allowlists
-                    else part
-                )
+                id(part): _resolved_expression(part, assignments)
                 for part in dynamic_parts
             }
             unresolved_parts = [
                 part
                 for part in dynamic_parts
                 if not _contains_external_input(evidence_parts[id(part)], params, aliases)
-                and not _allowlisted_identifier(
-                    part, assignments, literal_maps, params, guarded_names, node.lineno
-                )
-            ]
-            unsafe_parts = [
-                part
-                for part in dynamic_parts
-                if _contains_external_input(evidence_parts[id(part)], params, aliases)
                 and not _allowlisted_identifier(
                     part, assignments, literal_maps, params, guarded_names, node.lineno
                 )
@@ -950,45 +898,32 @@ def _sql_facts(
                 )
                 for part in dynamic_parts
             )
-            if equivalent_allowlists:
-                identifier_state = (
-                    "safe"
-                    if has_allowlisted_identifier
-                    else "unknown"
-                    if unresolved_parts
-                    else "unsafe"
-                )
-                value_state = "safe" if values_bound else "unsafe"
-                if unresolved_parts:
-                    state, reason = "unresolved", "dynamic_sql_expression_unresolved"
-                elif not has_allowlisted_identifier:
-                    state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
-                elif not values_bound:
-                    state, reason = "unsafe", "sql_value_parameterization_not_proved"
-                else:
-                    state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
-                facts.append(
-                    _fact(
-                        node,
-                        "sql.execute",
-                        state,
-                        reason,
-                        identifier_control=identifier_state,
-                        value_parameterization=value_state,
-                    )
-                )
+            identifier_state = (
+                "safe"
+                if has_allowlisted_identifier
+                else "unknown"
+                if unresolved_parts
+                else "unsafe"
+            )
+            value_state = "safe" if values_bound else "unsafe"
+            if unresolved_parts:
+                state, reason = "unresolved", "dynamic_sql_expression_unresolved"
+            elif not has_allowlisted_identifier:
+                state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
+            elif not values_bound:
+                state, reason = "unsafe", "sql_value_parameterization_not_proved"
             else:
-                if unsafe_parts:
-                    state, reason = "unsafe", "external_input_interpolated_into_sql"
-                elif unresolved_parts:
-                    state, reason = "unresolved", "dynamic_sql_expression_unresolved"
-                elif not has_allowlisted_identifier:
-                    state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
-                elif not values_bound:
-                    state, reason = "unsafe", "sql_value_parameterization_not_proved"
-                else:
-                    state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
-                facts.append(_fact(node, "sql.execute", state, reason))
+                state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
+            facts.append(
+                _fact(
+                    node,
+                    "sql.execute",
+                    state,
+                    reason,
+                    identifier_control=identifier_state,
+                    value_parameterization=value_state,
+                )
+            )
     return facts
 
 
@@ -1007,6 +942,29 @@ def _archive_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any
             state, reason = "unsafe", "archive_members_extracted_without_data_filter"
         facts.append(_fact(node, name, state, reason))
     return facts
+
+
+def _fixed_https_origin(node: ast.AST, assignments: dict[str, ast.AST]) -> bool | None:
+    if isinstance(node, ast.Name) and node.id in assignments:
+        return _fixed_https_origin(assignments[node.id], assignments)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        parsed = urlsplit(node.value)
+        return parsed.scheme == "https" and bool(parsed.hostname)
+    if isinstance(node, ast.JoinedStr):
+        prefix = ""
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                prefix += value.value
+            else:
+                break
+        parsed = urlsplit(prefix)
+        return parsed.scheme == "https" and bool(parsed.hostname) and prefix.startswith(
+            f"https://{parsed.netloc}/"
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fixed_https_origin(node.left, assignments)
+        return left if left is not None else False
+    return None
 
 
 def _xml_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
@@ -1043,29 +1001,6 @@ def _xml_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
             state, reason = "unsafe", "untrusted_xml_uses_default_parser"
         facts.append(_fact(node, name, state, reason))
     return facts
-
-
-def _fixed_https_origin(node: ast.AST, assignments: dict[str, ast.AST]) -> bool | None:
-    if isinstance(node, ast.Name) and node.id in assignments:
-        return _fixed_https_origin(assignments[node.id], assignments)
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        parsed = urlsplit(node.value)
-        return parsed.scheme == "https" and bool(parsed.hostname)
-    if isinstance(node, ast.JoinedStr):
-        prefix = ""
-        for value in node.values:
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                prefix += value.value
-            else:
-                break
-        parsed = urlsplit(prefix)
-        return parsed.scheme == "https" and bool(parsed.hostname) and prefix.startswith(
-            f"https://{parsed.netloc}/"
-        )
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _fixed_https_origin(node.left, assignments)
-        return left if left is not None else False
-    return None
 
 
 def _url_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
