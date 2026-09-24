@@ -8,8 +8,6 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.data.commands import _run_prepare_qualification_review
-
 CliHandler = Callable[[argparse.Namespace, argparse.ArgumentParser], int]
 
 
@@ -87,21 +85,6 @@ def _add_representation_group(groups: Any) -> None:
     holdout.add_argument("--cwe", action="append", required=True)
     holdout.add_argument("--task-units-per-cwe", type=int, default=3)
     holdout.add_argument("--ranking-salt", required=True)
-
-    qualification_review = _leaf(
-        actions,
-        "prepare-qualification-review",
-        _run_prepare_qualification_review,
-        "prepare disjoint source-only qualification review packets without assigning roles",
-    )
-    qualification_review.add_argument("source_bundle", type=Path)
-    qualification_review.add_argument("catalog", type=Path)
-    qualification_review.add_argument("registry", type=Path)
-    qualification_review.add_argument("output", type=Path)
-    qualification_review.add_argument("--producer-commit", required=True)
-    qualification_review.add_argument("--ranking-salt", required=True)
-    qualification_review.add_argument("--qual-dev-count", type=int, default=28)
-    qualification_review.add_argument("--qual-accept-count", type=int, default=28)
 
     extract_contracts = _leaf(
         actions,

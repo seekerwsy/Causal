@@ -35,7 +35,7 @@ contract review follows [contract content cleaning](contract-content-cleaning.md
 The immutable v5 baseline can be verified without replaying development history:
 
 ```text
-prompt-mechanism-study curate finalize task-units verify data/dataset-curation/reviewer-task-unit-dataset-v5
+prompt-mechanism-study data verify-inputs data/dataset-curation/reviewer-task-unit-dataset-v5
 ```
 
 ## Disjoint roles

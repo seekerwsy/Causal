@@ -79,15 +79,16 @@ Source is grouped directly under `src/`: `data`, `tsg`, `discovery`, `experiment
 `measurement` and `verification`. `src/cli.py` is the command entry and
 `src/target_workflow.py` the linear workflow. `development` only supplies the
 reviewer smoke fixture. The import package remains `prompt_mechanism_study`.
-Source-preparation commands live in `data/commands.py` and source review in
-`data/source_review.py`. Extraction, generation and functional review share
+Source import and read-only input verification live in `data/commands.py`.
+Contracts and independent source judgments are supplied inputs; the prototype
+does not run a separate contract-production and repair campaign. Extraction, generation and functional review share
 `llm.py`; each stage retains its own response interpretation. File serialization
 is shared in `artifact_io.py`, while result arithmetic is independently replayed
 in `verification/`. Result tables are built by `experiment/reporting.py`.
 
 | Author operation | Entry or guide |
 | --- | --- |
-| Prepare new source data | `data` / `curate`; [dataset boundaries](docs/research-dataset-spec.md) and [source preparation](docs/contract-content-cleaning.md) |
+| Prepare new source data | `data`; [dataset boundaries](docs/research-dataset-spec.md) and [source preparation](docs/contract-content-cleaning.md) |
 | Extract and assess TSG | `representation` / `qualification`; [TSG workflow](docs/tsg-workflow-stability.md) and [candidate semantics](docs/tsg-candidate-construction.md) |
 | Run authorized bounded development | `study development OUTPUT --development-plan FROZEN_PLAN` |
 | Verify its saved results | `study verify-development SAVED_RUN` |

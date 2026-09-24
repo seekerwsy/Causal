@@ -92,28 +92,41 @@ removed paths in the active package.
 
 | Area | Current responsibility and retained boundary |
 | --- | --- |
-| Entry and source preparation | `cli.py` routes the study; `data/commands.py` contains author data commands. `data/source_review.py` handles independent source decisions, not TSG semantics. |
+| Entry and source preparation | `cli.py` routes the study; `data/commands.py` contains author data commands. Source contracts and independent review decisions are supplied inputs; frozen v4/v5 identities, source evidence and task partitions remain verified. |
 | Representation | `tsg/source_records.py` owns extraction attempts and record compilation; `prompt_contract_extract.py` orchestrates graph construction and scope assessment without a reverse import from the producer. Conditions, scope and unknown semantics remain unchanged. |
 | Prioritization | `discovery/prioritization.py` retains the current PAG/FCI implementation, RD ranking, fixed candidate slots and Full/RD-only comparison. The unused adjacency-only adapter is removed. |
 | Freeze and assignment | `experiment/study_planning.py`, `study_design.py` and `randomization.py` retain prospective scope, budgets, independent task units and exact arm/seed assignment. These checks implement research boundaries rather than historical recovery. |
 | Measurement | `measurement/security_profiles.py` is the security implementation. Functional judgment remains separate; the native worker and its Docker adapter are together in `native_behavior.py`. Host-isolation protections remain. |
 | Outcomes and reporting | `experiment/outcomes.py`, `inference.py` and `reporting.py` assemble assigned outcomes, estimate effects and build tables. Unused one-off paired/model summaries are removed. The frozen development screen remains distinct from confirmatory inference. |
 | Independent verification | `verification/` retains its separate assignment and statistical replay. It does not import production estimators to manufacture agreement. |
-| Shared mechanics | `llm.py` provides one explicit chat attempt for cloud or local models. `artifact_io.py` handles JSON, hashes and task-dataset serialization; v4/v5 dataset identities and bytes remain distinct. |
+| Shared mechanics | `llm.py` provides one explicit chat attempt for cloud or local models. `artifact_io.py` handles JSON and hashes; v4/v5 dataset identities and bytes remain distinct. |
 
-The old keyword-deletion contract repair, subsequent recovery-adjudication
-command, cross-run batch-copy option and one-off archived source-asset replay
-are removed. Source corrections use the documented proposal/review/repair path;
-an unchanged run can still resume its completed batches. There is no automatic
-provider retry. Existing historical artifacts require their captured producer;
-this refactor does not reclassify old results or activate the formal protocol.
+The input contraction is preserved against `6b0e8b220` on local branch
+`codex/pre-input-contraction-20260924`. Automatic contract production, evidence
+repair loops, source-review packet production, v4/v5 corpus assembly and the
+closed-catalog qualification packet builder are removed from the active package.
+Raw source import and supplied-contract import remain available under `data`.
+Use `data verify-inputs BUNDLE` for frozen v4/v5 inputs and
+`data verify-source-review ROUND` for independently supplied historical review
+records. See [the input boundary](contract-content-cleaning.md).
 
-Validation on 2026-09-24 used a newly created Python 3.12 virtual environment
-installed with `.[dev,selectors,languages]`: all 100 tests passed, including the
-seven-stage smoke and independent verifier. The smoke's 20 saved files were
-byte-identical to the pre-refactor reference. The released v5 dataset verified,
-both v4/v5 dataset writers preserved their former bytes, and all 34 retained
-CLI leaves preserved their arguments/defaults apart from the retired reuse
-option. No live model generation or Docker measurement was run; the relocated
-container adapter's logic was checked unchanged. These are implementation
-checks, not new security-effect evidence.
+This is a deliberate reduction in preparation capability. It does not change
+TSG extraction, FCI/RD selection, four-arm assignment, outcome accounting or
+inference. Existing historical artifacts retain their original interpretation
+and require their captured producer if rebuilding them is necessary. The formal
+protocol remains inactive.
+
+Validation of the input contraction on 2026-09-24 used the isolated Python 3.12
+environment installed for the preceding framework review, with fresh test output
+directories: 100 tests passed in 29.88 seconds. All 20 smoke files remain
+byte-identical to the pre-refactor reference. The released v5 bundle still verifies
+with 2,165 task units and manifest
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+All retained function bodies in the four reduced data modules are unchanged;
+source imports and static unused-name checks pass. These checks involve no model
+calls, new effect evidence or paper changes.
+
+Python source under `src/` decreased from 35,115 to 29,670 physical lines
+(including comments and blank lines), across 54 files. The data modules decreased
+from 9,297 to 3,907 lines. These figures exclude fixtures, tests and documents;
+fixed synthetic input fixtures now replace tests of the retired producers.

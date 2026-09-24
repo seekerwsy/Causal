@@ -1,15 +1,15 @@
 # Task-unit data bundle
 
-This document describes the shared source-data structure. The immutable schema-5
-quality baseline is verified by `contract_cleaning.verify_contract_content_data`;
-`task_unit_data.py` describes the retained schema-4 compiler boundary. `research-dataset-spec.md` defines the
-planned research populations but does not duplicate this field schema.
+This document describes the frozen source-data structure. The current prototype
+reads prepared inputs: `contract_cleaning.verify_contract_content_data` verifies
+schema 5 and `task_unit_data.verify_task_unit_data` verifies schema 4. These are
+read-only verifiers, not a second method or an active corpus-building pipeline.
+The former compilers are preserved at `6b0e8b220` on
+`codex/pre-input-contraction-20260924`.
 
-The compiler is the single active path from the completed seven-source
-curation artifacts to the reviewer-facing task-unit corpus. It performs no
-model calls, semantic re-clustering, Prompt TSG extraction, hypothesis
-eligibility, formal role assignment, generation, measurement, or outcome
-analysis.
+[Source preparation](contract-content-cleaning.md) describes the current input
+boundary. The [dataset specification](research-dataset-spec.md) defines planned
+research populations; input verification grants no formal role or admission.
 
 ## Current bundle and verification
 
@@ -22,7 +22,7 @@ from source admission. Its ten files include the nine tables listed below plus
 `contract-repair-ledger.jsonl`, which preserves source-only review decisions.
 
 ```text
-prompt-mechanism-study curate finalize task-units verify data/dataset-curation/reviewer-task-unit-dataset-v5
+prompt-mechanism-study data verify-inputs data/dataset-curation/reviewer-task-unit-dataset-v5
 ```
 
 The old schema-4 build commands and provisional 1,222/563/166 counts are

@@ -1,449 +1,55 @@
+"""Fixed synthetic source bundles protect provenance independently of producers."""
 import hashlib
 import json
 from pathlib import Path
+
 import pytest
-from prompt_mechanism_study.artifact_io import write_bundle
-from prompt_mechanism_study.data.contract_cleaning import (
-    finalize_contract_content_data,
-    freeze_future_evaluation_reservation,
-    verify_contract_content_data,
-)
-from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.data.task_unit_data import compile_task_unit_data, verify_task_unit_data
+
+from prompt_mechanism_study.cli import main
+from prompt_mechanism_study.data.contract_cleaning import ContractCleaningError, verify_contract_content_data
+from prompt_mechanism_study.data.task_unit_data import TaskUnitDataError, verify_task_unit_data
+from prompt_mechanism_study.records import canonical_json, content_hash
 
 
-def test_content_producer_binds_repaired_contracts_without_certifying_disputed_evidence(tmp_path, monkeypatch):
-    """Exercise actual requests/parsers; only the upstream bundle reader is stubbed."""
-    from prompt_mechanism_study.data import contract_cleaning as cleaning
-    from prompt_mechanism_study.artifact_io import read_json
+@pytest.mark.parametrize("version", ["4", "5"])
+def test_fixed_input_identity_evidence_and_task_partition(version, tmp_path, capsys):
+    fixture = json.loads((Path(__file__).parent / "fixtures/task-unit-bundles.json").read_text(encoding="utf-8"))[version]
+    for name, payload in fixture.items():
+        (tmp_path / name).write_bytes(payload.encode("utf-8"))
+    verify = verify_task_unit_data if version == "4" else verify_contract_content_data
+    error = TaskUnitDataError if version == "4" else ContractCleaningError
+    result = verify(tmp_path)
+    assert result["task_units"] == result["functional_contracts"] == 3
+    assert not result["formal_execution_authorized"]
+    assert main(["data", "verify-inputs", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out) == result
 
-    tasks, contracts, quality = {}, {}, {}
-    for key, faithful in [('faithful', True), ('faulty', False)]:
-        prompt = f'For {key}, implement main. Return result.'
-        tasks[key] = dict(representative_record_id=key, declared_execution_context=dict(language='python'),
-            model_visible_input=dict(natural_prompt=prompt, natural_prompt_content_sha256=content_hash(prompt)))
-        contracts[key] = dict(contract_id='old-' + key, resolution_status='resolved', entrypoint='main',
-            requirements=['Return result.' if faithful else 'Return something else.'], inputs=[],
-            outputs=['result'], side_effects=[], environment_dependencies=[],
-            review=dict(contract_status='faithful' if faithful else 'faulty',
-                        issue_codes=[], remaining_deterministic_issue_codes=[]))
-        quality[key] = dict(quality_disposition='QUALITY_INCLUDED' if faithful else 'QUALITY_PENDING_CONTRACT_REPAIR')
-    base = write_bundle(tmp_path / 'base', {'fixture.json': 'Source population is checked in the compiler test.'})
-    monkeypatch.setattr(cleaning, 'verify_task_unit_data', lambda _: None)
-    monkeypatch.setattr(cleaning, '_base_population', lambda _: (tasks, contracts, quality))
-    requests = []
+    def rewrite(name, rows):
+        payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+        (tmp_path / name).write_bytes(payload)
+        manifest = json.loads(fixture["manifest.json"])
+        manifest["files"][name].update(record_count=len(rows), sha256=hashlib.sha256(payload).hexdigest())
+        (tmp_path / "manifest.json").write_text(canonical_json(manifest) + "\n", encoding="utf-8", newline="\n")
 
-    def provider(request, config, prompt):
-        requests.append(request)
-        rows = []
-        for item in request['tasks']:
-            if request['request_kind'] == 'blind_functional_contract_semantic_repair':
-                assert 'Do not return evidence spans' in prompt
-                rows.append(dict(item_index=item['item_index'], resolution_status='resolved', entrypoint='main',
-                    requirements=['Return result.'], inputs=[], outputs=['result'], side_effects=[],
-                    environment_dependencies=[], source_specification_assessment='sufficient',
-                    repair_category='CONTRACT_EXTRACTION_ERROR', reason='Source-only repair.'))
-            else:
-                assert item['immutable_contract']['requirements'] == ['Return result.']
-                quote = item['source_prompt'] if 'faithful' in item['source_prompt'] else 'not a source quote'
-                rows.append(dict(item_index=item['item_index'], binding_status='bound', reason='Fixture binding.',
-                    evidence_bindings=[dict(target_id=target['target_id'],
-                        spans=[dict(evidence_text=quote, evidence_occurrence=1)])
-                        for target in item['evidence_targets']]))
-        return json.dumps({'items': rows}).encode()
+    # Even with a recomputed file hash, every independent task must be in exactly
+    # one duplicate group. More rows may not manufacture more task support.
+    groups = [json.loads(line) for line in fixture["near-duplicate-groups.jsonl"].splitlines()]
+    groups[0]["task_unit_ids"].append(groups[0]["task_unit_ids"][0])
+    rewrite("near-duplicate-groups.jsonl", groups)
+    with pytest.raises(error):
+        verify(tmp_path)
+    (tmp_path / "near-duplicate-groups.jsonl").write_bytes(fixture["near-duplicate-groups.jsonl"].encode())
 
-    output = tmp_path / 'proposals'
-    report = cleaning.run_contract_content_proposals(Path.cwd(), base, output,
-        producer_commit='test', provider=provider)
-    assert len(requests) == 3  # Existing evidence, semantic repair, then repaired evidence.
-    assert all(r['arms_outcomes_roles_included'] is False for r in requests)
-    assert report['all_task_units_accounted_for'] and report['task_unit_count'] == 2
-    assert report['evidence_only_count'] == report['semantic_repair_count'] == 1
-    assert report['full_prompt_pending_review_count'] == 1 and not report['scientific_claim_allowed']
-    proposals = read_json(output / 'final/proposed-contracts.json')
-    ledger = {r['task_unit_id']: r for r in read_json(output / 'final/contract-repair-ledger.json')}
-    assert ledger['faulty']['evidence_binding_status'] == 'full_prompt_pending_review'
-    assert all(r['review_status'] == 'PENDING' for r in ledger.values())
-    for proposal in proposals:
-        cleaning._validate_proposal_identity(proposal)
-        cleaning._validate_frozen_evidence(tasks[proposal['task_unit_id']], proposal)
-    raw_binding = read_json(output / 'repair-evidence/batches/batch-0001/result.json')['items'][0]
-    assert raw_binding['binding_status'] == 'needs_repair' and raw_binding['content_evidence'] is None
-    assert cleaning.run_contract_content_proposals(Path.cwd(), base, output,
-        producer_commit='test', provider=provider) == report
-    assert len(requests) == 3  # Same frozen preparation replays without extra provider calls.
-
-    from prompt_mechanism_study.llm import ProviderError
-    from prompt_mechanism_study.data.curation import CurationError
-    failures = []
-    def failing_provider(*args):
-        failures.append(args)
-        raise ProviderError('provider response format is invalid')
-    failed_output = tmp_path / 'failed-proposals'
-    with pytest.raises(CurationError, match='failed and was closed without retry'):
-        cleaning.run_contract_content_proposals(Path.cwd(), base, failed_output,
-            producer_commit='test', provider=failing_provider)
-    assert len(failures) == 1
-    failure = read_json(failed_output / 'evidence/batches/batch-0001/result.json')
-    assert failure['status'] == 'ERROR' and failure['error_type'] == 'ProviderError'
-
-
-def _record(record_id, prompt, dataset, item, *, tests=()):
-    return {
-        "citation_url": "https://example.test/source",
-        "cwe": "CWE-89",
-        "language": "python",
-        "license_id": "test-only",
-        "prompt": prompt,
-        "prompt_sha256": content_hash(prompt),
-        "record_id": record_id,
-        "source_dataset": dataset,
-        "source_file_sha256": "1" * 64,
-        "source_item_id": item,
-        "source_lineage_family": "shared-lineage" if item in {"one", "copy"} else "other",
-        "source_locator": f"source.json#{item}",
-        "source_record_sha256": "2" * 64,
-        "source_test_references": list(tests),
-        "source_version": "v1",
-    }
-
-
-def _contract(task_id, representative, prompt, *, faithful=True):
-    core = {
-        "cluster_id": task_id,
-        "record_id": representative,
-        "source_prompt_sha256": content_hash(prompt),
-        "resolution_status": "resolved",
-        "entrypoint": "main",
-        "requirements": [f"Implement {prompt}."],
-        "inputs": [],
-        "outputs": ["result"],
-        "side_effects": [],
-        "environment_dependencies": [],
-        "reason": "Source-only extraction.",
-    }
-    return {**core, "contract_id": content_id("cluster_contract_", core)}
-
-
-def _review(contract, *, faithful=True):
-    return {
-        "cluster_id": contract["cluster_id"],
-        "contract_id": contract["contract_id"],
-        "record_id": contract["record_id"],
-        "contract_status": "faithful" if faithful else "faulty",
-        "functional_evaluability": "sufficient",
-        "issue_codes": ["none"] if faithful else ["missing_explicit_requirement"],
-        "deterministic_issue_codes": [],
-        "reason": "Blind source-contract comparison.",
-    }
-
-
-def _ledger(task_id, representative, contract_id, status, candidate_status):
-    return {
-        "arms_or_outcomes_used": False,
-        "blocker_codes": [] if status == "INCLUDED_FINAL_DATASET" else ["pending_contract"],
-        "candidate_status": candidate_status,
-        "contract_id": contract_id,
-        "contract_quality": "STRICT" if status == "INCLUDED_FINAL_DATASET" else "REPAIRABLE",
-        "final_dataset_status": status,
-        "functional_evaluability": "sufficient",
-        "functional_measurement": "AST_COMPILE_AND_BLIND_LLM_PLAUSIBILITY",
-        "language": "python",
-        "study_layer": "python_confirmatory",
-        "primary_cwe": "CWE-89",
-        "mechanism_binding_status": "BOUND",
-        "mechanism_realization_id": "python.cwe89.test.v1",
-        "oracle_profile_id": "python.cwe89.test.v1",
-        "oracle_support_status": "SUPPORTED",
-        "runtime_support_status": "SUPPORTED",
-        "source_dataset": "test",
-        "source_lineage_family": "shared-lineage" if task_id == "task-a" else "other",
-        "source_test_available": False,
-        "representative_record_id": representative,
-        "review_contract_status": "faithful" if status == "INCLUDED_FINAL_DATASET" else "faulty",
-        "task_unit_id": task_id,
-    }
-
-
-def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path):
-    records = [
-        _record("record-a", "prompt A", "source-a", "one", tests=("tests/a.py",)),
-        _record("record-b", "prompt A", "source-b", "copy"),
-        _record("record-c", "prompt C", "source-c", "three"),
-        _record("record-d", "prompt D", "source-c", "four"),
-    ]
-    prepared = write_bundle(tmp_path / "prepared", {"records.json": records})
-    clusters = [
-        {
-            "cluster_id": "task-a",
-            "cwe_label_conflict": False,
-            "cwes": ["CWE-89"],
-            "language": "python",
-            "record_ids": ["record-a", "record-b"],
-            "representative_record_id": "record-a",
-        },
-        {
-            "cluster_id": "task-c",
-            "cwe_label_conflict": False,
-            "cwes": ["CWE-89"],
-            "language": "python",
-            "record_ids": ["record-c"],
-            "representative_record_id": "record-c",
-        },
-        {
-            "cluster_id": "task-d",
-            "cwe_label_conflict": False,
-            "cwes": ["CWE-89"],
-            "language": "python",
-            "record_ids": ["record-d"],
-            "representative_record_id": "record-d",
-        },
-    ]
-    diagnostic = [
-        {
-            "label": "uncertain",
-            "left": "record-c",
-            "right": "record-d",
-        }
-    ]
-    cluster_root = write_bundle(
-        tmp_path / "clusters",
-        {
-            "semantic-clusters.json": clusters,
-            "diagnostic-semantic-edges.json": diagnostic,
-        },
-    )
-    contracts = [
-        _contract("task-a", "record-a", "prompt A"),
-        _contract("task-c", "record-c", "prompt C", faithful=False),
-        _contract("task-d", "record-d", "prompt D"),
-    ]
-    contract_root = write_bundle(
-        tmp_path / "contracts",
-        {
-            "functional-contracts.json": contracts,
-            "repairs.json": [],
-            "review-overrides.json": [],
-        },
-    )
-    review_root = write_bundle(
-        tmp_path / "reviews",
-        {
-            "contract-quality-reviews.json": [
-                _review(contracts[0]),
-                _review(contracts[1], faithful=False),
-                _review(contracts[2]),
-            ]
-        },
-    )
-    ledger = [
-        _ledger(
-            "task-a",
-            "record-a",
-            contracts[0]["contract_id"],
-            "INCLUDED_FINAL_DATASET",
-            "READY_CONFIRMATORY",
-        ),
-        _ledger(
-            "task-c",
-            "record-c",
-            contracts[1]["contract_id"],
-            "PENDING_QUALITY_REPAIR",
-            "PENDING_CONTRACT",
-        ),
-        _ledger(
-            "task-d",
-            "record-d",
-            contracts[2]["contract_id"],
-            "INCLUDED_FINAL_DATASET",
-            "READY_CONFIRMATORY",
-        ),
-    ]
-    candidate = write_bundle(tmp_path / "candidate", {"candidate-ledger.json": ledger})
-    legacy = write_bundle(
-        tmp_path / "legacy",
-        {
-            "role-manifest.json": {
-                "artifact_kind": "legacy_data_role_manifest",
-                "data_role": "LEGACY_ONLY",
-                "formal_use_authorized": False,
-                "bindings": [
-                    {
-                        "data_id": "legacy-d",
-                        "data_role": "LEGACY_ONLY",
-                        "exposure_history_applies_to_all_task_units": ["old-development"],
-                        "task_unit_source_lineage": {"task-d": "other"},
-                    }
-                ],
-            }
-        },
-    )
-    exclusions = tmp_path / "development.json"
-    exclusions.write_text(
-        json.dumps(
-            {
-                "arms_or_outcomes_used": False,
-                "task_unit_ids": ["task-c"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    output = tmp_path / "compiled"
-    result = compile_task_unit_data(
-        prepared_root=prepared,
-        clusters_root=cluster_root,
-        candidate_root=candidate,
-        contracts_root=contract_root,
-        contract_reviews_root=review_root,
-        legacy_roles_root=legacy,
-        development_exclusions_path=exclusions,
-        output=output,
-    )
-
-    assert result["task_units"] == 3
-    assert result["source_records"] == 4
-    assert result["functional_contracts"] == 3
-    assert result["quality_disposition_counts"] == {
-        "QUALITY_INCLUDED": 2,
-        "QUALITY_PENDING_CONTRACT_REPAIR": 1,
-    }
-    assert result["data_role_counts"] == {
-        "LEGACY_ONLY": 1,
-        "QUAL_DEV": 1,
-        "UNASSIGNED": 1,
-    }
-    assert result["readiness_workstream_counts"] == {
-        "CONTRACT_REPAIR": 1,
-        "TECHNICALLY_READY": 2,
-    }
-    assert result["prompt_tsg_status"] == "NOT_GENERATED_PENDING_METHOD_FREEZE"
-    assert verify_task_unit_data(output) == result
-
-    compiled_tasks = {
-        row["task_unit_id"]: row
-        for row in (
-            json.loads(line)
-            for line in (output / "task-units.jsonl").read_text(encoding="utf-8").splitlines()
-        )
-    }
-    proposals = []
-    repair_ledger = []
-    reviews = []
-    for task_id, task in sorted(compiled_tasks.items()):
-        prompt = task["model_visible_input"]["natural_prompt"]
-        evidence = {
-            "offset_basis": "utf8_bytes_of_exact_natural_prompt_v1",
-            "entrypoint": [],
-            "requirements": [
-                [
-                    {
-                        "source_prompt_sha256": content_hash(prompt),
-                        "start_byte": 0,
-                        "end_byte": len(prompt.encode("utf-8")),
-                        "quoted_text": prompt,
-                        "span_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-                    }
-                ]
-            ],
-            "inputs": [],
-            "outputs": [],
-            "side_effects": [],
-            "environment_dependencies": [],
-        }
-        core = {
-            "schema_version": "functional-contract-cleaning-proposal-1.0",
-            "task_unit_id": task_id,
-            "record_id": task["representative_record_id"],
-            "source_prompt_sha256": content_hash(prompt),
-            "resolution_status": "resolved",
-            "entrypoint": None,
-            "requirements": [prompt],
-            "inputs": [],
-            "outputs": [],
-            "side_effects": [],
-            "environment_dependencies": [],
-            "content_evidence": evidence,
-            "proposal_mode": "SEMANTIC_REPAIR",
-            "producer_source_assessment": "sufficient",
-            "producer_reason": "Exact source-bound fixture.",
-            "arms_or_outcomes_used": False,
-        }
-        contract_id = content_id("functional_contract_", core)
-        proposals.append({**core, "contract_id": contract_id})
-        repair_ledger.append(
-            {
-                "schema_version": "contract-repair-ledger-1.0",
-                "task_unit_id": task_id,
-                "old_contract_id": "old-" + task_id,
-                "new_contract_id": contract_id,
-                "repair_status": "PROPOSED_PENDING_INDEPENDENT_REVIEW",
-                "review_status": "PENDING",
-                "review_issue_codes": [],
-                "repair_ledger_record_sha256": content_hash(task_id),
-            }
-        )
-        review_core = {
-            "schema_version": "contract-content-review-1.0",
-            "task_unit_id": task_id,
-            "contract_id": contract_id,
-            "contract_status": "faithful",
-            "evidence_status": "supported",
-            "source_specification_disposition": "sufficient",
-            "issue_codes": ["none"],
-            "repair_category": "EVIDENCE_BACKFILL_ONLY",
-            "reason": "The source fully supports the contract.",
-            "terminal_quality_decision": "QUALITY_INCLUDED",
-            "arms_or_outcomes_used": False,
-        }
-        reviews.append(
-            {
-                **review_core,
-                "contract_content_review_record_sha256": content_hash(review_core),
-            }
-        )
-    proposal_root = write_bundle(
-        tmp_path / "content-proposals",
-        {
-            "proposed-contracts.json": proposals,
-            "contract-repair-ledger.json": repair_ledger,
-            "report.json": {"status": "fixture"},
-        },
-    )
-    content_review_root = write_bundle(
-        tmp_path / "content-reviews",
-        {
-            "contract-content-reviews.json": reviews,
-            "report.json": {
-                "status": "fixture",
-                "review_protocol_id": (
-                    "dual_blind_subagent_review_with_third_adjudication_v4_hash_semantics_explicit"
-                ),
-            },
-        },
-    )
-    reservation_root = tmp_path / "reservation"
-    freeze_future_evaluation_reservation(
-        output, reservation_root, producer_commit="fixture"
-    )
-    final_a = tmp_path / "final-a"
-    final_b = tmp_path / "final-b"
-    verified = finalize_contract_content_data(
-        output,
-        proposal_root,
-        content_review_root,
-        reservation_root,
-        final_a,
-        producer_commit="fixture",
-    )
-    finalize_contract_content_data(
-        output,
-        proposal_root,
-        content_review_root,
-        reservation_root,
-        final_b,
-        producer_commit="fixture",
-    )
-    assert verified["quality_disposition_counts"] == {"QUALITY_INCLUDED": 3}
-    assert verified["future_evaluation_reserved_task_unit_count"] == 1
-    assert verify_contract_content_data(final_a) == verified
-    assert (final_a / "manifest.json").read_bytes() == (final_b / "manifest.json").read_bytes()
+    # Rehashing a contract cannot make its unsupported quote into source evidence.
+    contracts = [json.loads(line) for line in fixture["functional-contracts.jsonl"].splitlines()]
+    if version == "4":
+        contracts[0]["requirement_evidence"] = [dict(
+            evidence_start=0, evidence_end=5, evidence_text="unsupported source quote",
+            evidence_sha256=content_hash("unsupported source quote"))]
+    else:
+        contracts[0]["content_evidence"]["requirements"][0][0]["quoted_text"] = "unsupported source quote"
+    contracts[0]["functional_contract_record_sha256"] = content_hash({
+        k: v for k, v in contracts[0].items() if k != "functional_contract_record_sha256"})
+    rewrite("functional-contracts.jsonl", contracts)
+    with pytest.raises(error):
+        verify(tmp_path)
