@@ -509,7 +509,6 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
         with pytest.raises(ValueError,match='existing source requirement'):
             _occurrence(candidate['sources'][0],occurrence,aliases)
         # Scope preparation must withhold the referenced feature, not claim absence.
-        from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
         fixed=deepcopy(comp.catalog)
         feature=next(f['semantic_id'] for f in comp.facts if f['local_id']=='fact.3')
         fixed['queries']=[dict(query_id='binding',actionable_feature_id=feature,required_semantics=[by_id[op]],

@@ -41,7 +41,7 @@ from prompt_mechanism_study.experiment.randomization import (
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.tsg.representation import ModelBoundCandidateRecord
-from prompt_mechanism_study.discovery.selector_analysis import build_target_rq_tables
+from prompt_mechanism_study.experiment.reporting import build_target_rq_tables
 from prompt_mechanism_study.verification import (
     verify_target_rq_tables,
     verify_target_shared_evidence,

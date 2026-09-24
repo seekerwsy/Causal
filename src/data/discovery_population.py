@@ -774,11 +774,7 @@ def _audit_scoped_discovery_positivity(
     and intervention readiness remain separate from these mechanical counts.
     """
     from prompt_mechanism_study.artifact_io import file_sha256, read_json_exact
-    from prompt_mechanism_study.tsg.representation import (
-        AtomicPolicyKey,
-        Operation,
-        freeze_source_eligibility,
-    )
+    from prompt_mechanism_study.tsg.representation import Operation, freeze_source_eligibility
     from prompt_mechanism_study.discovery.prioritization import (
         AtomicPreOutcomeObservation,
         CandidateCoverageSummary,

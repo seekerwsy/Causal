@@ -569,7 +569,7 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
         assert schema["required"] == ["decisions"]
         assert set(schema["properties"]["decisions"]["required"]) == set(response["decisions"])
         return json.dumps(response).encode()
-    monkeypatch.setattr("prompt_mechanism_study.measurement.functional_judge.bailian_complete", fake_complete)
+    monkeypatch.setattr("prompt_mechanism_study.llm.complete_chat", fake_complete)
     monkeypatch.setattr("prompt_mechanism_study.tsg.candidate_construction._proposal_evaluator", lambda path: {})
     proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=paths[1])
     assert sent == [candidate_model_request(request)]

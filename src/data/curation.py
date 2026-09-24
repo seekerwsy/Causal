@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
-from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+from prompt_mechanism_study.llm import complete_chat
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id
 
 # The frozen provider twice returned only the first ten items from 24-item
@@ -74,8 +74,7 @@ def run_semantic_curation(
     *,
     max_new_batches: int | None = None,
     workers: int = 1,
-    reuse_root: Path | None = None,
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
 ) -> dict[str, Any]:
     """Adjudicate every lexical pair and freeze connected semantic clusters."""
 
@@ -108,11 +107,7 @@ def run_semantic_curation(
         "policy": identities,
         "outcomes_or_arm_labels_used": False,
     }
-    reuse = _reuse_metadata(reuse_root, base_plan) if reuse_root is not None else None
-    plan = {**base_plan, **({"reuse_source": reuse} if reuse is not None else {})}
-    run_root = _initialize(output.resolve(), plan)
-    if reuse_root is not None:
-        _import_reuse(reuse_root.resolve(), run_root, reuse)
+    run_root = _initialize(output.resolve(), base_plan)
     decisions, complete = _execute(
         run_root,
         batches,
@@ -131,7 +126,7 @@ def run_semantic_curation(
     if final.exists():
         verify_bundle(final)
         return read_json(final / "report.json")
-    return _freeze_clusters(prepared, candidates, records, decisions, final, plan)
+    return _freeze_clusters(prepared, candidates, records, decisions, final, base_plan)
 
 
 def run_contract_curation(
@@ -142,9 +137,8 @@ def run_contract_curation(
     *,
     max_new_batches: int | None = None,
     workers: int = 1,
-    reuse_root: Path | None = None,
     existing_contracts_root: Path | None = None,
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
 ) -> dict[str, Any]:
     """Reuse matching contracts and extract only missing cluster contracts."""
 
@@ -191,11 +185,7 @@ def run_contract_curation(
         "policy": identities,
         "outcomes_or_arm_labels_used": False,
     }
-    reuse = _reuse_metadata(reuse_root, base_plan) if reuse_root is not None else None
-    plan = {**base_plan, **({"reuse_source": reuse} if reuse is not None else {})}
-    run_root = _initialize(output.resolve(), plan)
-    if reuse_root is not None:
-        _import_reuse(reuse_root.resolve(), run_root, reuse)
+    run_root = _initialize(output.resolve(), base_plan)
     contracts, complete = _execute(
         run_root,
         batches,
@@ -253,8 +243,7 @@ def run_contract_quality_review(
     *,
     max_new_batches: int | None = None,
     workers: int = 1,
-    reuse_root: Path | None = None,
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
 ) -> dict[str, Any]:
     """Blindly triage every extracted contract before independent adjudication."""
 
@@ -338,11 +327,7 @@ def run_contract_quality_review(
             "no_deterministic_issue_and_faithful_and_functionally_sufficient_v1"
         ),
     }
-    reuse = _reuse_metadata(reuse_root, base_plan) if reuse_root is not None else None
-    plan = {**base_plan, **({"reuse_source": reuse} if reuse is not None else {})}
-    run_root = _initialize(output.resolve(), plan)
-    if reuse_root is not None:
-        _import_reuse(reuse_root.resolve(), run_root, reuse)
+    run_root = _initialize(output.resolve(), base_plan)
     reviews, complete = _execute(
         run_root,
         batches,
@@ -421,275 +406,6 @@ def run_contract_quality_review(
     return report
 
 
-
-
-def repair_response_format_contract_leaks(
-    contracts_root: Path,
-    output: Path,
-) -> dict[str, Any]:
-    """Remove response-format instructions from a successor contract bundle."""
-
-    contracts = contracts_root.resolve()
-    verify_bundle(contracts)
-    contract_rows = _rows(
-        read_json(contracts / "functional-contracts.json"),
-        "functional contracts",
-    )
-    corrected: list[dict[str, Any]] = []
-    repaired_only: list[dict[str, Any]] = []
-    repairs: list[dict[str, Any]] = []
-    seen_clusters: set[str] = set()
-    for contract in contract_rows:
-        cluster_id = contract.get("cluster_id")
-        if not isinstance(cluster_id, str) or cluster_id in seen_clusters:
-            raise CurationError("functional contracts have invalid task-unit identities")
-        seen_clusters.add(cluster_id)
-        original_core = {key: value for key, value in contract.items() if key != "contract_id"}
-        if contract.get("contract_id") != content_id("cluster_contract_", original_core):
-            raise CurationError("functional contract content identity is invalid")
-        requirements = contract.get("requirements")
-        if not isinstance(requirements, list) or any(
-            not isinstance(requirement, str) or not requirement.strip()
-            for requirement in requirements
-        ):
-            raise CurationError("contract requirements are invalid")
-        removed = [
-            requirement
-            for requirement in requirements
-            if _is_response_format_requirement(requirement)
-        ]
-        retained = [requirement for requirement in requirements if requirement not in removed]
-        if removed and not retained:
-            raise CurationError("format-leak repair would erase every functional requirement")
-        corrected_core = {**original_core, "requirements": retained}
-        corrected_contract = {
-            **corrected_core,
-            "contract_id": content_id("cluster_contract_", corrected_core),
-        }
-        corrected.append(corrected_contract)
-        if removed:
-            repaired_only.append(corrected_contract)
-            repairs.append(
-                {
-                    "cluster_id": cluster_id,
-                    "record_id": contract["record_id"],
-                    "old_contract_id": contract["contract_id"],
-                    "new_contract_id": corrected_contract["contract_id"],
-                    "removed_requirements": removed,
-                    "repair_code": "remove_response_format_instruction_v1",
-                }
-            )
-    corrected.sort(key=lambda item: item["cluster_id"])
-    repaired_only.sort(key=lambda item: item["cluster_id"])
-    repairs.sort(key=lambda item: item["cluster_id"])
-    report = {
-        "schema_version": "1.0",
-        "status": "FUNCTIONAL_CONTRACT_FORMAT_REPAIRS_FROZEN",
-        "source_contracts_bundle_sha256": bundle_digest(contracts),
-        "contract_count": len(corrected),
-        "repaired_contract_count": len(repairs),
-        "unchanged_contract_count": len(corrected) - len(repairs),
-        "repair_rule": "remove_response_format_instruction_v1",
-        "arms_or_outcomes_used": False,
-        "semantic_quality_established": False,
-        "final_experiment_eligibility_established": False,
-        "scientific_claim_allowed": False,
-    }
-    destination = output.resolve()
-    write_bundle(
-        destination,
-        {
-            "functional-contracts.json": corrected,
-            "repaired-contracts.json": repaired_only,
-            "repairs.json": repairs,
-            "report.json": report,
-        },
-    )
-    return report
-
-
-def apply_contract_recovery_adjudications(
-    contracts_root: Path,
-    reviews_root: Path,
-    adjudications_path: Path,
-    output: Path,
-) -> dict[str, Any]:
-    """Apply bounded outcome-blind contract and review corrections."""
-
-    contracts = contracts_root.resolve()
-    reviews = reviews_root.resolve()
-    adjudications_file = adjudications_path.resolve()
-    verify_bundle(contracts)
-    verify_bundle(reviews)
-    policy = _object(read_json(adjudications_file), "contract recovery adjudications")
-    if (
-        policy.get("schema_version") != "1.0"
-        or policy.get("arms_or_outcomes_used") is not False
-        or policy.get("source_contract_bundle_sha256") != bundle_digest(contracts)
-        or policy.get("source_review_bundle_sha256") != bundle_digest(reviews)
-    ):
-        raise CurationError("contract recovery adjudication provenance is invalid")
-    decisions = _rows(policy.get("decisions"), "contract recovery decisions")
-    decision_by_cluster = {row.get("task_unit_id"): row for row in decisions}
-    if len(decision_by_cluster) != len(decisions) or None in decision_by_cluster:
-        raise CurationError("contract recovery decisions have duplicate task units")
-
-    contract_rows = _rows(
-        read_json(contracts / "functional-contracts.json"), "functional contracts"
-    )
-    review_rows = _rows(
-        read_json(reviews / "contract-quality-reviews.json"), "contract reviews"
-    )
-    contract_by_cluster = {row.get("cluster_id"): row for row in contract_rows}
-    review_by_cluster = {row.get("cluster_id"): row for row in review_rows}
-    if (
-        len(contract_by_cluster) != len(contract_rows)
-        or len(review_by_cluster) != len(review_rows)
-        or set(contract_by_cluster) != set(review_by_cluster)
-        or not set(decision_by_cluster) <= set(contract_by_cluster)
-    ):
-        raise CurationError("contract recovery populations do not align")
-    source_repairs = {
-        row["cluster_id"]: row
-        for row in _rows(read_json(contracts / "repairs.json"), "source contract repairs")
-    }
-    if len(source_repairs) != len(read_json(contracts / "repairs.json")):
-        raise CurationError("source contract repairs contain duplicate task units")
-
-    replacement_keys = {
-        "entrypoint",
-        "requirements",
-        "inputs",
-        "outputs",
-        "side_effects",
-        "environment_dependencies",
-        "reason",
-    }
-    corrected: list[dict[str, Any]] = []
-    corrected_only: list[dict[str, Any]] = []
-    consolidated_repairs: list[dict[str, Any]] = []
-    overrides: list[dict[str, Any]] = []
-    frozen_decisions: list[dict[str, Any]] = []
-    for cluster_id in sorted(contract_by_cluster):
-        current = contract_by_cluster[cluster_id]
-        review = review_by_cluster[cluster_id]
-        source_repair = source_repairs.get(cluster_id)
-        if review.get("record_id") != current.get("record_id"):
-            raise CurationError("contract recovery review record binding is stale")
-        if review.get("contract_id") != current.get("contract_id"):
-            if (
-                source_repair is None
-                or source_repair.get("old_contract_id") != review.get("contract_id")
-                or source_repair.get("new_contract_id") != current.get("contract_id")
-            ):
-                raise CurationError("contract recovery source lineage is invalid")
-
-        decision = decision_by_cluster.get(cluster_id)
-        final_contract = current
-        repair_codes = (
-            [] if source_repair is None else [source_repair["repair_code"]]
-        )
-        if decision is not None:
-            kind = decision.get("decision")
-            if (
-                kind not in {"accept_current_contract", "replace_contract", "retain_pending"}
-                or not isinstance(decision.get("reason"), str)
-                or not decision["reason"].strip()
-                or review.get("contract_status") != "faulty"
-                or review.get("functional_evaluability") != "sufficient"
-            ):
-                raise CurationError("contract recovery decision is invalid")
-            if kind == "replace_contract":
-                replacement = decision.get("replacement")
-                if not isinstance(replacement, dict) or set(replacement) != replacement_keys:
-                    raise CurationError("replacement contract fields are invalid")
-                for key in (
-                    "requirements",
-                    "inputs",
-                    "outputs",
-                    "side_effects",
-                    "environment_dependencies",
-                ):
-                    values = replacement[key]
-                    if not isinstance(values, list) or any(
-                        not isinstance(value, str) or not value.strip() for value in values
-                    ):
-                        raise CurationError("replacement contract lists are invalid")
-                final_core = {
-                    **{
-                        key: value
-                        for key, value in current.items()
-                        if key not in replacement_keys | {"contract_id"}
-                    },
-                    **replacement,
-                }
-                final_contract = {
-                    **final_core,
-                    "contract_id": content_id("cluster_contract_", final_core),
-                }
-                corrected_only.append(final_contract)
-                repair_codes.append("outcome_blind_contract_adjudication_v1")
-            if kind != "retain_pending":
-                overrides.append(
-                    {
-                        "cluster_id": cluster_id,
-                        "record_id": current["record_id"],
-                        "source_review_contract_id": review["contract_id"],
-                        "current_contract_id": final_contract["contract_id"],
-                        "contract_status": "faithful",
-                        "functional_evaluability": "sufficient",
-                        "issue_codes": ["none"],
-                        "adjudication_id": policy["adjudication_id"],
-                        "reason": decision["reason"],
-                    }
-                )
-            frozen_decisions.append(canonical_value(decision))
-
-        corrected.append(final_contract)
-        if final_contract["contract_id"] != review["contract_id"]:
-            consolidated_repairs.append(
-                {
-                    "cluster_id": cluster_id,
-                    "record_id": current["record_id"],
-                    "old_contract_id": review["contract_id"],
-                    "new_contract_id": final_contract["contract_id"],
-                    "repair_codes": sorted(set(repair_codes)),
-                }
-            )
-
-    report = {
-        "schema_version": "1.0",
-        "status": "OUTCOME_BLIND_CONTRACT_RECOVERY_FROZEN",
-        "source_contract_bundle_sha256": bundle_digest(contracts),
-        "source_review_bundle_sha256": bundle_digest(reviews),
-        "adjudication_sha256": hashlib.sha256(adjudications_file.read_bytes()).hexdigest(),
-        "contract_count": len(corrected),
-        "adjudicated_task_units": len(frozen_decisions),
-        "accepted_current_contracts": sum(
-            row["decision"] == "accept_current_contract" for row in frozen_decisions
-        ),
-        "replaced_contracts": len(corrected_only),
-        "retained_pending": sum(
-            row["decision"] == "retain_pending" for row in frozen_decisions
-        ),
-        "review_overrides": len(overrides),
-        "arms_or_outcomes_used": False,
-        "scientific_claim_allowed": False,
-    }
-    write_bundle(
-        output.resolve(),
-        {
-            "functional-contracts.json": corrected,
-            "repaired-contracts.json": corrected_only,
-            "repairs.json": consolidated_repairs,
-            "review-overrides.json": overrides,
-            "adjudication-decisions.json": frozen_decisions,
-            "report.json": report,
-        },
-    )
-    return report
-
-
 def assemble_semantic_clusters(
     prepared_root: Path,
     candidates_root: Path,
@@ -758,7 +474,7 @@ def _policy(
                 (root / "src/data/curation.py").read_bytes()
             ).hexdigest(),
             "provider_adapter_sha256": hashlib.sha256(
-                (root / "src/measurement/functional_judge.py").read_bytes()
+                (root / "src/llm.py").read_bytes()
             ).hexdigest(),
             "temperature": evaluator["temperature"],
             "top_p": evaluator["top_p"],
@@ -779,59 +495,10 @@ def _initialize(output: Path, plan: dict[str, Any]) -> Path:
         raise CurationError("existing run plan does not match the requested inputs")
     if not (output / "batches").is_dir():
         raise CurationError("curation batch directory is missing")
-    allowed = {"plan", "batches", "reuse", "final"}
+    allowed = {"plan", "batches", "final"}
     if {item.name for item in output.iterdir()} - allowed:
         raise CurationError("curation run contains unexpected paths")
     return output
-
-
-def _reuse_metadata(source: Path, base_plan: dict[str, Any]) -> dict[str, Any]:
-    source = source.resolve()
-    verify_bundle(source / "plan")
-    old_plan = _object(read_json(source / "plan/plan.json"), "reuse plan")
-    if {key: value for key, value in old_plan.items() if key != "reuse_source"} != base_plan:
-        raise CurationError("reuse source was created from a different core plan")
-    batches = []
-    for batch_root in sorted((source / "batches").iterdir()):
-        verify_bundle(batch_root)
-        result = _object(read_json(batch_root / "result.json"), "reuse batch result")
-        if result.get("status") == "COMPLETE":
-            batches.append(
-                {"batch_name": batch_root.name, "bundle_sha256": bundle_digest(batch_root)}
-            )
-    return {
-        "source_root": str(source),
-        "source_plan_bundle_sha256": bundle_digest(source / "plan"),
-        "completed_batches": batches,
-    }
-
-
-def _import_reuse(source: Path, target: Path, metadata: dict[str, Any] | None) -> None:
-    if metadata is None:
-        raise CurationError("reuse metadata is missing")
-    reuse_bundle = target / "reuse"
-    if reuse_bundle.exists():
-        verify_bundle(reuse_bundle)
-        if read_json(reuse_bundle / "report.json") != canonical_value(metadata):
-            raise CurationError("reuse evidence does not match the frozen plan")
-        return
-    for item in metadata["completed_batches"]:
-        source_batch = source / "batches" / item["batch_name"]
-        if bundle_digest(source_batch) != item["bundle_sha256"]:
-            raise CurationError("reuse source batch drifted")
-        target_batch = target / "batches" / item["batch_name"]
-        if target_batch.exists():
-            if bundle_digest(target_batch) != item["bundle_sha256"]:
-                raise CurationError("target contains a conflicting reused batch")
-            continue
-        artifacts = {
-            name: read_json(source_batch / name)
-            for name in ("request.json", "response.json", "result.json")
-        }
-        write_bundle(target_batch, artifacts)
-        if bundle_digest(target_batch) != item["bundle_sha256"]:
-            raise CurationError("reused batch bytes are not exact")
-    write_bundle(reuse_bundle, {"report.json": metadata})
 
 
 def _execute(
@@ -980,8 +647,6 @@ def _contract_review_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-
-
 def _parse_contract_reviews(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -1025,8 +690,6 @@ def _parse_contract_reviews(
             }
         )
     return frozen
-
-
 
 
 def _parse_contracts(raw: bytes, batch: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1368,8 +1031,6 @@ def _contract_review_chars(item: dict[str, Any]) -> int:
     return len(item["source_prompt"]) + len(json.dumps(item["contract"], ensure_ascii=False))
 
 
-
-
 def _evidence_occurrence(prompt: str, evidence: str, occurrence: int) -> int | None:
     start = -1
     for _ in range(occurrence):
@@ -1506,7 +1167,5 @@ __all__ = [
     "assemble_semantic_clusters",
     "run_contract_curation",
     "run_contract_quality_review",
-    "apply_contract_recovery_adjudications",
-    "repair_response_format_contract_leaks",
     "run_semantic_curation",
 ]

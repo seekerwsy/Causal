@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from prompt_mechanism_study.artifact_io import read_json, write_bundle, loads_exact_json
-from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+from prompt_mechanism_study.artifact_io import file_sha256, read_json, write_bundle, loads_exact_json
+from prompt_mechanism_study.llm import complete_chat
+from prompt_mechanism_study.tsg.source_records import ExtractionAttempt, attempt_graph
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
     task_context_contract_record,
@@ -39,25 +40,6 @@ from prompt_mechanism_study.tsg.scope_assessment import (
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
 
-@dataclass(frozen=True, slots=True)
-class _TaskContractAttempt:
-    task_id: str
-    request: dict[str, Any]
-    provider_calls: int
-    raw: bytes | None
-    contract: OpenTaskContract | None
-    graph: PromptTSG | None
-    error_type: str | None
-    error_message: str | None
-    scope_assessment: dict[str, Any] | None = None
-    provider_failure: dict[str, Any] | None = None
-    binding_annotation: dict[str, Any] | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return self.contract is not None and self.graph is not None and self.error_type is None
-
-
 def extract_task_contract(
     task: Mapping[str, Any],
     *,
@@ -65,7 +47,7 @@ def extract_task_contract(
     evaluator: Mapping[str, Any],
     annotator_prompt: str,
     review_status: str,
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
 ) -> tuple[OpenTaskContract, PromptTSG, dict[str, Any], bytes]:
     """Extract one task; the final two values are the fact-inventory request/raw.
 
@@ -104,7 +86,7 @@ def _attempt_task_contract(
     annotator_prompt: str,
     review_status: str,
     provider: Provider,
-) -> _TaskContractAttempt:
+) -> ExtractionAttempt:
     """One path: build source semantics, then assess candidate-specific scopes."""
     graph_attempt = _attempt_source_graph(task, catalog=catalog, evaluator=evaluator,
         annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
@@ -120,20 +102,19 @@ def _attempt_source_graph(
     annotator_prompt: str,
     review_status: str,
     provider: Provider,
-) -> _TaskContractAttempt:
+) -> ExtractionAttempt:
     """Close raw responses and call counts even when deterministic parsing fails."""
     if catalog.get("schema_version") != "2.0":
         raise PromptContractExtractionError("active extraction requires an open-graph catalog")
-    from prompt_mechanism_study.tsg.source_records import attempt_graph
     return attempt_graph(task, catalog=catalog, evaluator=evaluator,
         annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
 
 
 def _assess_candidate_scopes(
-    graph_attempt: _TaskContractAttempt, *, task: Mapping[str, Any],
+    graph_attempt: ExtractionAttempt, *, task: Mapping[str, Any],
     catalog: Mapping[str, Any], evaluator: Mapping[str, Any],
     annotator_prompt: str, provider: Provider,
-) -> _TaskContractAttempt:
+) -> ExtractionAttempt:
     """Assess candidate states after graph construction; never edit source facts or edges.
 
     A scope failure retains the completed source graph. The graph-only attempt
@@ -192,7 +173,7 @@ def extract_contract_task_file(
     output: Path,
     *,
     review_status: str = "prospective_frozen",
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
     max_workers: int = 1,
     qualification_reference_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -212,7 +193,7 @@ def extract_contract_task_file(
         or set(selection)
         != {"schema_version", "source_tasks_sha256", "selection_rule", "task_ids", "arms_or_outcomes_used"}
         or selection["schema_version"] != "1.0"
-        or selection["source_tasks_sha256"] != _sha256(tasks_path)
+        or selection["source_tasks_sha256"] != file_sha256(tasks_path)
         or selection["arms_or_outcomes_used"] is not False
         or not isinstance(selection["selection_rule"], str)
         or not selection["selection_rule"].strip()
@@ -244,16 +225,16 @@ def extract_contract_task_file(
             raise PromptContractExtractionError("source-semantic qualification requires frozen open concepts")
         reference_bytes = qualification_reference_path.read_bytes()
         reference = loads_exact_json(reference_bytes)
-        reference_binding = dict(task_file_sha256=_sha256(tasks_path),
-            task_selection_sha256=_sha256(selection_path), task_selection_record_sha256=content_hash(selection),
-            catalog_sha256=catalog_sha256(catalog), evaluator_sha256=_sha256(evaluator_path),
-            annotator_prompt_sha256=_sha256(annotator_prompt_path),
+        reference_binding = dict(task_file_sha256=file_sha256(tasks_path),
+            task_selection_sha256=file_sha256(selection_path), task_selection_record_sha256=content_hash(selection),
+            catalog_sha256=catalog_sha256(catalog), evaluator_sha256=file_sha256(evaluator_path),
+            annotator_prompt_sha256=file_sha256(annotator_prompt_path),
             representation_implementation_sha256=representation_implementation_identity(),
             candidate_id=f"single-evidence:{evaluator['candidate_id']}")
         validate_open_source_reference(reference, bindings=reference_binding, tasks=selected)
         reference_binding["qualification_reference_sha256"] = hashlib.sha256(reference_bytes).hexdigest()
 
-    def extract(task: Mapping[str, Any]) -> _TaskContractAttempt:
+    def extract(task: Mapping[str, Any]) -> ExtractionAttempt:
         return _attempt_task_contract(
             task,
             catalog=catalog,
@@ -342,13 +323,13 @@ def extract_contract_task_file(
         "task_workers": max_workers,
         "effective_task_workers": min(max_workers, len(selected)),
         "candidate_id": candidate_id,
-        "task_file_sha256": _sha256(tasks_path),
-        "task_selection_sha256": _sha256(selection_path),
+        "task_file_sha256": file_sha256(tasks_path),
+        "task_selection_sha256": file_sha256(selection_path),
         "catalog_sha256": catalog_sha256(catalog),
-        "evaluator_sha256": _sha256(evaluator_path),
-        "annotator_prompt_sha256": _sha256(annotator_prompt_path),
-        "extractor_implementation_sha256": _sha256(Path(__file__)),
-        "provider_adapter_sha256": _sha256(Path(provider.__code__.co_filename)),
+        "evaluator_sha256": file_sha256(evaluator_path),
+        "annotator_prompt_sha256": file_sha256(annotator_prompt_path),
+        "extractor_implementation_sha256": file_sha256(Path(__file__)),
+        "provider_adapter_sha256": file_sha256(Path(provider.__code__.co_filename)),
         "response_protocol_id": "source_covered_layered_bindings_expression_v1",
         "unresolved_task_units": sum(bool(graph["unresolved_semantics"]) or bool(contract.get("unresolved_notes"))
                                      for graph, contract in zip(graphs, contracts, strict=True)),
@@ -423,7 +404,7 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
         format_path.relative_to(evaluator_path.parent.resolve())
     except ValueError:
         raise PromptContractExtractionError("response format escapes evaluator directory") from None
-    if _sha256(format_path) != value["response_format_sha256"]:
+    if file_sha256(format_path) != value["response_format_sha256"]:
         raise PromptContractExtractionError("response format identity drifted")
     response_format = read_json(format_path)
     if (
@@ -442,10 +423,6 @@ def _rows(value: Any, label: str) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value or any(not isinstance(row, dict) for row in value):
         raise PromptContractExtractionError(f"{label} must be a non-empty object list")
     return value
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 __all__ = [

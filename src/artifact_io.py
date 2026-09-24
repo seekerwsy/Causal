@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from prompt_mechanism_study.records import canonical_json
 
@@ -52,7 +52,7 @@ def verify_bundle_contents(contents: Mapping[str, bytes]) -> dict[str, Any]:
         raise ValueError("invalid bundle file map")
     for name, digest in expected.items():
         _valid_name(name)
-        _digest(digest)
+        require_sha256(digest)
     actual = set(contents) - {MANIFEST}
     if actual != set(expected):
         raise ValueError("bundle file set is not exact")
@@ -153,16 +153,75 @@ def _valid_name(name: str) -> None:
         raise ValueError("artifact names must be simple relative filenames")
 
 
-def _digest(value: object) -> None:
-    require_sha256(value)
-
-
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("duplicate JSON key")
         value[key] = item
+    return value
+
+
+def write_jsonl_bundle(
+    root: Path,
+    jsonl_artifacts: Mapping[str, Iterable[Mapping[str, Any]]],
+    report: Mapping[str, Any],
+    *, schema_version: str,
+) -> None:
+    """Write the frozen task-dataset format; its v4/v5 identities remain distinct."""
+    if root.exists():
+        raise FileExistsError(root)
+    root.mkdir(parents=True)
+    descriptors: dict[str, dict[str, Any]] = {}
+    for name, values in sorted(jsonl_artifacts.items()):
+        _valid_name(name)
+        if name == "report.json":
+            raise ValueError("report.json is reserved for the dataset report")
+        rows = list(values)
+        payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+        (root / name).write_bytes(payload)
+        descriptors[name] = {
+            "format": "canonical-jsonl",
+            "record_count": len(rows),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    report_payload = (canonical_json(report) + "\n").encode("utf-8")
+    (root / "report.json").write_bytes(report_payload)
+    descriptors["report.json"] = {
+        "format": "canonical-json",
+        "sha256": hashlib.sha256(report_payload).hexdigest(),
+    }
+    manifest = {
+        "schema_version": schema_version,
+        "artifact_kind": "reviewer_task_unit_dataset",
+        "files": descriptors,
+    }
+    (root / "manifest.json").write_bytes((canonical_json(manifest) + "\n").encode("utf-8"))
+
+
+def read_canonical_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
+    try:
+        payload = path.read_bytes()
+        lines = payload.decode("utf-8").splitlines(keepends=True)
+        rows = [json.loads(line) for line in lines]
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError(f"{label} is unreadable") from None
+    if not lines or any(
+        not isinstance(row, dict) or line != canonical_json(row) + "\n"
+        for line, row in zip(lines, rows, strict=True)
+    ):
+        raise ValueError(f"{label} is not canonical JSONL")
+    return rows
+
+
+def read_canonical_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = path.read_bytes()
+        value = json.loads(payload)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError(f"{label} is unreadable") from None
+    if not isinstance(value, dict) or payload != (canonical_json(value) + "\n").encode("utf-8"):
+        raise ValueError(f"{label} is not canonical JSON")
     return value
 
 
@@ -175,6 +234,9 @@ __all__ = [
     "json_object",
     "loads_exact_json",
     "read_json",
+    "read_canonical_object",
+    "read_canonical_jsonl",
+    "write_jsonl_bundle",
     "read_json_exact",
     "require_file_hash",
     "require_sha256",

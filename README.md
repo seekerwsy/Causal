@@ -79,6 +79,11 @@ Source is grouped directly under `src/`: `data`, `tsg`, `discovery`, `experiment
 `measurement` and `verification`. `src/cli.py` is the command entry and
 `src/target_workflow.py` the linear workflow. `development` only supplies the
 reviewer smoke fixture. The import package remains `prompt_mechanism_study`.
+Source-preparation commands live in `data/commands.py` and source review in
+`data/source_review.py`. Extraction, generation and functional review share
+`llm.py`; each stage retains its own response interpretation. File serialization
+is shared in `artifact_io.py`, while result arithmetic is independently replayed
+in `verification/`. Result tables are built by `experiment/reporting.py`.
 
 | Author operation | Entry or guide |
 | --- | --- |

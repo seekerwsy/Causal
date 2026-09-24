@@ -10,14 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
-from prompt_mechanism_study.data.curation import (
-    CurationError,
-    _batches,
-    _execute,
-    _initialize,
-    _is_response_format_requirement,
-)
-from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+from prompt_mechanism_study.data.curation import _batches, _execute, _initialize, _is_response_format_requirement
+from prompt_mechanism_study.llm import complete_chat
+from prompt_mechanism_study.artifact_io import write_jsonl_bundle, read_canonical_object
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
 from prompt_mechanism_study.data.task_unit_data import (
     _canonical_jsonl,
@@ -339,7 +334,7 @@ def run_contract_content_proposals(
     producer_commit: str,
     max_new_batches: int | None = None,
     workers: int = 1,
-    provider: Provider = bailian_complete,
+    provider: Provider = complete_chat,
 ) -> dict[str, Any]:
     """Prepare source-bound proposals, with one repair/binding pass before blind review."""
 
@@ -892,7 +887,9 @@ def finalize_contract_content_data(
         "readiness-worklist.jsonl": readiness,
         "contract-repair-ledger.jsonl": ledger,
     }
-    _write_final_data_bundle(output.resolve(), artifacts, report)
+    if set(artifacts) != _FINAL_JSONL_FILES:
+        raise ContractCleaningError("final data artifact set is incomplete")
+    write_jsonl_bundle(output.resolve(), artifacts, report, schema_version="5.0")
     return verify_contract_content_data(output.resolve())
 
 
@@ -1435,53 +1432,6 @@ def _final_readiness_row(
     return {**core, "readiness_record_sha256": content_hash(core)}
 
 
-def _write_final_data_bundle(
-    root: Path,
-    artifacts: Mapping[str, Sequence[Mapping[str, Any]]],
-    report: Mapping[str, Any],
-) -> None:
-    if root.exists():
-        raise FileExistsError(root)
-    if set(artifacts) != _FINAL_JSONL_FILES:
-        raise ContractCleaningError("final data artifact set is incomplete")
-    root.mkdir(parents=True)
-    descriptors = {}
-    for name, values in sorted(artifacts.items()):
-        rows = list(values)
-        payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
-        (root / name).write_bytes(payload)
-        descriptors[name] = {
-            "format": "canonical-jsonl",
-            "record_count": len(rows),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-    report_payload = (canonical_json(report) + "\n").encode("utf-8")
-    (root / "report.json").write_bytes(report_payload)
-    descriptors["report.json"] = {
-        "format": "canonical-json",
-        "sha256": hashlib.sha256(report_payload).hexdigest(),
-    }
-    manifest = {
-        "schema_version": "5.0",
-        "artifact_kind": "reviewer_task_unit_dataset",
-        "files": descriptors,
-    }
-    (root / "manifest.json").write_bytes(
-        (canonical_json(manifest) + "\n").encode("utf-8")
-    )
-
-
-def _canonical_json_object(path: Path, label: str) -> dict[str, Any]:
-    try:
-        payload = path.read_bytes()
-        value = json.loads(payload)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise ContractCleaningError(f"{label} is unreadable") from None
-    if not isinstance(value, dict) or payload != (canonical_json(value) + "\n").encode("utf-8"):
-        raise ContractCleaningError(f"{label} is not canonical JSON")
-    return value
-
-
 def _contract_payload(row: Mapping[str, Any]) -> dict[str, Any]:
     return {key: row[key] for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)}
 
@@ -1982,6 +1932,15 @@ def _proposal_progress(
         "completed_repair_item_count": len(repair_results),
         "complete": complete,
     }
+
+
+
+
+def _canonical_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        return read_canonical_object(path, label)
+    except ValueError as error:
+        raise ContractCleaningError(str(error)) from None
 
 
 __all__ = [

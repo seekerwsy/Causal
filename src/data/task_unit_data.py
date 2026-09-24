@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle
-from prompt_mechanism_study.records import canonical_json, content_hash, content_id
+from prompt_mechanism_study.artifact_io import write_jsonl_bundle, read_canonical_jsonl, read_canonical_object
+from prompt_mechanism_study.records import content_hash, content_id
 
 
 _JSONL_FILES = {
@@ -296,19 +296,16 @@ def compile_task_unit_data(
 
         if task_id in development_ids:
             role = "QUAL_DEV"
-            exposure_status = "EXPOSED"
             exposure_history = ["contract_review_policy_development"]
             exposure_data_ids = ["contract-review-development-exclusions-v1"]
             assignment_status = "FROZEN_HISTORICAL"
         elif task_id in legacy_exposure:
             role = "LEGACY_ONLY"
-            exposure_status = "EXPOSED"
             exposure_history = legacy_exposure[task_id]["history"]
             exposure_data_ids = legacy_exposure[task_id]["data_ids"]
             assignment_status = "FROZEN_HISTORICAL"
         else:
             role = "UNASSIGNED"
-            exposure_status = "NO_RECORDED_EXPOSURE"
             exposure_history = []
             exposure_data_ids = []
             assignment_status = "PENDING_PROSPECTIVE_ALLOCATION"
@@ -466,7 +463,7 @@ def compile_task_unit_data(
         "formal_execution_authorized": False,
         "scientific_effect_claim_allowed": False,
     }
-    _write_bundle(
+    write_jsonl_bundle(
         output.resolve(),
         {
             "task-units.jsonl": task_units,
@@ -477,7 +474,7 @@ def compile_task_unit_data(
             "near-duplicate-groups.jsonl": near_group_rows,
             "readiness-worklist.jsonl": readiness_rows,
         },
-        report,
+        report, schema_version="4.0",
     )
     return verify_task_unit_data(output.resolve())
 
@@ -1144,64 +1141,6 @@ def _legacy_exposure(
     return result
 
 
-def _write_bundle(
-    root: Path,
-    jsonl_artifacts: Mapping[str, Iterable[Mapping[str, Any]]],
-    report: Mapping[str, Any],
-) -> None:
-    if root.exists():
-        raise FileExistsError(root)
-    root.mkdir(parents=True)
-    descriptors: dict[str, dict[str, Any]] = {}
-    for name, values in sorted(jsonl_artifacts.items()):
-        rows = list(values)
-        payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
-        (root / name).write_bytes(payload)
-        descriptors[name] = {
-            "format": "canonical-jsonl",
-            "record_count": len(rows),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-    report_payload = (canonical_json(report) + "\n").encode("utf-8")
-    (root / "report.json").write_bytes(report_payload)
-    descriptors["report.json"] = {
-        "format": "canonical-json",
-        "sha256": hashlib.sha256(report_payload).hexdigest(),
-    }
-    manifest = {
-        "schema_version": "4.0",
-        "artifact_kind": "reviewer_task_unit_dataset",
-        "files": descriptors,
-    }
-    (root / "manifest.json").write_bytes((canonical_json(manifest) + "\n").encode("utf-8"))
-
-
-def _canonical_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
-    payload = path.read_bytes()
-    try:
-        lines = payload.decode("utf-8").splitlines(keepends=True)
-        rows = [json.loads(line) for line in lines]
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise TaskUnitDataError(f"{label} is unreadable") from None
-    if not lines or any(
-        not isinstance(row, dict) or line != canonical_json(row) + "\n"
-        for line, row in zip(lines, rows, strict=True)
-    ):
-        raise TaskUnitDataError(f"{label} is not canonical JSONL")
-    return rows
-
-
-def _canonical_json_file(path: Path, label: str) -> dict[str, Any]:
-    try:
-        payload = path.read_bytes()
-        value = json.loads(payload)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise TaskUnitDataError(f"{label} is unreadable") from None
-    if not isinstance(value, dict) or payload != (canonical_json(value) + "\n").encode("utf-8"):
-        raise TaskUnitDataError(f"{label} is not canonical JSON")
-    return value
-
-
 def _unique_by(
     rows: Iterable[dict[str, Any]], field: str, label: str
 ) -> dict[str, dict[str, Any]]:
@@ -1236,6 +1175,22 @@ def _texts(value: Any, label: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
         raise TaskUnitDataError(f"{label} must be a text list")
     return tuple(value)
+
+
+
+
+def _canonical_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
+    try:
+        return read_canonical_jsonl(path, label)
+    except ValueError as error:
+        raise TaskUnitDataError(str(error)) from None
+
+
+def _canonical_json_file(path: Path, label: str) -> dict[str, Any]:
+    try:
+        return read_canonical_object(path, label)
+    except ValueError as error:
+        raise TaskUnitDataError(str(error)) from None
 
 
 __all__ = [

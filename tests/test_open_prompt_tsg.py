@@ -5,7 +5,6 @@ from copy import deepcopy
 from dataclasses import replace
 import pytest
 from annotation_fixture import (
-    authored_source_inventory,
     indexed_annotation,
     scope_answer,
 )

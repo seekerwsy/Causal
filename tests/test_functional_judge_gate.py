@@ -3,11 +3,11 @@ import json
 from pathlib import Path
 import pytest
 from prompt_mechanism_study.measurement.functional_judge import (
-    JudgeGateError,
-    bailian_complete,
     load_gate_inputs,
 )
 
+
+from prompt_mechanism_study.llm import complete_chat, ProviderError
 
 ROOT = Path(__file__).parents[1]
 
@@ -24,9 +24,9 @@ def test_http_failure_retains_bounded_redacted_body_without_retry(monkeypatch):
         observed.append(request)
         raise HTTPError(request.full_url, status, 'rejected', {}, io.BytesIO(payload))
     monkeypatch.setenv('ALI_BAILIAN_API_KEY', secret)
-    monkeypatch.setattr('prompt_mechanism_study.measurement.functional_judge.urlopen', reject)
-    with pytest.raises(JudgeGateError, match=f'provider HTTP error {status}') as caught:
-        bailian_complete({}, inputs.evaluator, inputs.prompt,
+    monkeypatch.setattr('prompt_mechanism_study.llm.urlopen', reject)
+    with pytest.raises(ProviderError, match=f'provider HTTP error {status}') as caught:
+        complete_chat({}, inputs.evaluator, inputs.prompt,
                          trace=lambda kind, raw: traces.append((kind, raw)))
     assert len(observed) == 1
     assert [kind for kind, _ in traces] == ['request', 'response']
@@ -64,7 +64,7 @@ def test_chat_request_preserves_frozen_decoding_and_repair_messages(monkeypatch)
         return _Response()
 
     monkeypatch.setenv("ALI_BAILIAN_API_KEY", "test-only")
-    monkeypatch.setattr("prompt_mechanism_study.measurement.functional_judge.urlopen", _urlopen)
+    monkeypatch.setattr("prompt_mechanism_study.llm.urlopen", _urlopen)
 
     evaluator = dict(inputs.evaluator)
     evaluator.update(enable_thinking=True, maximum_completion_tokens=8192, thinking_budget=4096)
@@ -80,7 +80,7 @@ def test_chat_request_preserves_frozen_decoding_and_repair_messages(monkeypatch)
     traces = []
     continuation = [dict(role='assistant', content='{"verdict":"unknown"}'),
                     dict(role='user', content='Revise the draft using the original source.')]
-    returned = bailian_complete({}, evaluator, inputs.prompt,
+    returned = complete_chat({}, evaluator, inputs.prompt,
                                trace=lambda kind, raw: traces.append((kind, raw)), continuation=continuation)
     assert [kind for kind, _ in traces] == ['request', 'response']
     assert json.loads(traces[0][1]) == observed['body']
@@ -102,7 +102,7 @@ def test_chat_request_preserves_frozen_decoding_and_repair_messages(monkeypatch)
     assert observed['authorization'] == 'Bearer test-only'
     assert body["n"] == 1
 
-    bailian_complete({}, {**evaluator, 'provider': 'deepseek', 'model_id': 'deepseek-flash',
+    complete_chat({}, {**evaluator, 'provider': 'deepseek', 'model_id': 'deepseek-flash',
                           'base_url': 'https://api.deepseek.com'}, inputs.prompt,
                      continuation=continuation)
     deepseek_body = observed['body']
@@ -113,8 +113,8 @@ def test_chat_request_preserves_frozen_decoding_and_repair_messages(monkeypatch)
 
     local = {**evaluator, 'provider': 'local_vllm', 'api_key_env': None,
              'base_url': 'http://127.0.0.1:8000/v1', 'response_format': None}
-    bailian_complete({}, local, inputs.prompt)
+    complete_chat({}, local, inputs.prompt)
     assert not {'enable_thinking', 'thinking', 'chat_template_kwargs', 'response_format'} & observed['body'].keys()
-    bailian_complete({}, {**local, 'chat_template_kwargs': {'enable_thinking': False}}, inputs.prompt)
+    complete_chat({}, {**local, 'chat_template_kwargs': {'enable_thinking': False}}, inputs.prompt)
     assert observed['body']['chat_template_kwargs'] == {'enable_thinking': False}
     assert 'enable_thinking' not in observed['body'] and observed['authorization'] is None

@@ -3,18 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from typing import Any
 import re
 from copy import deepcopy
 from dataclasses import replace
-from prompt_mechanism_study.tsg.prompt_contract import (
-    open_contract_from_response,
-    compile_task_context_contract,
-    OpenTaskContract,
-)
-from prompt_mechanism_study.tsg.prompt_tsg import (
-    PromptTSGError,
-    has_required_source_name,
-)
+from prompt_mechanism_study.tsg.prompt_contract import open_contract_from_response, OpenTaskContract
+from prompt_mechanism_study.tsg.prompt_tsg import has_required_source_name
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_template_facts
 
 

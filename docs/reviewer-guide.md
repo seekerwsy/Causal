@@ -83,3 +83,37 @@ comparison is explicitly a development diagnostic on the archived branch.
 The [test guide](../tests/README.md) identifies scientific boundaries checked by
 the default suite. Source preparation and historical experiment administration
 are not prerequisites to reproduce the smoke.
+
+## Framework responsibilities
+
+The framework-wide refactor starts from `dec567472`, preserved on local branch
+`codex/pre-framework-refactor-20260924`. There is no compatibility copy of the
+removed paths in the active package.
+
+| Area | Current responsibility and retained boundary |
+| --- | --- |
+| Entry and source preparation | `cli.py` routes the study; `data/commands.py` contains author data commands. `data/source_review.py` handles independent source decisions, not TSG semantics. |
+| Representation | `tsg/source_records.py` owns extraction attempts and record compilation; `prompt_contract_extract.py` orchestrates graph construction and scope assessment without a reverse import from the producer. Conditions, scope and unknown semantics remain unchanged. |
+| Prioritization | `discovery/prioritization.py` retains the current PAG/FCI implementation, RD ranking, fixed candidate slots and Full/RD-only comparison. The unused adjacency-only adapter is removed. |
+| Freeze and assignment | `experiment/study_planning.py`, `study_design.py` and `randomization.py` retain prospective scope, budgets, independent task units and exact arm/seed assignment. These checks implement research boundaries rather than historical recovery. |
+| Measurement | `measurement/security_profiles.py` is the security implementation. Functional judgment remains separate; the native worker and its Docker adapter are together in `native_behavior.py`. Host-isolation protections remain. |
+| Outcomes and reporting | `experiment/outcomes.py`, `inference.py` and `reporting.py` assemble assigned outcomes, estimate effects and build tables. Unused one-off paired/model summaries are removed. The frozen development screen remains distinct from confirmatory inference. |
+| Independent verification | `verification/` retains its separate assignment and statistical replay. It does not import production estimators to manufacture agreement. |
+| Shared mechanics | `llm.py` provides one explicit chat attempt for cloud or local models. `artifact_io.py` handles JSON, hashes and task-dataset serialization; v4/v5 dataset identities and bytes remain distinct. |
+
+The old keyword-deletion contract repair, subsequent recovery-adjudication
+command, cross-run batch-copy option and one-off archived source-asset replay
+are removed. Source corrections use the documented proposal/review/repair path;
+an unchanged run can still resume its completed batches. There is no automatic
+provider retry. Existing historical artifacts require their captured producer;
+this refactor does not reclassify old results or activate the formal protocol.
+
+Validation on 2026-09-24 used a newly created Python 3.12 virtual environment
+installed with `.[dev,selectors,languages]`: all 100 tests passed, including the
+seven-stage smoke and independent verifier. The smoke's 20 saved files were
+byte-identical to the pre-refactor reference. The released v5 dataset verified,
+both v4/v5 dataset writers preserved their former bytes, and all 34 retained
+CLI leaves preserved their arguments/defaults apart from the retired reuse
+option. No live model generation or Docker measurement was run; the relocated
+container adapter's logic was checked unchanged. These are implementation
+checks, not new security-effect evidence.

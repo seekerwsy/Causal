@@ -82,6 +82,13 @@ as errors by the common batch executor; there is no additional automatic retry
 inside contract preparation. Successful saved batches remain reusable under the
 same frozen plan.
 
+Source commands are implemented in `src/data/commands.py`; independent packets
+and decisions in `src/data/source_review.py`. All model requests use the shared
+`src/llm.py` transport. The old `--reuse-root` cross-run copy and
+`curate repair contracts` / `contract-adjudications` shortcuts are retired.
+Use the review and repair sequence below for semantic corrections; keyword
+matching alone no longer deletes requirements from a successor contract.
+
 The complete proposals are in `PROPOSALS/final`. Use the existing review commands:
 
 ```text

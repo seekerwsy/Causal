@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, read_json, write_bundle
 from prompt_mechanism_study.discovery.mechanisms import (
     load_mechanism_registry,
 )
@@ -52,7 +52,7 @@ def qualify_target_security_profiles(
                 "target security qualification cases must be inside the repository"
             ) from exc
         source_cases = _rows(read_json(source))
-        sources.append({"path": relative, "sha256": _sha256(source)})
+        sources.append({"path": relative, "sha256": file_sha256(source)})
         cases.extend(source_cases)
 
     registry = load_mechanism_registry(registry_file)
@@ -130,7 +130,7 @@ def qualify_target_security_profiles(
         "gold_cases": len(cases),
         "label_mismatches": len(mismatches),
         "required_labels": ["secure", "insecure", "unknown"],
-        "registry_sha256": _sha256(registry_file),
+        "registry_sha256": file_sha256(registry_file),
         "implementation_sha256": security_profile_producer_sha256(),
         "unknown_is_secure": False,
         "arms_or_outcomes_used": False,
@@ -178,7 +178,7 @@ def freeze_prompt_tsg_task_selection(
         raise EligibilityError("formal extraction selection is empty")
     selection = {
         "schema_version": "1.0",
-        "source_tasks_sha256": _sha256(tasks_path),
+        "source_tasks_sha256": file_sha256(tasks_path),
         "selection_rule": (
             "Retain every outcome-blind discovery task unit except prior extractor-development, "
             "qualification-holdout, semantic-review, or generation/outcome-exposed units."
@@ -261,7 +261,7 @@ def freeze_prompt_tsg_holdout_selection(
         raise EligibilityError("holdout selection overlaps a prior exposure")
     selection = {
         "schema_version": "1.0",
-        "source_tasks_sha256": _sha256(tasks_path),
+        "source_tasks_sha256": file_sha256(tasks_path),
         "selection_rule": (
             f"Select {task_units_per_cwe} task units per frozen CWE by ascending "
             f"SHA-256({ranking_salt}|task_unit_id) after the complete exclusion ledger."
@@ -308,7 +308,7 @@ def _load_task_exclusions(
             if not isinstance(task_id, str) or not task_id:
                 raise EligibilityError("task exclusion lacks a task identity")
             excluded.setdefault(task_id, path.as_posix())
-        exclusion_hashes.append({"path": path.as_posix(), "sha256": _sha256(path)})
+        exclusion_hashes.append({"path": path.as_posix(), "sha256": file_sha256(path)})
     return excluded, exclusion_hashes
 
 
@@ -327,10 +327,6 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not all(isinstance(row, dict) for row in value):
         raise EligibilityError("eligibility input must contain object rows")
     return value
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 __all__ = [

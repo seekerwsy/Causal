@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from typing import Any
 from copy import deepcopy
 from dataclasses import replace
 from prompt_mechanism_study.artifact_io import json_object
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
+    OpenTaskContract,
 )
 from prompt_mechanism_study.tsg.prompt_tsg import (
     PromptTSGError,

@@ -54,7 +54,7 @@ from prompt_mechanism_study.discovery.prioritization import (
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.tsg.representation import DataRole, validate_data_role_firewall
-from prompt_mechanism_study.discovery.selector_analysis import write_target_result_bundle
+from prompt_mechanism_study.experiment.reporting import write_target_result_bundle
 from prompt_mechanism_study.verification import verify_target_study_freezes
 from prompt_mechanism_study.experiment.study_design import (
     freeze_target_confirmation_design,
@@ -98,10 +98,6 @@ def prepare_development_assignments(plan: dict) -> list[dict]:
     This tests measurement and intervention behavior; it does not execute Discovery,
     select hypotheses from outcomes, assign formal roles, or activate the protocol.
     """
-    from prompt_mechanism_study.discovery.mechanisms import (
-        bind_task_hypothesis,
-        render_task_hypothesis,
-    )
     from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_from_record, validate_prompt_tsg
     from prompt_mechanism_study.measurement.security_profiles import (
         security_profile_producer_sha256,
@@ -332,7 +328,7 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
     Exact source/arm/seed assignments are saved before provider calls. Raw responses
     and failures survive independently of final analysis. No task is replaced.
     """
-    from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+    from prompt_mechanism_study.llm import complete_chat
     from prompt_mechanism_study.experiment.inference import (
         summarize_development_itt,
         summarize_development_sampling,
@@ -341,7 +337,7 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
 
     plan = read_json(plan_path)
     assignments = prepare_development_assignments(plan)
-    provider = complete or bailian_complete
+    provider = complete or complete_chat
     if output.exists():
         raise FileExistsError(output)
     output.mkdir(parents=True)

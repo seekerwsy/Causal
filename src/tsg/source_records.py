@@ -3,12 +3,36 @@
 These records replace model-generated graph bindings. Compilation is mechanical;
 neither a valid record nor a positive model review proves source entailment.
 """
+from __future__ import annotations
+
+from typing import Any
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 
 from prompt_mechanism_study.artifact_io import json_object
 from prompt_mechanism_study.tsg.source_codec import fact_layer
+from prompt_mechanism_study.tsg.prompt_contract import OpenTaskContract
+from prompt_mechanism_study.tsg.prompt_tsg import PromptTSG
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionAttempt:
+    task_id: str
+    request: dict[str, Any]
+    provider_calls: int
+    raw: bytes | None
+    contract: OpenTaskContract | None
+    graph: PromptTSG | None
+    error_type: str | None
+    error_message: str | None
+    scope_assessment: dict[str, Any] | None = None
+    provider_failure: dict[str, Any] | None = None
+    binding_annotation: dict[str, Any] | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.contract is not None and self.graph is not None and self.error_type is None
 
 
 def _object(fields):
@@ -794,8 +818,6 @@ def structural_readback(request, value):
         empty_field_rule='An empty conditions list supplies no guard. A guard present only in prose is NOT represented. Unresolved source coverage remains unresolved; readback never repairs it.')
 
 
-
-
 def review_request(request, value, *, compiled_contract=None):
     check = dict(request_kind="source_only_record_review", source_prompt=request["source_prompt"],
         source_units=request["source_units"], records=value,
@@ -843,7 +865,6 @@ def review_request(request, value, *, compiled_contract=None):
     return check
 
 
-
 def review_response_format(request):
     status = dict(type="string", enum=["supported", "unsupported", "unresolved"])
     return dict(type="json_schema", json_schema=dict(name="source_record_review", strict=True,
@@ -851,9 +872,6 @@ def review_response_format(request):
             rejected_claims=_array(dict(type="string", enum=list(_claims(r)))))) for r in _records(request["records"])}),
             source_units=_object({key: _object(dict(complete=dict(type="boolean"), reason=dict(type="string")))
                                   for key in request["source_units"]})))))
-
-
-
 
 
 def _claims(record):
@@ -1021,7 +1039,6 @@ def attempt_graph(task, *, catalog, evaluator, annotator_prompt, review_status, 
         contract_decision_request,
         PromptContractExtractionError,
     )
-    from prompt_mechanism_study.tsg.prompt_contract_extract import _TaskContractAttempt
     from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
     from prompt_mechanism_study.tsg.task_input import prepare_task_input
     task = prepare_task_input(task)
@@ -1089,7 +1106,7 @@ def attempt_graph(task, *, catalog, evaluator, annotator_prompt, review_status, 
         raise
     except Exception as error:
         audit.update(error_type=type(error).__name__, error_message=str(error), provider_calls=max(0,calls-1))
-        return _TaskContractAttempt(str(task["task_id"]), request, calls, raw, contract, graph,
+        return ExtractionAttempt(str(task["task_id"]), request, calls, raw, contract, graph,
             type(error).__name__, str(error), None, binding_annotation=audit)
-    return _TaskContractAttempt(str(task["task_id"]), request, calls, raw, contract, graph,
+    return ExtractionAttempt(str(task["task_id"]), request, calls, raw, contract, graph,
         None, None, None, binding_annotation=audit)

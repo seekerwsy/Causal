@@ -8,7 +8,7 @@ import json
 import sys
 from prompt_mechanism_study.artifact_io import read_json, write_bundle, bundle_digest
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+from prompt_mechanism_study.llm import complete_chat
 
 
 def run(base, output):
@@ -67,7 +67,7 @@ def run(base, output):
             options=dict(trace=lambda kind,value:record['trace'].update({kind:value.decode('utf-8')}))
             if continuation:options['continuation']=continuation
             if plan.get('source_first_delivery'):options['source_first_delivery']=True
-            raw=bailian_complete(request,delivered_config,delivered_prompt,**options)
+            raw=complete_chat(request,delivered_config,delivered_prompt,**options)
             record['response_text']=raw.decode();return raw
         except Exception as error:
             failure=error

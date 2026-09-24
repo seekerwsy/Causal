@@ -1898,23 +1898,6 @@ def _encode_fci_covariates(
     )
 
 
-def _run_causal_learn_family(
-    matrix: tuple[tuple[int, ...], ...],
-    *,
-    alpha: float,
-    depth: int,
-    max_path_length: int,
-    outcome_index: int,
-) -> set[int]:
-    variable_order = tuple(f"X{index + 1}" for index in range(outcome_index + 1))
-    adjacent, _edges = _run_causal_learn_pag(
-        matrix, alpha=alpha, depth=depth, max_path_length=max_path_length,
-        outcome_index=outcome_index, variable_order=variable_order,
-        forbidden_directions=tuple((variable_order[-1], item) for item in variable_order[:-1]),
-    )
-    return adjacent
-
-
 def _run_causal_learn_pag(
     matrix: tuple[tuple[int, ...], ...],
     *,

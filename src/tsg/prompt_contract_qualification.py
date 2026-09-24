@@ -200,8 +200,6 @@ def qualify_prompt_contract_extractor(
         evaluator_path, annotator_prompt_path, output, assertion_review_path)
 
 
-
-
 _OPEN_REFERENCE = "open_tsg_source_semantics"
 
 
@@ -213,7 +211,7 @@ def representation_implementation_identity() -> str:
         "scope_assessment.py", "prompt_contract.py",
         "prompt_tsg.py", "task_input.py", "prompt_contract_qualification.py",
     )]
-    paths.append(folder.parent / "measurement/functional_judge.py")
+    paths.append(folder.parent / "llm.py")
     return content_hash({path.name: file_sha256(path) for path in paths})
 
 
@@ -621,7 +619,6 @@ def summarize_review_changes(reference_ids, before, after):
 def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_path,
                           evaluator_path, annotator_prompt_path, output, assertion_review_path):
     """Replay facts, bindings and scopes, then score the complete reference selection."""
-    from dataclasses import replace
     from prompt_mechanism_study.tsg.scope_assessment import (
         apply_fixed_scope_response,
         fixed_scope_request,
@@ -795,7 +792,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
     if reference["reference_kind"] != "SYNTHETIC_TEST" and report["review_status"] != "prospective_frozen":
         blocked.append("EXPOSED_DEVELOPMENT_CANNOT_QUALIFY")
     if (reference["reference_kind"] != "SYNTHETIC_TEST"
-        and report.get("provider_adapter_sha256") != file_sha256(Path(__file__).parents[1] / 'measurement/functional_judge.py')):
+        and report.get("provider_adapter_sha256") != file_sha256(Path(__file__).parents[1] / 'llm.py')):
         blocked.append("ACTIVE_PROVIDER_ADAPTER_IDENTITY_REQUIRED")
     status = ("QUALIFICATION_BLOCKED" if blocked else "QUALIFICATION_FAILED" if not passed else
               "SYNTHETIC_REFERENCE_CHECK_PASSED" if reference["reference_kind"] == "SYNTHETIC_TEST"
@@ -826,8 +823,6 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not all(isinstance(row, dict) for row in value):
         raise PromptContractQualificationError("qualification input must contain object rows")
     return value
-
-
 
 
 __all__ = [

@@ -28,46 +28,6 @@ from prompt_mechanism_study.experiment.randomization import (
 from prompt_mechanism_study.records import content_hash, content_id, require_text
 
 
-def summarize_paired_development(rows: Sequence[Mapping[str, object]]) -> dict:
-    """Equal-task-unit, assigned-arm effects for a frozen three-arm dev check.
-
-    Seed bundles are randomly permuted among arms within task unit. Conditional
-    on the third arm, swapping the other two bundles gives the exact sharp-null
-    randomization distribution. Repeated source templates and seeds are averaged
-    *inside* their predeclared unit, never treated as extra independent tasks.
-    """
-    from itertools import product
-    from scipy.stats import t
-
-    units = sorted({str(r["task_unit_id"]) for r in rows})
-    arms = ("NOOP", "GENERIC", "TARGET")
-    means = {}
-    for unit in units:
-        local = [r for r in rows if r["task_unit_id"] == unit]
-        sizes = [sum(r["arm"] == arm for r in local) for arm in arms]
-        if min(sizes) == 0 or len(set(sizes)) != 1:
-            raise ValueError("Incomplete assigned unit; never drop a failed generation")
-        means[unit] = {a: statistics.mean(int(r["security_label"] == "secure")
-                        for r in local if r["arm"] == a) for a in arms}
-    contrasts = []
-    for control in ("NOOP", "GENERIC"):
-        delta = [means[u]["TARGET"] - means[u][control] for u in units]
-        effect = statistics.mean(delta)
-        p = sum(abs(sum(s*d for s, d in zip(signs, delta))) >= abs(sum(delta))-1e-12
-                for signs in product((-1, 1), repeat=len(units))) / 2**len(units)
-        se = statistics.stdev(delta) / math.sqrt(len(delta))
-        radius = float(t.ppf(1-.05/4, len(delta)-1)) * se
-        contrasts.append(dict(control=control, effect=effect, task_differences=delta,
-            exact_sharp_null_p=p, approximate_bonferroni_t_interval=[max(-1., effect-radius), min(1., effect+radius)]))
-    ordered = sorted(contrasts, key=lambda c: c["exact_sharp_null_p"])
-    previous = 0.
-    for rank, contrast in enumerate(ordered):
-        previous = max(previous, min(1., (2-rank)*contrast["exact_sharp_null_p"]))
-        contrast["holm_p"] = previous
-    return dict(task_units=len(units), task_unit_order=units, task_arm_means=means,
-                contrasts=contrasts, interval_limitation="Approximate task t intervals, not exact coverage or a population-wide guarantee.")
-
-
 class Metric(StrEnum):
     CODE_VALID = "code_valid"
     ORACLE_EVALUABLE = "oracle_evaluable"
@@ -1445,49 +1405,6 @@ def summarize_development_itt(rows: Sequence[Mapping], plan: Mapping) -> list[di
         for effect in ranked[:plan["top_k"]]:
             effect["screening_selected"] = True
     return effects
-
-
-def summarize_development_models(rows_by_model: Mapping[str, Sequence[Mapping]], plan: Mapping) -> dict:
-    """Keep models separate and adjust their complete shared development family.
-
-    Model is an effect coordinate, not an independent task. Assignment identifiers
-    can repeat between model-specific runs; their full coordinates must agree.
-    This descriptive table does not change either run's frozen analysis.
-    """
-    if not rows_by_model:
-        raise ValueError('model comparison requires assigned development outcomes')
-    coordinates = None
-    effects, sampling, counts = [], {}, {}
-    all_units = set()
-    for model, rows in sorted(rows_by_model.items()):
-        local_coordinates = [(r['policy_id'], r['task_unit_id'], r['arm'], r['seed']) for r in rows]
-        if len(local_coordinates) != len(set(local_coordinates)):
-            raise ValueError('duplicate task-policy-arm-seed coordinate within model')
-        if coordinates is not None and set(local_coordinates) != coordinates:
-            raise ValueError('model comparison requires the same assigned task and seed coordinates')
-        coordinates = set(local_coordinates)
-        all_units.update(r['task_unit_id'] for r in rows)
-        counts[model] = {'assigned_rows': len(rows),
-                         'independent_task_units': len({r['task_unit_id'] for r in rows})}
-        sampling[model] = summarize_development_sampling(rows, plan)
-        for row in summarize_development_itt(rows, plan):
-            effects.append({**row, 'model_id': model,
-                            'per_model_adjusted_p_value': row['adjusted_p_value']})
-    previous = 0.0
-    order = sorted(range(len(effects)), key=lambda i: effects[i]['p_value'] if effects[i]['p_value'] is not None else 1.0)
-    for rank, index in enumerate(order):
-        row = effects[index]
-        raw = row['p_value'] if row['p_value'] is not None else 1.0
-        previous = max(previous, min(1.0, (len(effects) - rank) * raw))
-        row['adjusted_p_value'] = previous if row['p_value'] is not None else None
-        row['development_signal'] = (row['effect'] is not None and (
-            row['effect'] >= plan['minimum_effect'] if plan['method'] == 'paired_task_effect_screen_v1'
-            else previous <= plan['alpha'] and abs(row['effect']) >= plan['minimum_effect']))
-    return {'status': 'DEVELOPMENT_MODEL_COMPARISON', 'scientific_claim_allowed': False,
-            'independent_task_units': len(all_units), 'models': counts,
-            'assigned_rows': sum(len(rows) for rows in rows_by_model.values()),
-            'family_size': len(effects), 'multiplicity': 'Holm across every listed model-policy-contrast',
-            'effects': effects, 'sampling': sampling}
 
 
 def summarize_development_sampling(rows: Sequence[Mapping], plan: Mapping) -> dict:

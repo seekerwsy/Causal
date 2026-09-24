@@ -1071,13 +1071,13 @@ def build_candidate_catalog(
         if response_path is not None:
             raw = response_path.read_bytes()
         else:
-            from prompt_mechanism_study.measurement.functional_judge import bailian_complete
+            from prompt_mechanism_study.llm import complete_chat
 
             if read_json_exact(request_bundle / "prompt.json") != _PROPOSER_PROMPT:
                 raise ValueError("prepare a current binding-selection request before a new provider call")
             evaluator = _proposal_evaluator(evaluator_path)
             calls = 1
-            raw = bailian_complete(
+            raw = complete_chat(
                 model_request,
                 {**evaluator, "response_format": candidate_response_format(request)},
                 read_json_exact(request_bundle / "prompt.json"),
@@ -1217,7 +1217,6 @@ def _proposal_evaluator(path):
     if type(evaluator["timeout_seconds"]) not in (int, float) or not 0 < evaluator["timeout_seconds"] <= 3600:
         raise ValueError("candidate proposal requires a finite timeout")
     return evaluator
-
 
 
 def bind_candidate_scopes(
