@@ -710,92 +710,31 @@ def _render_reviewed_variant(binding, graph, *, prompt, catalog, enabled, varian
     }
 
 
-
-
-
-
-
-
 def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:
-    """Load and validate a registry keyed by realization id."""
+    """Read source/Oracle coordinates; candidate policies come from TSG bindings.
 
+    Additional registry descriptions are retained but do not define or qualify
+    an intervention. Only fields used by source selection and Oracle scope need
+    validation here.
+    """
     value = json.loads(path.read_text(encoding="utf-8"))
-    if set(value) != {"schema_version", "mechanisms"} or value["schema_version"] not in {
-        "1.0",
-        "2.0",
-    }:
+    if (not isinstance(value, dict) or set(value) != {"schema_version", "mechanisms"}
+            or value["schema_version"] not in {"1.0", "2.0"}):
         raise MechanismRegistryError("mechanism registry envelope is invalid")
     rows = value["mechanisms"]
     if not isinstance(rows, list) or not rows:
         raise MechanismRegistryError("mechanism registry is empty")
-    result: dict[str, dict[str, Any]] = {}
-    legacy_fields = {
-        "realization_id",
-        "cwe_id",
-        "task_family",
-        "prompt_markers",
-        "oracle_profile_id",
-        "specific_contract",
-        "must_preserve",
-    }
-    context_fields = {
-        "realization_id",
-        "cwe_id",
-        "task_family",
-        "required_context",
-        "excluded_context",
-        "oracle_profile_id",
-        "required_delta",
-        "forbidden_delta",
-        "must_preserve",
-    }
-    required = legacy_fields if value["schema_version"] == "1.0" else context_fields
+    fields = ("realization_id", "cwe_id", "task_family", "oracle_profile_id")
+    result = {}
     for row in rows:
-        if not isinstance(row, dict) or set(row) != required:
-            raise MechanismRegistryError("mechanism record fields are invalid")
-        realization_id = row["realization_id"]
-        scalar_fields = ("realization_id", "cwe_id", "task_family", "oracle_profile_id")
-        list_fields = (
-            ("prompt_markers", "must_preserve")
-            if value["schema_version"] == "1.0"
-            else (
-                "required_context",
-                "excluded_context",
-                "required_delta",
-                "forbidden_delta",
-                "must_preserve",
-            )
-        )
-        if (
-            any(not isinstance(row[field], str) or not row[field] for field in scalar_fields)
-            or any(
-                not isinstance(row[field], list)
-                or any(not isinstance(item, str) or not item for item in row[field])
-                for field in list_fields
-            )
-            or (
-                value["schema_version"] == "1.0"
-                and (
-                    not isinstance(row["specific_contract"], str)
-                    or not row["specific_contract"].strip()
-                )
-            )
-            or (
-                value["schema_version"] == "2.0"
-                and (
-                    not row["required_delta"]
-                    or set(row["required_context"]) & set(row["excluded_context"])
-                )
-            )
-            or realization_id in result
+        if not isinstance(row, dict) or any(
+            not isinstance(row.get(field), str) or not row[field].strip() for field in fields
         ):
-            raise MechanismRegistryError("mechanism record values are invalid")
-        result[realization_id] = row
+            raise MechanismRegistryError("mechanism profile coordinates are invalid")
+        if row["realization_id"] in result:
+            raise MechanismRegistryError("mechanism profile coordinates are duplicated")
+        result[row["realization_id"]] = row
     return result
-
-
-
-
 
 
 __all__ = [

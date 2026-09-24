@@ -50,9 +50,8 @@ from prompt_mechanism_study.verification.reporting import (
     _replay_execution_measurements,
     verify_target_execution_artifacts,
 )
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    evaluate_target_security_profile,
-    target_security_profile_producer_sha256,
+from prompt_mechanism_study.measurement.security_profiles import (
+    security_profile_producer_sha256,
 )
 
 
@@ -232,7 +231,7 @@ def test_execution_verifier_rebuilds_raw_measurements_and_rejects_tampering(code
         source_task_prompt="Fetch the URL", functional_contract=functional_contract,
         functional_evaluator=functional_evaluator, functional_prompt="Review functionality",
         security_profile_id="python.cwe295.tls_certificate_validation.v1",
-        complete=lambda *_: next(responses), security_evaluate=evaluate_target_security_profile,
+        complete=lambda *_: next(responses),
     )
     outcomes = derive_outcomes(MeasurementLedger("test", "test", "test", (measured,)))
     evidence = SimpleNamespace(ledger=SimpleNamespace(
@@ -241,7 +240,7 @@ def test_execution_verifier_rebuilds_raw_measurements_and_rejects_tampering(code
     contract = {"task_contracts": {assignment.task_instance_id: {
         "functional_contract": functional_contract, "functional_evaluator": functional_evaluator,
         "source_task_prompt": "Fetch the URL", "security_profile_id": "python.cwe295.tls_certificate_validation.v1",
-        "security_producer_sha256": target_security_profile_producer_sha256(),
+        "security_producer_sha256": security_profile_producer_sha256(),
     }}}
     raw.update(assignment_id=assignment.assignment_id, measurement=asdict(measured),
                functional_evaluator=functional_evaluator)

@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import pytest
 from prompt_mechanism_study.artifact_io import write_bundle
 from prompt_mechanism_study.data.contract_cleaning import (
     finalize_contract_content_data,
@@ -71,6 +72,19 @@ def test_content_producer_binds_repaired_contracts_without_certifying_disputed_e
     assert cleaning.run_contract_content_proposals(Path.cwd(), base, output,
         producer_commit='test', provider=provider) == report
     assert len(requests) == 3  # Same frozen preparation replays without extra provider calls.
+
+    from prompt_mechanism_study.measurement.functional_judge import JudgeGateError
+    failures = []
+    def failing_provider(*args):
+        failures.append(args)
+        raise JudgeGateError('provider response format is invalid')
+    failed_output = tmp_path / 'failed-proposals'
+    with pytest.raises(cleaning.CurationError, match='failed and was closed without retry'):
+        cleaning.run_contract_content_proposals(Path.cwd(), base, failed_output,
+            producer_commit='test', provider=failing_provider)
+    assert len(failures) == 1
+    failure = read_json(failed_output / 'evidence/batches/batch-0001/result.json')
+    assert failure['status'] == 'ERROR' and failure['error_type'] == 'JudgeGateError'
 
 
 def _record(record_id, prompt, dataset, item, *, tests=()):

@@ -30,9 +30,6 @@ from prompt_mechanism_study.measurement.evaluate import (
     close_target_measurements,
     measure_generated_code,
 )
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    evaluate_target_security_profile,
-)
 from prompt_mechanism_study.experiment.inference import (
     EvidenceLevel,
     build_target_selector_yields,
@@ -106,8 +103,8 @@ def prepare_development_assignments(plan: dict) -> list[dict]:
         render_task_hypothesis,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_from_record, validate_prompt_tsg
-    from prompt_mechanism_study.measurement.target_security_profiles import (
-        target_security_profile_producer_sha256,
+    from prompt_mechanism_study.measurement.security_profiles import (
+        security_profile_producer_sha256,
     )
 
     if (
@@ -117,7 +114,7 @@ def prepare_development_assignments(plan: dict) -> list[dict]:
         or plan.get("formal_execution_authorized") is not False
     ):
         raise ValueError("only an explicitly bounded non-claim development plan is executable")
-    if plan["security_producer_sha256"] != target_security_profile_producer_sha256():
+    if plan["security_producer_sha256"] != security_profile_producer_sha256():
         raise ValueError("development security producer differs from its prospective freeze")
     if any(
         contrast.get("kind") == "pair_interaction" for contrast in plan["analysis"]["contrasts"]
@@ -403,7 +400,6 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
                 functional_prompt=plan["functional_system_prompt"],
                 security_profile_id=row["security_profile_id"],
                 complete=captured,
-                security_evaluate=evaluate_target_security_profile,
             )
             outcome = derive_outcomes(
                 MeasurementLedger(
@@ -693,7 +689,6 @@ def run_target_reviewer_smoke(
             functional_prompt="Blinded functional review.",
             security_profile_id=inputs.security_profile_id,
             complete=inputs.complete,
-            security_evaluate=evaluate_target_security_profile,
         )
         measurements.append(measured)
     measurement_ledger = close_target_measurements(

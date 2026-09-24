@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -18,7 +17,7 @@ from prompt_mechanism_study.data.curation import (
     _initialize,
     _is_response_format_requirement,
 )
-from prompt_mechanism_study.measurement.functional_judge import JudgeGateError, bailian_complete
+from prompt_mechanism_study.measurement.functional_judge import bailian_complete
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
 from prompt_mechanism_study.data.task_unit_data import (
     _canonical_jsonl,
@@ -1173,7 +1172,7 @@ def _run_stage(
         parser,
         max_new_batches,
         workers,
-        _transport_retry(provider),
+        provider,
     )
     return results, complete, plan
 
@@ -1194,35 +1193,10 @@ def _policy(root: Path, prompt_name: str, config_name: str) -> tuple[dict[str, A
         "temperature": evaluator["temperature"],
         "top_p": evaluator["top_p"],
         "seed": evaluator["seed"],
-        "transport_max_attempts": 3,
+        "transport_max_attempts": 1,
         "duplicate_index_policy": "last_occurrence_wins_if_all_indices_covered_v1",
     }
     return evaluator, prompt, identity
-
-
-def _transport_retry(provider: Provider) -> Provider:
-    """Retry only empty/invalid provider envelopes; semantic parsing remains single-pass."""
-
-    def wrapped(
-        request: dict[str, Any], evaluator: Mapping[str, Any], prompt: str
-    ) -> bytes:
-        last_failure: JudgeGateError | None = None
-        for attempt in range(1, 4):
-            try:
-                return provider(request, evaluator, prompt)
-            except JudgeGateError as failure:
-                if str(failure) not in {
-                    "provider request failed",
-                    "provider response format is invalid",
-                }:
-                    raise
-                last_failure = failure
-                if attempt < 3:
-                    time.sleep(float(attempt))
-        assert last_failure is not None
-        raise last_failure
-
-    return wrapped
 
 
 def _base_population(

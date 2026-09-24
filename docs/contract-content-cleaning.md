@@ -77,6 +77,11 @@ plan to finish its remaining batches; completed batches are reused. Changed code
 prompts or inputs require a new output directory. Provider spending requires the
 owner's authorization; the command itself grants none.
 
+Each batch makes one provider attempt. Provider or response failures are saved
+as errors by the common batch executor; there is no additional automatic retry
+inside contract preparation. Successful saved batches remain reusable under the
+same frozen plan.
+
 The complete proposals are in `PROPOSALS/final`. Use the existing review commands:
 
 ```text

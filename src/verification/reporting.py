@@ -849,9 +849,9 @@ from prompt_mechanism_study.experiment.study_planning import (
 from prompt_mechanism_study.verification.design import verify_target_study_freezes
 from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
 from prompt_mechanism_study.verification.integrity import _decode_target_value
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    evaluate_target_security_profile,
-    target_security_profile_producer_sha256,
+from prompt_mechanism_study.measurement.security_profiles import (
+    evaluate_security_profile,
+    security_profile_producer_sha256,
 )
 
 
@@ -1057,9 +1057,9 @@ def _replay_execution_measurements(evidence, contract, raw) -> dict[str, object]
             if any(row.get(key) is not None for key in ("security", "functional_response")):
                 raise ValueError("execution terminal code contains evaluator output")
         else:
-            if frozen.get("security_producer_sha256") != target_security_profile_producer_sha256():
+            if frozen.get("security_producer_sha256") != security_profile_producer_sha256():
                 raise ValueError("execution security producer drifted from its qualification")
-            security = evaluate_target_security_profile(code, frozen.get("security_profile_id"))
+            security = evaluate_security_profile(code, frozen.get("security_profile_id"))
             if row.get("security") != security or measurement.oracle_evidence_sha256 != content_hash(security):
                 raise ValueError("execution security measurement failed local replay")
             if review_policy is None and scope != "complete":

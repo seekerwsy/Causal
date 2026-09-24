@@ -14,9 +14,8 @@ from prompt_mechanism_study.target_workflow import (
     run_target_development,
     DEVELOPMENT_CODE_RESPONSE_FORMAT,
 )
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    evaluate_target_security_profile,
-    target_security_profile_producer_sha256,
+from prompt_mechanism_study.measurement.security_profiles import (
+    security_profile_producer_sha256,
 )
 from prompt_mechanism_study.verification.reporting import verify_development_result
 from prompt_mechanism_study.measurement.evaluate import (
@@ -44,7 +43,7 @@ def _prepared_synthetic_plan(subject_bound=False):
     """Reuse exposed quotations as offline fixtures, never as new annotation evidence."""
     plan = read_json(Path('data/method/open-tsg-effect-canary-v1/plan.json'))
     records = {c['task_id']: c for c in read_json(Path('data/method/open-tsg-effect-canary-v1/representation/contracts.json'))}
-    plan['security_producer_sha256'] = target_security_profile_producer_sha256()
+    plan['security_producer_sha256'] = security_profile_producer_sha256()
     plan['generator']['response_format'] = DEVELOPMENT_CODE_RESPONSE_FORMAT
     plan['run_id'] = 'synthetic-prepared-input-check'
     for i, source in enumerate(plan['tasks']):
@@ -168,7 +167,7 @@ def test_failed_functional_judge_does_not_erase_primary_security_measurement():
     measurement,evidence=measure_generated_code(assignment_id='assigned',generation_request={'language':'python'},
         generation_evaluator={},generation_prompt='code',source_task_prompt='Look up the given name in users.',
         functional_contract={'language':'python','requirements':[]},functional_evaluator={},functional_prompt='review',
-        security_profile_id='python.cwe89.sql_values.v1',complete=complete,security_evaluate=evaluate_target_security_profile)
+        security_profile_id='python.cwe89.sql_values.v1',complete=complete)
     assert measurement.oracle_status is OracleStatus.SECURE
     assert measurement.functional_status is FunctionalStatus.UNKNOWN
     assert evidence['functional_failure']['error_type']=='JudgeGateError'

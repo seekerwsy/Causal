@@ -10,6 +10,13 @@ The closed-vocabulary TSG qualifier and fixed-registry task-to-mechanism
 binding commands are available only in that historical implementation; the
 current path constructs open-graph Atomic candidates.
 
+All current code measurement uses `measurement/security_profiles.py`. Command
+and SQL interpretation are checked directly at each sink; there is no legacy
+Oracle followed by a corrective wrapper. The retained qualification command is
+`qualification target-security-oracle`, with `--profile` for the declared scope.
+The trace format and implementation hash identify the current implementation;
+old result packages must be replayed with their captured implementation.
+
 ## Reproduce the current result
 
 Use Python 3.12 from the repository root:

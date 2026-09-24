@@ -15,91 +15,12 @@ from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.measurement.security_profiles import (
     LOCAL_PROFILE_IDS,
     evaluate_security_profile,
-)
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    TARGET_LOCAL_PROFILE_IDS,
-    TARGET_ONLY_PROFILE_IDS,
-    evaluate_target_security_profile,
-    target_security_profile_producer_sha256,
+    security_profile_producer_sha256,
 )
 
 
 class EligibilityError(RuntimeError):
     """Raised when an eligibility input or policy is inconsistent."""
-
-
-def qualify_local_security_profiles(
-    repository_root: Path,
-    registry_path: Path,
-    cases_path: Path,
-    output: Path,
-) -> dict[str, Any]:
-    """Replay the frozen three-way gold boundary for every active local profile."""
-
-    root = repository_root.resolve()
-    registry = load_mechanism_registry(registry_path)
-    cases = _rows(read_json(cases_path))
-    case_ids = [row.get("case_id") for row in cases]
-    if not cases or len(case_ids) != len(set(case_ids)) or any(
-        not isinstance(case_id, str) or not case_id for case_id in case_ids
-    ):
-        raise EligibilityError("security qualification case identities are invalid")
-    active_profiles = {
-        row["oracle_profile_id"]
-        for row in registry.values()
-        if row["oracle_profile_id"] in LOCAL_PROFILE_IDS
-    }
-    case_profiles = {row.get("profile_id") for row in cases}
-    if case_profiles != active_profiles:
-        raise EligibilityError("security qualification cases do not exactly cover local profiles")
-
-    labels_by_profile: dict[str, set[str]] = {profile: set() for profile in active_profiles}
-    results = []
-    for case in cases:
-        if set(case) != {"case_id", "profile_id", "expected_label", "code"} or case[
-            "expected_label"
-        ] not in {"secure", "insecure", "unknown"}:
-            raise EligibilityError("security qualification case is invalid")
-        labels_by_profile[case["profile_id"]].add(case["expected_label"])
-        result = evaluate_security_profile(case["code"], case["profile_id"])
-        results.append(
-            {
-                "case_id": case["case_id"],
-                "profile_id": case["profile_id"],
-                "expected_label": case["expected_label"],
-                "actual_label": result["security_label"],
-                "reason_code": result["reason_code"],
-                "matched": result["security_label"] == case["expected_label"],
-            }
-        )
-    if any(labels != {"secure", "insecure", "unknown"} for labels in labels_by_profile.values()):
-        raise EligibilityError("each local profile requires secure, insecure, and unknown gold cases")
-    mismatches = [row for row in results if not row["matched"]]
-    report = {
-        "schema_version": "1.0",
-        "status": "QUALIFIED_FOR_EXPERIMENT" if not mismatches else "QUALIFICATION_FAILED",
-        "active_local_profiles": sorted(active_profiles),
-        "unsupported_registry_profiles": sorted(
-            {
-                row["oracle_profile_id"]
-                for row in registry.values()
-                if row["oracle_profile_id"] not in LOCAL_PROFILE_IDS
-            }
-        ),
-        "gold_cases": len(cases),
-        "label_mismatches": len(mismatches),
-        "required_labels": ["secure", "insecure", "unknown"],
-        "registry_sha256": _sha256(registry_path),
-        "cases_sha256": _sha256(cases_path),
-        "implementation_sha256": _sha256(root / "src/measurement/security_profiles.py"),
-        "unknown_is_secure": False,
-        "claim_boundary": (
-            "Qualification covers only the frozen local AST profiles and gold idioms; "
-            "it is not a global CWE-detection accuracy claim."
-        ),
-    }
-    write_bundle(output, {"case-results.json": results, "qualification.json": report})
-    return report
 
 
 def qualify_target_security_profiles(
@@ -112,7 +33,7 @@ def qualify_target_security_profiles(
 ) -> dict[str, Any]:
     """Qualify the declared profile scope on arm-blind gold code idioms.
 
-    Omitting the scope preserves full-catalog qualification and frozen replay.
+    Omitting the scope checks all registered, supported profiles.
     Explicit scope never certifies an untested profile or broader code coverage.
     """
 
@@ -143,7 +64,7 @@ def qualify_target_security_profiles(
     registered_profiles = {
         row["oracle_profile_id"]
         for row in registry.values()
-        if row["oracle_profile_id"] in TARGET_LOCAL_PROFILE_IDS
+        if row["oracle_profile_id"] in LOCAL_PROFILE_IDS
     }
     active_profiles = registered_profiles
     if profile_ids is not None:
@@ -170,7 +91,7 @@ def qualify_target_security_profiles(
         ] not in {"secure", "insecure", "unknown"}:
             raise EligibilityError("target security qualification case is invalid")
         labels_by_profile[case["profile_id"]].add(case["expected_label"])
-        result = evaluate_target_security_profile(case["code"], case["profile_id"])
+        result = evaluate_security_profile(case["code"], case["profile_id"])
         results.append(
             {
                 "case_id": case["case_id"],
@@ -197,12 +118,11 @@ def qualify_target_security_profiles(
             else "TARGET_MEASUREMENT_PROFILE_QUALIFICATION_FAILED"
         ),
         "active_local_profiles": sorted(active_profiles),
-        "target_only_profiles": sorted(active_profiles & TARGET_ONLY_PROFILE_IDS),
         "unsupported_registry_profiles": sorted(
             {
                 row["oracle_profile_id"]
                 for row in registry.values()
-                if row["oracle_profile_id"] not in TARGET_LOCAL_PROFILE_IDS
+                if row["oracle_profile_id"] not in LOCAL_PROFILE_IDS
             }
         ),
         "case_sources": sources,
@@ -211,13 +131,13 @@ def qualify_target_security_profiles(
         "label_mismatches": len(mismatches),
         "required_labels": ["secure", "insecure", "unknown"],
         "registry_sha256": _sha256(registry_file),
-        "implementation_sha256": target_security_profile_producer_sha256(),
+        "implementation_sha256": security_profile_producer_sha256(),
         "unknown_is_secure": False,
         "arms_or_outcomes_used": False,
         "formal_execution_authorized": False,
         "scientific_claim_allowed": False,
         "claim_boundary": (
-            "Qualification covers only the exact target/legacy local AST producers and frozen "
+            "Qualification covers only the current local AST implementation and frozen "
             "gold idioms; it is not a global CWE-detection accuracy claim."
         ),
     }
@@ -392,10 +312,6 @@ def _load_task_exclusions(
     return excluded, exclusion_hashes
 
 
-
-
-
-
 _MEMORY_REPLICATION_CWES = {
     "CWE-119",
     "CWE-120",
@@ -405,8 +321,6 @@ _MEMORY_REPLICATION_CWES = {
     "CWE-476",
     "CWE-787",
 }
-
-
 
 
 def _rows(value: Any) -> list[dict[str, Any]]:
@@ -423,6 +337,5 @@ __all__ = [
     "EligibilityError",
     "freeze_prompt_tsg_holdout_selection",
     "freeze_prompt_tsg_task_selection",
-    "qualify_local_security_profiles",
     "qualify_target_security_profiles",
 ]

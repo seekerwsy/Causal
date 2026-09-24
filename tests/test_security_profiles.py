@@ -7,9 +7,31 @@ from prompt_mechanism_study.data.eligibility import (
     EligibilityError,
     qualify_target_security_profiles,
 )
-from prompt_mechanism_study.measurement.target_security_profiles import (
-    evaluate_target_security_profile,
+from prompt_mechanism_study.measurement.security_profiles import (
+    evaluate_security_profile,
 )
+
+
+def test_command_and_sql_profiles_preserve_interpretation_boundaries() -> None:
+    command_cases = [
+        ("subprocess.run(['ping', value], shell=False)", "secure"),
+        ("subprocess.run(['ping', value], shell=flag)", "unknown"),
+        ("subprocess.run(['ping', value], **options)", "unknown"),
+        ("subprocess.run(['sh', '-c', value], shell=False)", "insecure"),
+        ("subprocess.run([value], **options)", "insecure"),
+    ]
+    for body, expected in command_cases:
+        code = "import subprocess\ndef run(value, flag, options):\n    " + body
+        assert evaluate_security_profile(code, "python.cwe78.fixed_executable_argv.v1")["security_label"] == expected
+    sql_cases = [
+        ("'SELECT * FROM t WHERE x = ?'", "secure"),
+        ("'SELECT * FROM t WHERE x = ' + value", "insecure"),
+        ("f'SELECT * FROM t WHERE x = ? AND y = {value}'", "insecure"),
+        ("f'SELECT * FROM t WHERE x = {int(value)}'", "unknown"),
+    ]
+    for query, expected in sql_cases:
+        code = "def run(cursor, value):\n    cursor.execute(" + query + ", (value,))"
+        assert evaluate_security_profile(code, "python.cwe89.sql_values.v1")["security_label"] == expected
 
 
 def test_xml_external_entity_endpoint_keeps_defaults_and_file_contents_unknown() -> None:
@@ -24,10 +46,10 @@ def test_xml_external_entity_endpoint_keeps_defaults_and_file_contents_unknown()
         ("def parse(data):\n    return data", "unknown"),
     ]
     for code, expected in cases:
-        assert evaluate_target_security_profile(code, "python.cwe611.xml_external_entity.v2")["security_label"] == expected
+        assert evaluate_security_profile(code, "python.cwe611.xml_external_entity.v2")["security_label"] == expected
     # Historical results must retain their original interpretation.
-    assert evaluate_target_security_profile(cases[0][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "insecure"
-    assert evaluate_target_security_profile(cases[1][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "secure"
+    assert evaluate_security_profile(cases[0][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "insecure"
+    assert evaluate_security_profile(cases[1][0], "python.cwe611.xml_external_entity.v1")["security_label"] == "secure"
 
 
 @pytest.mark.parametrize('body, expected', [
@@ -40,7 +62,7 @@ def test_xml_external_entity_endpoint_keeps_defaults_and_file_contents_unknown()
 ])
 def test_tls_profile_proves_configuration_at_use(body: str, expected: str) -> None:
     code = "import requests, ssl, urllib.request\n" + body
-    result = evaluate_target_security_profile(code, "python.cwe295.tls_certificate_validation.v1")
+    result = evaluate_security_profile(code, "python.cwe295.tls_certificate_validation.v1")
     assert result["security_label"] == expected
 
 
@@ -79,7 +101,12 @@ def test_scoped_qualification_does_not_certify_unused_profiles(tmp_path: Path) -
              if r["profile_id"] == profile]
     # Qualification case files are required to remain inside the declared root.
     registry = tmp_path / "registry.json"
-    registry.write_bytes((root / "data/method/phase-context-policy-v3-mechanism-registry-v1.json").read_bytes())
+    registry_value = read_json(root / "data/method/phase-context-policy-v3-mechanism-registry-v1.json")
+    # Qualification depends on profile coordinates, not obsolete policy templates.
+    registry_value["mechanisms"] = [{key: row[key] for key in
+        ("realization_id", "cwe_id", "task_family", "oracle_profile_id")}
+        for row in registry_value["mechanisms"]]
+    registry.write_text(json.dumps(registry_value), encoding="utf-8")
     path = tmp_path / "cases.json"
     path.write_text(json.dumps([r for r in cases if r["expected_label"] != "unknown"]), encoding="utf-8")
     with pytest.raises(EligibilityError, match="unknown gold cases"):

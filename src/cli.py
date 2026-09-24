@@ -496,22 +496,11 @@ def _add_qualification_group(groups: Any) -> None:
     )
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
 
-    security = _leaf(
-        actions,
-        "security-oracle",
-        _run_security_oracle,
-        "replay the frozen gold boundary for active local security profiles",
-    )
-    security.add_argument("registry", type=Path)
-    security.add_argument("cases", type=Path)
-    security.add_argument("output", type=Path)
-    security.add_argument("--repository-root", type=Path, default=Path.cwd())
-
     target_security = _leaf(
         actions,
         "target-security-oracle",
         _run_target_security_oracle,
-        "qualify the target-v3 local Security Oracle catalog without mutating legacy producers",
+        "qualify the current Security Oracle for the declared profile scope",
     )
     target_security.add_argument("registry", type=Path)
     target_security.add_argument("output", type=Path)
@@ -1062,18 +1051,6 @@ def _run_bind_candidates(args: argparse.Namespace, _: argparse.ArgumentParser) -
             qualification_bundle=args.qualification_bundle,
         )
     )
-
-
-def _run_security_oracle(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
-    from prompt_mechanism_study.data.eligibility import qualify_local_security_profiles
-
-    report = qualify_local_security_profiles(
-        args.repository_root,
-        args.registry,
-        args.cases,
-        args.output,
-    )
-    return _emit_gate_status(report, "QUALIFIED_FOR_EXPERIMENT")
 
 
 def _run_target_security_oracle(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
