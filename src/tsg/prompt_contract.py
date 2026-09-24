@@ -44,15 +44,6 @@ def task_context_contract_from_record(value: Mapping[str, Any]) -> OpenTaskContr
     return contract
 
 
-def compile_task_context_contract(
-    contract: OpenTaskContract, *, prompt: str, catalog: Mapping[str, Any]
-) -> PromptTSG:
-    """Compile the active open contract without reinterpreting its source facts."""
-    if not isinstance(contract, OpenTaskContract):
-        raise PromptTSGError("open task contract is required")
-    return compile_open_task_contract(contract, prompt=prompt, catalog=catalog)
-
-
 @dataclass(frozen=True, slots=True)
 class OpenTaskContract:
     """Source-only instances with a development-open or frozen concept vocabulary."""
@@ -304,7 +295,7 @@ def open_contract_from_response(
         catalog_sha256(catalog), annotator_id, review_status, False, derived,
         tuple(bound_facts), tuple(bound_relations), tuple(concept_states),
         tuple(feature_states), tuple(notes), inventory)
-    compile_open_task_contract(contract, prompt=task["prompt"], catalog=catalog)
+    compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
     return contract
 
 
@@ -447,9 +438,12 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
             raise PromptTSGError("precedes relation requires runtime operations")
 
 
-def compile_open_task_contract(
+def compile_task_context_contract(
     contract: OpenTaskContract, *, prompt: str, catalog: Mapping[str, Any],
 ) -> PromptTSG:
+    """Compile the source record once; structural checks do not certify meaning."""
+    if not isinstance(contract, OpenTaskContract):
+        raise PromptTSGError("open task contract is required")
     if (contract.schema_version != "3.0" or contract.prompt_sha256 != content_hash(prompt)
         or contract.input_catalog_sha256 != catalog_sha256(catalog)
         or contract.arms_or_outcomes_used is not False or contract.review_status not in _REVIEW_STATUSES):

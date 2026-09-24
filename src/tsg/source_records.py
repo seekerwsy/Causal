@@ -466,7 +466,7 @@ def _inherit_conditions(value):
     return value
 
 
-def _target_operations(record, runtime, implementation=()):
+def _target_operations(record, implementation=()):
     """Only explicit direct targets are distributive; boundaries never are."""
     return sorted(implementation if record['scope_kind']=='implementation' else
                   record['operations'] if record['scope_kind']=='targets' else ())
@@ -477,7 +477,6 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
     from prompt_mechanism_study.tsg.source_codec import (
         PromptContractExtractionError as Error,
         _quoted_inventory_citation,
-        _inventory_concept,
         contract_from_value,
         _indexed_citation,
         _source_tokens,
@@ -553,18 +552,8 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
         key = aliases[record["record_id"]]
         refs(record["operations"], operations)
         refs(record["subjects"], objects)
-        meaning = _inventory_concept(record["fact"], request)
-        if record["modality"] != "obligation" and meaning["node_type"] != "constraint":
-            raise Error("assumptions and unresolved force require a neutral constraint concept")
         modalities[key] = record["modality"]
-        layer = contract.source_inventory["layers"][key]
-        if record["scope_kind"] in {"task", "implementation", "composite"}:
-            if record["operations"] or record["subjects"]:
-                raise Error("task/implementation/composite scope has no hand-picked targets")
-            if record["scope_kind"] == "task" and layer != "runtime" or record["scope_kind"] == "implementation" and layer != "generation":
-                raise Error("record scope conflicts with its semantic layer")
-        targets = [aliases[k] for k in _target_operations(record,
-            {k for k in operations if contract.source_inventory['layers'][aliases[k]] == 'runtime'})]
+        targets = [aliases[k] for k in _target_operations(record)]
         if record["scope_kind"] == "targets" and not targets and not record["subjects"]:
             raise Error("target scope must identify an operation or subject")
         for target in (*targets, *(aliases[k] for k in record['subjects'])):
@@ -590,39 +579,38 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
         incidence(role)
     contract = replace(contract, relations=tuple(edges), source_inventory={**contract.source_inventory,
         'operation_roles': roles, 'unit_impacts': impacts})
-    compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
     contract = _include_recorded_impacts(contract)
     # Only fallback implementation scope targets the shared generation operation.
     edges = list(contract.relations)
     for key, owner, condition, relation in guards:
         if relation == 'context_for':
             edges.append(dict(source=key, target=owner, edge_type=relation,
-                **_indexed_citation(task['prompt'], _source_tokens(task['prompt']), citation(condition))))
+                **_indexed_citation(task['prompt'], tokens, citation(condition))))
     for record in value["requirements"]:
         if record["scope_kind"] == "implementation":
             implementation = [f['local_id'] for f in contract.facts if f['node_type']=='task_operation'
                               and contract.source_inventory['layers'][f['local_id']]=='generation']
             if len(implementation) != 1:
                 raise Error('generation obligations require one source-supported implementation operation')
-            edges.append(dict(source=aliases[record["record_id"]], target=_target_operations(record, (), implementation)[0],
-                edge_type="constrains", **_indexed_citation(task["prompt"], _source_tokens(task["prompt"]), citation(record["fact"]))))
-    contract = replace(contract, relations=tuple(edges), source_inventory={**contract.source_inventory,
+            edges.append(dict(source=aliases[record["record_id"]], target=_target_operations(record, implementation)[0],
+                edge_type="constrains", **_indexed_citation(task["prompt"], tokens, citation(record["fact"]))))
+    # Assemble the complete inventory before constructing the next contract.
+    inventory = {**contract.source_inventory,
         "statement_kinds": modalities,
         "requirement_scopes": {aliases[key]: dict(kind=row['scope_kind'],
             boundaries=[aliases[k] for k in row['operations']], target_class=row['target_class'])
             for key, row in requirements.items() if row['scope_kind'] in {'task', 'each'}},
         "requirement_structures": {aliases[key]: dict(kind=row['structure']['kind'],
-            members=[aliases[m] for m in row['structure']['members']]) for key, row in requirements.items()}})
+            members=[aliases[m] for m in row['structure']['members']]) for key, row in requirements.items()},
+        "unit_impacts": {key: {**impact,
+            **_indexed_citation(task['prompt'], tokens, citation(value['unit_impacts'][key]))}
+            for key, impact in contract.source_inventory['unit_impacts'].items()}}
     owned_relations = {aliases[key]: [dict(source=aliases[r['source']], target=aliases[r['target']],
-        edge_type=r['edge_type'], **_indexed_citation(task['prompt'], _source_tokens(task['prompt']), citation(r)))
+        edge_type=r['edge_type'], **_indexed_citation(task['prompt'], tokens, citation(r)))
         for r in row['relations']] for key, row in requirements.items() if row['relations']}
     if owned_relations:
-        contract = replace(contract, source_inventory={**contract.source_inventory,
-            'requirement_relations': owned_relations})
-    impacts = deepcopy(contract.source_inventory['unit_impacts'])
-    for key, impact in value['unit_impacts'].items():
-        impacts[key].update(_indexed_citation(task['prompt'], _source_tokens(task['prompt']), citation(impact)))
-    contract = replace(contract, source_inventory={**contract.source_inventory, 'unit_impacts': impacts})
+        inventory['requirement_relations'] = owned_relations
+    contract = replace(contract, relations=tuple(edges), source_inventory=inventory)
     contract = _include_recorded_impacts(contract)
     opaque = {aliases[key] for key, row in requirements.items() if row['structure']['kind'] == 'opaque'}
     if "unresolved" in modalities.values() or opaque:
@@ -759,7 +747,6 @@ def structural_readback(request, value):
     from prompt_mechanism_study.tsg.prompt_tsg import requirement_membership
     effective = _inherit_conditions(value)
     operations = {r['record_id']:r for r in value['operations']}
-    runtime = {key for key,row in operations.items() if fact_layer(row['fact'], request)=='runtime'}
     implementation = {key for key,row in operations.items() if fact_layer(row['fact'], request)=='generation'}
     implementation.update(n['local_id'] for n in request.get('fixed_template',{}).get('nodes',[])
                           if n['concept_id']=='code.implementation')
@@ -772,7 +759,7 @@ def structural_readback(request, value):
         for r in value['requirements']],requirement_ids)
     decoded={}
     for row in effective['requirements']:
-        key=row['record_id']; targets=_target_operations(row,runtime,implementation)
+        key=row['record_id']; targets=_target_operations(row,implementation)
         bindings=[]
         for target in targets:
             execution=operations.get(target,{}).get('execution_conditions',[])

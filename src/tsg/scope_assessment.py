@@ -327,48 +327,26 @@ def apply_fixed_scope_response(
         raise PromptContractExtractionError("fixed scope response fields are invalid")
     notes = [*contract.unresolved_notes, *value["unresolved_notes"]]
     assessments = []
-    fact_ids = {row["local_id"] for row in request["facts"]}
     # The preceding annotations supply facts and bindings only; no omitted
     # scope answer is a default or evidence of absence.
     base = replace(contract, feature_states=())
     for key, scope in request["scopes"].items():
         supplied = value["states"].get(key)
-        # Coordinates, evidence references and fixed explanations belong to the
-        # program. A missing judgment still stays missing; no default is inferred.
-        expression_fields = {"expression", "requirements"}
-        fields = expression_fields | {"applicability", "applicability_rationale"}
-        if (isinstance(supplied, dict) and set(supplied) == fields
-            and isinstance(supplied.get("expression"), str) and supplied["expression"] in _EXPRESSION_STATES):
-            supplied = dict(supplied,
-                expression_rationale=_scope_expression_rationale(scope, supplied["expression"]),
-                applicability_evidence=sorted({scope["target"], *scope["subjects"]}))
-        else:
-            supplied = None
         row = {name: scope[name] for name in ("target", "subjects", "conditions", "concept_id")}
         error = None
         if (not isinstance(supplied, dict) or set(supplied) != {
-                "applicability", "applicability_evidence", "applicability_rationale",
-                "expression", "requirements", "expression_rationale"}
+                "applicability", "applicability_rationale", "expression", "requirements"}
             or supplied.get("applicability") not in _APPLICABILITY_STATES
             or supplied.get("expression") not in _EXPRESSION_STATES
             or not isinstance(supplied.get("requirements"), list)
             or any(not isinstance(item, str) for item in supplied["requirements"])
             or len(set(supplied["requirements"])) != len(supplied["requirements"])
-            or not isinstance(supplied.get("applicability_evidence"), list)
-            or any(not isinstance(item, str) for item in supplied["applicability_evidence"])
-            or len(set(supplied["applicability_evidence"])) != len(supplied["applicability_evidence"])
-            or any(not isinstance(supplied.get(key), str) or not supplied[key].strip()
-                   for key in ("applicability_rationale", "expression_rationale"))):
+            or not isinstance(supplied.get("applicability_rationale"), str)
+            or not supplied["applicability_rationale"].strip()):
             error = "missing or malformed state row"
         else:
             applicability, expression = supplied["applicability"], supplied["expression"]
-            evidence = set(supplied["applicability_evidence"])
-            required = {scope["target"], *scope["subjects"]}
-            if supplied["expression_rationale"] != _scope_expression_rationale(scope, expression):
-                error = "expression explanation does not bind its exact scope and judgment"
-            elif not evidence <= fact_ids or applicability != "unresolved" and not required <= evidence:
-                error = "applicability evidence does not cover the source-bound operation and subjects"
-            elif expression != "explicitly_required" and supplied["requirements"]:
+            if expression != "explicitly_required" and supplied["requirements"]:
                 error = "non-positive expression contains positive requirement evidence"
             elif expression == "explicitly_required" and (
                 not supplied["requirements"]
@@ -382,7 +360,7 @@ def apply_fixed_scope_response(
             elif applicability == "not_applicable" and expression == "not_expressed":
                 state = "not_applicable"
             row.update(state=state, requirements=sorted(supplied["requirements"]) if state == "present" else [],
-                       rationale=f"Applicability ({applicability}): {supplied['applicability_rationale']} Expression ({expression}): {supplied['expression_rationale']}")
+                       rationale=f"Applicability ({applicability}): {supplied['applicability_rationale']} Expression ({expression}): {_scope_expression_rationale(scope, expression)}")
             try:
                 if error is None:
                     compile_task_context_contract(replace(base, feature_states=(row,)),

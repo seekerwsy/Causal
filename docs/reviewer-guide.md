@@ -210,3 +210,13 @@ positions and dangling references fail. This verifies the intended responsibilit
 boundary, not improved extraction accuracy. No live model call, protected input,
 paper edit or relabeling of frozen evidence was involved. TSG source decreased
 from 7,965 to 7,622 lines; all `src/` Python source totals 29,029 lines in 54 files.
+
+The following bounded simplification, backed up at `3761fdef3` on
+`codex/pre-tsg-compact-20260925`, consolidates the public compiler entry point,
+removes redundant in-progress compilation and self-checks of program-generated
+assessment fields, and assembles inventory metadata together. Model requests,
+review/patch behavior and saved record formats are unchanged. In the isolated
+Python 3.12 environment, all 102 tests passed (29.28 seconds); 109 captured
+compiler/assessment outputs and all 20 smoke files match the preceding version
+exactly. TSG source is 7,581 lines; total Python source is 28,988 lines. This is
+implementation simplification, not a new semantic accuracy or effect result.

@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 import pytest
 from prompt_mechanism_study.tsg.prompt_contract import (
-    compile_open_task_contract,
+    compile_task_context_contract,
     open_concept_catalog,
     open_contract_from_response,
     task_context_contract_from_record,
@@ -65,7 +65,7 @@ def _inventory_contract():
 
 def test_local_input_and_result_can_be_the_same_source_object_and_metadata_roundtrips():
     catalog, contract = _inventory_contract()
-    graph = compile_open_task_contract(contract, prompt=SOURCE, catalog=catalog)
+    graph = compile_task_context_contract(contract, prompt=SOURCE, catalog=catalog)
     assert len(graph.nodes) == len(contract.facts) + 1
     record = task_context_contract_record(contract)
     assert record["source_inventory"] == contract.source_inventory
@@ -86,7 +86,7 @@ def test_units_and_role_evidence_must_quote_the_actual_source(section):
     row = inventory[section]["u1"] if section == "source_units" else inventory[section][0]
     row["evidence_text"] = "This evidence is not in the task."
     with pytest.raises(PromptTSGError):
-        compile_open_task_contract(replace(contract, source_inventory=inventory), prompt=SOURCE, catalog=catalog)
+        compile_task_context_contract(replace(contract, source_inventory=inventory), prompt=SOURCE, catalog=catalog)
 
 
 @pytest.mark.parametrize('source,relation,target,match', [
@@ -103,5 +103,5 @@ def test_edges_require_same_layer_and_the_exact_operation_subject_role(source, r
         inventory["operation_roles"] = [row for row in inventory["operation_roles"] if row["role"] != "result"]
     edge = dict(source=source, edge_type=relation, target=target, evidence_text=SOURCE, occurrence=1)
     with pytest.raises(PromptTSGError, match=match):
-        compile_open_task_contract(replace(contract, source_inventory=inventory, relations=(edge,)),
+        compile_task_context_contract(replace(contract, source_inventory=inventory, relations=(edge,)),
                                    prompt=SOURCE, catalog=catalog)
