@@ -833,15 +833,16 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
             legacy_contract = replace(present, catalog=legacy, input_catalog_sha256=catalog_sha256(legacy))
             with pytest.raises(PromptTSGError, match="explicit object policy selector"):
                 compile_task_context_contract(legacy_contract, prompt=present_task["prompt"], catalog=legacy)
-            # Operation-local impact declarations cannot certify object-wide
-            # irrelevance. Explicit generation-only influence can still be ignored.
+            # Uncertain source influence is passed to the semantic assessor;
+            # program locality rules no longer withhold this candidate.
             inventory = json.loads(json.dumps(present.source_inventory))
             inventory["coverage"]["u"]["status"] = "unresolved"
             inventory["unit_impacts"] = {"u": dict(effect="local", operations=["return"], complete=False,
                 reason="Authored unresolved source-impact contrast.")}
             incomplete = replace(present, source_inventory=inventory)
             withheld = fixed_scope_request(incomplete, prompt=present_task["prompt"], catalog=catalog)
-            assert not withheld["scopes"] and withheld["withheld_scopes"]
+            assert withheld["scopes"] and not withheld["withheld_scopes"]
+            assert withheld["source_inventory_status"]["status"] == "INCOMPLETE"
             inventory["unit_impacts"]["u"].update(effect="no_runtime_effect", operations=[])
             assert fixed_scope_request(incomplete, prompt=present_task["prompt"], catalog=catalog)["scopes"]
             # Root anchoring does not bring an unrelated operation into this

@@ -9,7 +9,6 @@ import re
 from copy import deepcopy
 from dataclasses import replace
 from prompt_mechanism_study.tsg.prompt_contract import open_contract_from_response, OpenTaskContract
-from prompt_mechanism_study.tsg.prompt_tsg import has_required_source_name
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_template_facts
 
 
@@ -45,27 +44,6 @@ _OBJECT_ROLE_MEANINGS = {
 
 class PromptContractExtractionError(RuntimeError):
     """The source request, model response, or extraction closure is invalid."""
-
-
-def _operation_anchor_conflicts(nodes: list, request: Mapping[str, Any]) -> list[tuple[int, int]]:
-    """Locate overlapping identity anchors for distinct instances of one operation concept."""
-    operations = []
-    for index, node in enumerate(nodes):
-        if not isinstance(node, dict):
-            continue
-        concept_id = node.get("concept_id")
-        concept = (request.get("known_concepts", {}).get(concept_id, {})
-                   if isinstance(concept_id, str) else node.get("concept", {}))
-        if not isinstance(concept, dict) or concept.get("node_type") != "task_operation":
-            continue
-        concept_id = concept_id or concept.get("concept_id")
-        start, end = node.get("evidence_start_token"), node.get("evidence_end_token")
-        if isinstance(concept_id, str) and type(start) is int and type(end) is int and 1 <= start <= end:
-            operations.append((index, concept_id, start, end))
-    return [(i, j) for offset, (i, concept, start, end) in enumerate(operations)
-            for j, other, left, right in operations[offset + 1:]
-            if concept == other and (start, end) != (left, right)
-            and max(start, left) <= min(end, right)]
 
 
 def _has_fixed_concept_layers(request: Mapping[str, Any]) -> bool:
@@ -290,8 +268,6 @@ def _indexed_facts_response(value: Any, *, prompt: str, request: Mapping[str, An
         raise PromptContractExtractionError("source fact inventory fields are invalid")
     if not isinstance(value["coverage"], dict) or set(value["coverage"]) != set(request["source_units"]):
         raise PromptContractExtractionError("source inventory coverage is incomplete")
-    if _operation_anchor_conflicts(value["nodes"], request):
-        raise PromptContractExtractionError("overlapping anchors do not distinguish instances of the same operation concept")
     template = request["fixed_template"]
     template_concepts = {row["concept_id"] for row in template["concepts"]}
     frozen = request["concept_policy"] == "FROZEN"
@@ -476,28 +452,14 @@ def contract_decision_request(
         "message_roles": "System message has priority over User message. System message, User message and Task are provenance labels, not extra requirements. Language is an actual field supplied to the generator and must be considered with the message contents.",
         "concept_policy": catalog["concept_policy"],
         "known_concepts": {key: {"node_type": value, "definition": catalog["semantic_guidance"].get(key, ""),
-                                 **({"layer": catalog["semantic_layers"][key]} if key in catalog.get("semantic_layers", {}) else {}),
-                                 **({"source_name_terms": catalog["source_name_terms"][key]}
-                                    if key in catalog.get("source_name_terms", {}) else {})}
+                                 **({"layer": catalog["semantic_layers"][key]} if key in catalog.get("semantic_layers", {}) else {})}
                            for key, value in catalog["semantics"].items() if key != "task.root"
-                           and key not in {row["concept_id"] for row in template["concepts"]}
-                           and has_required_source_name(catalog, key, task["prompt"])},
-        **({"source_name_policy": (
-                "For a concept with source_name_terms, its cited identity evidence must contain at least one "
-                "declared literal name as a whole identifier, ignoring case. A name inside a longer identifier "
-                "does not qualify. The compiler checks this prerequisite; a match alone does not establish "
-                "the entity, role or full concept meaning. Imports, negations and unrelated mentions still "
-                "require source-semantic review. Excluded concepts lack their declared name in the source; "
-                "this is not an absence judgment about the underlying property. Preserve any stated generic "
-                "entity with an admissible concept, or record a source gap rather than inventing a name."),
-            "excluded_source_name_concepts": {key: terms for key, terms in catalog["source_name_terms"].items()
-                if not has_required_source_name(catalog, key, task["prompt"])}}
-           if "source_name_terms" in catalog else {}),
+                           and key not in {row["concept_id"] for row in template["concepts"]}},
         "allowed_node_types": [value for value in catalog["node_types"] if value != "task"],
         "fixed_template": template,
         "source_units": _source_units(task, fixed_template=bool(template["nodes"])),
         "annotation_phase": "source_covered_fact_draft",
-        "source_instance_policy": "Use an action-specific identity quote for each operation. Distinct instances of the SAME operation concept must have non-overlapping identity spans; keep wider supporting clauses in source_units, not in a quote spanning the other operation. Exact duplicate instances may be merged. Different atomic concepts may share contextual evidence. Preserve object identity qualifiers, including whether a named result is an individual value or a whole collection. Role evidence may retain wider context independently of identity quotes.",
+        "source_instance_policy": "Use an action-specific identity quote for each operation. Evidence spans may overlap: overlap alone neither merges instances nor invalidates a binding. Use the source meaning to distinguish operations. Exact duplicate instances may be merged. Different atomic concepts may share contextual evidence. Preserve object identity qualifiers, including whether a named result is an individual value or a whole collection. Role evidence may retain wider context independently of identity quotes.",
         "fact_granularity": "Each node represents one source semantic unit. Each requirement node must express one independently specified requirement: split separately changeable requirements into distinct nodes during this inventory, before binding edges or constructing candidates. A sentence may support several atomic nodes, and their source-token spans may overlap. Preserve the whole meaning of each atom, including negation, quantifiers, comparison operators and thresholds; do not split a predicate into meaningless words or detach a condition from its obligation. Represent explicit conditions as their own facts and retain their source-supported bindings in the binding step. A single atomic requirement may apply to multiple explicitly stated operations or objects; scope multiplicity does not itself make the meaning composite. Under FROZEN, missing atomic meanings remain unresolved; do not substitute a composite or partially entailed known concept. If atomic decomposition is ambiguous, mark the source unit unresolved and explain the ambiguity. Semantic atomicity remains subject to source review, not a conclusion proved by valid JSON.",
         "operation_feature_checks": [],
         "development_scope": "Inventory atomic source facts with generation/runtime layer and source-unit coverage. Nodes cite preassigned source-unit keys; the program assigns all fact IDs after this response. Do not output local_id, operation_roles or cross-references between new facts. Under DEVELOPMENT_OPEN, each node carries its complete inline concept; under FROZEN it selects a known concept_id. Coverage rows contain status and reason only; no_task_fact means no additional fact beyond the supplied fixed template. The fixed template facts/edges are already supplied by the program: never redeclare or replace them. Role declarations are source propositions, not code predictions or committed graph edges. Report missing meanings explicitly; do not substitute another object. Relation confirmation and scope judgments follow separately.",

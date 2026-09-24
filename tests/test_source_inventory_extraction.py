@@ -62,7 +62,7 @@ def _compile(task, catalog, wire):
         annotator_id="source-authored-offline-fixture", review_status="development_exposed")
 
 
-def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
+def test_overlapping_evidence_is_not_a_semantic_rejection():
     from copy import deepcopy
     task, catalog, canonical, request, _ = _source_fixture(
         'Run query A using input x. Return the selected rows. Produce readable code. Run query B using input x.')
@@ -73,9 +73,35 @@ def test_repeated_operation_identity_is_distinct_from_wide_supporting_context():
     operations = [n for n in wire['nodes'] if n['concept_id']=='sql.query']
     operations[0]['evidence_end_token'] = operations[1]['evidence_end_token']
     before = deepcopy(wire)
-    with pytest.raises(PromptContractExtractionError, match='do not distinguish instances'):
-        _compile(task, catalog, wire)
+    overlapping = _compile(task, catalog, wire)
+    assert sum(f['semantic_id']=='sql.query' for f in overlapping.facts) == 2
     assert wire == before
+
+
+def test_minimal_graph_validation_does_not_certify_source_meaning():
+    from prompt_mechanism_study.tsg.prompt_tsg import build_prompt_tsg, PromptTSGError
+    catalog = open_concept_catalog()
+    catalog['semantics']['write'] = 'task_operation'
+    catalog['semantic_guidance']['write'] = 'Write a file.'
+    # Deliberately wrong interpretation, but a valid source coordinate. The
+    # compiler must not act as a semantic judge or impose an arbitrary node cap.
+    passages = [f'Read file {i} without changing it.' for i in range(130)]
+    passages[0] += ' source context' * 200
+    prompt = '\n'.join(passages)
+    facts = [dict(local_id=f'f{i}', node_type='task_operation', semantic_id='write',
+                  evidence_text=text, occurrence=1, attributes={}) for i, text in enumerate(passages)]
+    def build(rows, relations=()):
+        return build_prompt_tsg(task_id='synthetic-structure-only', prompt=prompt,
+            extractor_id='authored-incorrect-meaning', catalog=catalog, facts=rows, relations=relations)
+    graph = build(facts)
+    assert len(graph.nodes) == 131
+    assert not any(e.edge_type == 'used_by' for e in graph.edges)
+    bad = [dict(facts[0], occurrence=2)]
+    with pytest.raises(PromptTSGError, match='evidence does not match'):
+        build(bad)
+    with pytest.raises(PromptTSGError):
+        build([facts[0]], [dict(source='f0', target='missing', edge_type='precedes',
+                               evidence_text=passages[0], occurrence=1)])
 
 
 def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
@@ -84,7 +110,7 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
         apply_fixed_scope_response,
         fixed_scope_response_format,
     )
-    task, catalog, bound, request, response, ids = _property_scope_fixture('character_sequence', conditional=True)
+    task, catalog, bound, request, response, ids = _conditional_scope_fixture()
     schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
     for key, scope in request['scopes'].items():
         if scope['concept_id'] != 'length':
@@ -101,44 +127,39 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
     row = next(s for s in result.feature_states if s['concept_id']=='length' and not s['subjects'] and not s['conditions'])
     assert row['state']=='unresolved' and row['rationale']=='No valid source-bound assessment.'
     assert any('positive expression lacks exact requirement-to-scope evidence' in n for n in result.unresolved_notes)
-    # An admitted alternative kind defeats a definite type premise even if the
-    # model still answers character_sequence; it cannot manufacture absence.
+    # A model's unresolved judgment stays unresolved; roles/types cannot fill it in.
     bad = deepcopy(response)
-    property_key = next(k for k,q in request['subject_property_questions'].items()
-                        if q['subject']==ids['sql.input'] and not q['conditions'])
-    bad['subject_properties'][property_key].update(alternative_kind_possible=True,
-        alternative_kind_reason='A numeric input remains source-compatible.')
+    key = next(k for k,scope in request['scopes'].items()
+               if scope['concept_id']=='length' and scope['subjects']==[ids['sql.input']]
+               and not scope['conditions'])
+    bad['states'][key].update(applicability='unresolved')
     result = apply_fixed_scope_response(json.dumps(bad).encode(), request=request,
         contract=bound, prompt=task['prompt'], catalog=catalog)
-    row = next(s for s in result.feature_states if s['concept_id']=='length'
-               and s['subjects']==[ids['sql.input']] and not s['conditions'])
+    row = next(r for r in result.feature_states if r['concept_id']=='length'
+               and r['subjects']==[ids['sql.input']] and not r['conditions'])
     assert row['state']=='unresolved'
     assert result.facts == bound.facts and result.relations == bound.relations
-    assert any('conflicts with a compatible alternative' in n for n in result.unresolved_notes)
 
 
-@pytest.mark.parametrize('role,caller_required,caller_declared,expected', [
-    ('resource', False, False, 'not_applicable'),
-    ('input_unspecified', False, True, 'unresolved'),
-    ('value_input', True, True, 'applicable'),
+@pytest.mark.parametrize('role,expected', [
+    ('resource', 'not_applicable'),
+    ('input_unspecified', 'unresolved'),
+    ('value_input', 'applicable'),
 ])
-def test_declared_role_domains_preserve_unknown_and_separate_expression(role, caller_required, caller_declared, expected):
+def test_model_judges_applicability_without_role_domain_rules(role, expected):
     from prompt_mechanism_study.tsg.scope_assessment import (
         fixed_scope_response_format,
         apply_fixed_scope_response,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
     task, catalog, canonical, _, _ = _source_fixture()
-    catalog.update(feature_scope_domains={'sql.binding': 'subjects'},
-        caller_supplied_concepts=['sql.input'] if caller_declared else [],
-        feature_role_domains={'sql.binding': dict(applicable_roles=['value_input'],
-            inapplicable_roles=['identifier_input', 'resource', 'destination'], caller_supplied_only=caller_required)})
+    catalog.update(feature_scope_domains={'sql.binding': 'subjects'})
     catalog_from_record(catalog)
     bound = _bound_records(task, catalog, canonical, roles={'x': role})
     input_id = next(f['local_id'] for f in bound.facts if f['semantic_id'] == 'sql.input')
     request = fixed_scope_request(bound, prompt=task['prompt'], catalog=catalog)
     key, scope = next((k, s) for k, s in request['scopes'].items() if s['subjects'] == [input_id])
-    assert scope['role_domain_check']['applicability'] == expected
+    assert 'role_domain_check' not in scope
     schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
     assert set(schema[key]['properties']) == {'expression', 'requirements', 'applicability', 'applicability_rationale'}
     answers = {k: dict(expression='not_expressed', requirements=[],
@@ -159,7 +180,10 @@ def test_declared_role_domains_preserve_unknown_and_separate_expression(role, ca
     answers[key]['expression'] = 'unresolved'
     assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     answers[key]['expression'] = 'not_expressed'
-    answers[key]['applicability'] = 'applicable' if expected != 'applicable' else 'invalid'
+    # The parser deliberately does not decide whether a resource is a valid operand.
+    answers[key]['applicability'] = 'applicable'
+    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'absent'
+    answers[key]['applicability'] = 'invalid'
     contradiction = apply(answers)
     assert next(r for r in contradiction.feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
     assert any('unresolved_fixed_scope' in note for note in contradiction.unresolved_notes)
@@ -180,11 +204,11 @@ def _bound_records(task, catalog, canonical, *, roles):
         annotator_id='source-authored-offline-fixture', review_status='development_exposed')
 
 
-def _property_scope_fixture(kind, *, conditional=False):
+def _conditional_scope_fixture():
     from copy import deepcopy
     from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
-    prefix = {'character_sequence': 'The input x is text. ',
-              'other_value': 'The input x is an integer. ', 'unspecified': ''}[kind]
+    prefix = 'The input x is text. '
+    conditional = True
     conditional_text = 'When mode is safe, require input x to be at most 10 characters.'
     task, catalog, canonical, _, _ = _source_fixture(prefix +
         'Run query A using input x and a database. Return the selected rows. Produce readable code.'
@@ -198,10 +222,7 @@ def _property_scope_fixture(kind, *, conditional=False):
     query = deepcopy(catalog['queries'][0])
     query.update(query_id='length', actionable_feature_id='length', realization_id='length')
     catalog['queries'].append(query)
-    catalog.update(feature_scope_domains={'sql.binding':'subjects', 'length':'subjects'},
-        feature_subject_properties={'length':'character_sequence'}, caller_supplied_concepts=[],
-        feature_role_domains={'sql.binding':dict(applicable_roles=['value_input'],
-            inapplicable_roles=['resource'], caller_supplied_only=False)})
+    catalog.update(feature_scope_domains={'sql.binding':'subjects', 'length':'subjects'})
     catalog_from_record(catalog)
     for edge in canonical['edges']:
         edge['evidence_text'] = edge['evidence_text'].replace(
@@ -225,25 +246,13 @@ def _property_scope_fixture(kind, *, conditional=False):
     states = {}
     for key, scope in request['scopes'].items():
         states[key] = dict(expression='not_expressed', requirements=[])
-        if 'subject_property' not in scope:
-            states[key].update(applicability=scope['role_domain_check']['applicability'],
-                applicability_rationale='This authored fixture explicitly requires an SQL query with the bound roles.')
+        states[key].update(applicability='applicable' if scope['subjects']==[ids['sql.input']] else 'unresolved',
+            applicability_rationale='An authored judgment for the exact conditional fixture, not a role-derived verdict.')
         if conditional and scope['concept_id']=='length' and ids['sql.input'] in scope['subjects']:
             exact = scope['subjects']==[ids['sql.input']] and scope['conditions']==[ids['condition.safe']]
             states[key].update(expression='explicitly_required' if exact else 'unresolved',
                 requirements=[ids['length']] if exact else [])
-    answers = {}
-    for key, question in request['subject_property_questions'].items():
-        database = question['subject'] == ids['database']
-        conditional_evidence = conditional and question['conditions']==[ids['condition.safe']] and not database
-        answers[key] = dict(kind='facility' if database else 'character_sequence' if conditional_evidence else kind,
-            alternative_kind_possible=not database and not conditional_evidence and kind=='unspecified',
-            alternative_kind_reason='Several input types remain possible.' if not database and not conditional_evidence and kind=='unspecified' else 'The quoted source establishes this logical kind.',
-            evidence_text='a database' if database else conditional_text if conditional_evidence else prefix.strip() or 'input x', occurrence=1,
-            reason='Explicit database facility.' if database else
-                'The exact conditional obligation explicitly imposes a character-count domain.' if conditional_evidence else
-                'The source explicitly states this value type.' if prefix else 'No value type is specified.')
-    return task, catalog, bound, request, dict(states=states, subject_properties=answers, unresolved_notes=[]), ids
+    return task, catalog, bound, request, dict(states=states, unresolved_notes=[]), ids
 
 
 def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_condition():
@@ -729,12 +738,16 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
                 owned_relations=composite.requirement_relations) is None
 
 
-def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider():
+def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
     task, catalog, canonical, _, _ = _source_fixture()
     calls = []
     def provider(request, _config, _prompt):
         calls.append(request["request_kind"])
-        assert request["request_kind"] != "source_only_fixed_scope_states"
+        if request["request_kind"] == "source_only_fixed_scope_states":
+            assert request['source_inventory_status']['status'] == 'INCOMPLETE'
+            return json.dumps(dict(states={k:dict(expression='unresolved', requirements=[],
+                applicability='unresolved', applicability_rationale='Source uncertainty affects this binding.')
+                for k in request['scopes']}, unresolved_notes=[])).encode()
         if request['request_kind'] == 'source_only_record_review':
             assert request['effective_unit_impacts']
             assert request['compiled_operations']
@@ -745,14 +758,13 @@ def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider(
         return json.dumps(value).encode()
     attempt = _attempt_task_contract(task, catalog=catalog, evaluator=dict(candidate_id="offline"),
         annotator_prompt="Source-authored synthetic fixture.", review_status="development_exposed", provider=provider)
-    assert calls == ["source_only_atomic_records", "source_only_record_review"]
-    assert attempt.provider_calls == 2 and attempt.error_type is None
+    assert calls == ["source_only_atomic_records", "source_only_record_review", "source_only_fixed_scope_states"]
+    assert attempt.provider_calls == 3 and attempt.error_type is None
     assert attempt.contract is not None and attempt.graph is not None
-    assert attempt.contract.feature_states == ()
-    assert attempt.scope_assessment["provider_calls"] == 0
-    assert attempt.scope_assessment["status"] == "SOURCE_INVENTORY_INCOMPLETE"
-    assert attempt.scope_assessment["response_text"] is None
-    assert len(attempt.scope_assessment["request"]["withheld_scopes"]) == 2
+    assert attempt.contract.feature_states and all(r['state']=='unresolved' for r in attempt.contract.feature_states)
+    assert attempt.scope_assessment["provider_calls"] == 1
+    assert attempt.scope_assessment["response_text"] is not None
+    assert not attempt.scope_assessment["request"]["withheld_scopes"]
     # Exercise the active record compiler's local-impact declarations, not just
     # handcrafted contract metadata. Separate inputs prevent accidental sharing.
     from annotation_fixture import record_annotation
@@ -768,9 +780,12 @@ def test_actual_attempt_retains_incomplete_graph_without_calling_scope_provider(
         contract=compile_records(records,request=request,task=task,catalog=catalog,annotator_id='offline',review_status='development_exposed')
         return fixed_scope_request(contract,prompt=task['prompt'],catalog=catalog)
     localized=scopes()
-    assert localized['scopes'] and localized['withheld_scopes']
+    assert localized['scopes'] and not localized['withheld_scopes']
+    assert localized['unit_impacts'][unit]['effect'] == 'local'
     records['unit_impacts'][unit].update(effect='global',operations=[])
-    assert not scopes()['scopes']
+    global_request = scopes()
+    assert global_request['scopes'] == localized['scopes']
+    assert global_request['unit_impacts'][unit]['effect'] == 'global'
 
 
 def test_fixed_generation_facts_are_injected_once_and_never_redeclared_by_model():
@@ -855,12 +870,12 @@ def test_qualification_keeps_incomplete_inventory_in_denominator_and_cannot_pass
     result = qualify_prompt_contract_extractor(paths["tasks"], extraction, paths["catalog"],
         paths["reference"], paths["evaluator"], paths["prompt"],
         output, assertion_review_path=audit)
-    assert [call["request_kind"] for call in calls] == ["source_only_atomic_records", "source_only_record_review"]
+    assert [call["request_kind"] for call in calls] == ["source_only_atomic_records", "source_only_record_review", "source_only_fixed_scope_states"]
     assert result["task_units"] == 1 and result["failed_extraction_task_units"] == 0
     assert result["complete_task_units"] == 0
     assert result["status"] == "QUALIFICATION_FAILED" and result["scientific_claim_allowed"] is False
     scored = read_json(output / "case-results.json")[0]
     assert scored["source_inventory_status"]["status"] == "INCOMPLETE"
-    assert scored["withheld_scope_count"] == 3
+    assert scored["withheld_scope_count"] == 0
     assert scored["complete_task"] is False and scored["extraction_failed"] is False
-    assert scored["raw_scope_response_sha256"] is None
+    assert scored["raw_scope_response_sha256"] is not None

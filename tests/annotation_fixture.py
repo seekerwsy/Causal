@@ -84,9 +84,8 @@ def authored_source_inventory(prompt, canonical):
 def scope_answer(scope, *, expression="not_expressed", applicability="applicable", requirements=()):
     """Explicit source-authored applicability and expression judgments for tests."""
     answer = dict(expression=expression, requirements=list(requirements))
-    if "subject_property" not in scope:
-        answer.update(applicability=applicability,
-                      applicability_rationale="The authored fixture resolves the operation and subject roles.")
+    answer.update(applicability=applicability,
+                  applicability_rationale="The authored fixture resolves the operation and subject roles.")
     return answer
 
 

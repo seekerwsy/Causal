@@ -31,6 +31,10 @@ Post-assignment compliance, generation success and drift never filter the ITT
 denominator. Secure-code yield, Oracle coverage, functionality and joint success
 remain separate. Current TSG uses graph schema 3 and concept-catalog schema 2;
 older formats are replayed with their captured Git implementation.
+TSG program validation checks structure, references and source locations, not
+semantic entailment. Models judge source meaning and candidate applicability;
+independent reference evaluation measures their errors. The compiler does not
+complete roles or classify domains using hand-coded concept rules.
 `main` is Atomic-only; [Pair research is deferred](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research).
 
 ## Reproduce the reviewer smoke

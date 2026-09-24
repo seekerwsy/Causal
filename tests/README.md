@@ -6,7 +6,7 @@ Use Python 3.12 with the repository's `dev,selectors,languages` extras:
 python -m pytest -q
 ```
 
-The default suite contains **101 cases in 80 test functions**. Its end-to-end
+The default suite contains **102 cases in 81 test functions**. Its end-to-end
 smoke executes all seven stages with offline model responses and a real FCI fit
 on synthetic observations. It also runs the independent saved-result verifier.
 These checks make no paid provider calls and cannot establish real-model TSG or
@@ -33,6 +33,13 @@ Task-bound security tests retain unknown assignments and independent functionali
 when permission targets or credential meaning are unavailable. Qualification tests
 preserve separately valid profiles when another lacks support. Mocked proposal
 calls exercise the real configurable evaluator boundary without network access.
+
+TSG tests distinguish structural acceptance from semantic correctness: overlapping
+source spans and a deliberately incorrect but structurally valid interpretation
+are accepted, while dangling references and invalid locations are rejected.
+Model-reported uncertainty remains explicit. Domain/role inference tests have
+been replaced with direct model-assessment tests; the independent semantic
+qualification test still fails an incomplete representation.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the

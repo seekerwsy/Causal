@@ -74,6 +74,24 @@ compilation. The existing bounded mechanical repair limit is unchanged. There is
 no additional default readback or detailed binding reviewer. Debug readings remain
 available; a positive LLM review is not an independent semantic reference.
 
+The owner-approved 2026-09-25 revision limits program checks to structural
+validity and faithful compilation: field/type validity, identities, references,
+source locations, declared relation signatures and composition/scope consistency.
+These checks do not establish source entailment. The compiler preserves declared
+bindings and inherited guards; it does not add participants based on concept
+names, decide value types, or infer applicability from role-domain tables.
+Literal-name gates, character-type classifiers and existing-value-return role
+completion are removed. Overlapping evidence is legal. Arbitrary graph-size and
+quote-length cutoffs are removed; configured model request/response limits remain.
+Citation lookup still locates source text and preserves its exact span; it is
+not a semantic support judgment.
+
+Each candidate's complete binding is assessed by the model against the full
+source. Independent reference evaluation, not acceptance by the parser, measures
+semantic correctness. The existing single review/patch path remains; no reviewer
+or new rule engine is introduced. Frozen inputs using the retired catalog rules
+must use their captured implementation, not silently discard those rules.
+
 A requirement preserves content, negation, thresholds, direct objects, operation
 instances and conditions together. Conditions providing information are distinct
 from targets being constrained. Participation in the same workflow does not
@@ -99,9 +117,12 @@ need not exist as separate task facts after the policy is removed. Unclear
 applicability, expression or editability remains unresolved. These changes do not
 activate Pair or context-modifier inference.
 
-Applicability and expression are distinct. Source-grounded local impacts limit
-unknown propagation to affected candidates; absent localization and shared
-constraints remain blocking. Required target endpoints cannot be waived. Preserve
+Applicability and expression are distinct. Source coverage and impact annotations
+are supplied to the candidate assessor, not used by program locality rules to
+withhold all candidate judgments. The assessor must retain uncertainty when it
+affects the candidate, including shared constraints; unknown is never silently
+erased. Structural projections still cannot assert an OR member, discard a guard,
+or invent a missing target endpoint. Preserve
 `UNRESOLVED != ABSENT`; an unexpressed prompt requirement does not mean generated
 software lacks that protection. Evaluation reports critical meanings, extra
 assertions, candidate correctness and coverage alongside whole-graph diagnostics.

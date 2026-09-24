@@ -419,7 +419,7 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
     roles = set()
     for row in inventory["operation_roles"]:
         if (not isinstance(row, dict)
-            or set(row) - {"derived_from"} != {"operation", "subject", "role", "evidence_text", "occurrence"}
+            or set(row) != {"operation", "subject", "role", "evidence_text", "occurrence"}
             or any(not isinstance(row[key], str) for key in ("operation", "subject", "role"))):
             raise PromptTSGError("operation-local role fields are invalid")
         operation, subject, role = row["operation"], row["subject"], row["role"]
@@ -430,12 +430,6 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
             or role not in input_roles | {"result"}):
             raise PromptTSGError("operation-local role endpoints or layer are invalid")
         citation(row)
-        if "derived_from" in row:
-            premise = {key: row[key] for key in ("operation", "subject", "evidence_text", "occurrence")}
-            if (row["derived_from"] != "existing_value_return_result" or role != "value_input"
-                or by_local[operation]["semantic_id"] not in contract.catalog.get("existing_value_return_operations", [])
-                or {**premise, "role": "result"} not in inventory["operation_roles"]):
-                raise PromptTSGError("derived operand role lacks its declared return meaning or exact result premise")
         identity = (operation, subject, role)
         if identity in roles:
             raise PromptTSGError("operation-local role is duplicated")

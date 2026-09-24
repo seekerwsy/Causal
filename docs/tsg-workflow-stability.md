@@ -34,6 +34,15 @@ The model no longer receives a separate free binding task. Ordinary extraction a
 and retained fixtures; frozen old runs reproduce with their own execution archives.
 They are not an alternative active workflow.
 
+As of the owner-approved 2026-09-25 revision, program checks establish structure,
+references, source positions and faithful interpretation of declared composition;
+they do not establish semantic correctness. Domain-specific role/type rules,
+literal-name concept gates and automatic return-input completion are removed.
+Coverage and impact uncertainty are sent to the candidate assessor rather than
+used as an automatic whole-task veto. Missing model judgments remain unresolved.
+Overlapping evidence is allowed; a valid source location does not prove entailment.
+The existing review count and independent semantic evaluation are unchanged.
+
 Supplied code and examples remain in the complete source. The existing records
 represent their source-required interfaces, objects, behavior and explicit library
 requirements; a bare import need not become a node and does not establish runtime

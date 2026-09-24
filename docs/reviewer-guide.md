@@ -178,9 +178,9 @@ request, with one attempt and finite call limits.
 The duplicated power/baseline lineage predicates in budget construction and its
 record validation are shared. Budget qualification requirements and independent
 statistical verification remain in place; this is not a claim that the entire
-research-administration layer has been retired. The specialized TSG property
-checks and diagnostic scope enumeration also remain pending a separately
-validated change to semantic assessment. No paper change or live model call is
+research-administration layer has been retired. Specialized TSG property checks
+were still present in that revision; the following revision removes them.
+Diagnostic scope enumeration remains. No paper change or live model call is
 part of this implementation revision.
 
 Validation used the isolated Python 3.12 review environment with a fresh output
@@ -191,3 +191,22 @@ This is a preservation check, not an accuracy estimate. The two withdrawn static
 profiles reduce evaluable coverage; no replacement behavioral endpoint has been
 qualified by this change. `src/` contains 54 Python files and 29,372 physical lines,
 149 fewer than before this revision.
+
+## Minimal TSG checking boundary
+
+The 2026-09-25 change starts from `004829740`, preserved on
+`codex/pre-tsg-minimal-checks-20260925`. The current
+[representation protocol](protocol.md) separates program structure checks from
+model semantic judgments and independent reference evaluation. Retired catalog
+fields are rejected, not silently ignored; frozen runs retain their original
+implementation. Candidate projection still respects declared composition and
+scope, but role/type tables no longer determine applicability and incomplete
+source annotations no longer trigger a program locality veto.
+
+The isolated Python 3.12 suite passed 102 cases in 29.01 seconds. All 20 smoke
+files are byte-identical to the preceding reference. A deliberately incorrect
+semantic interpretation passes structural compilation, while invalid evidence
+positions and dangling references fail. This verifies the intended responsibility
+boundary, not improved extraction accuracy. No live model call, protected input,
+paper edit or relabeling of frozen evidence was involved. TSG source decreased
+from 7,965 to 7,622 lines; all `src/` Python source totals 29,029 lines in 54 files.

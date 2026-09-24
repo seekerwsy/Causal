@@ -332,12 +332,9 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
         "development_task_ids",
     }
     optional = {
-        "feature_scope_domains", "semantic_layers", "existing_value_return_operations",
-        "feature_subject_properties", "source_name_terms", "feature_scope_selectors",
+        "feature_scope_domains", "semantic_layers", "feature_scope_selectors",
     }
     expected = required | (optional & value.keys())
-    if "feature_role_domains" in value:
-        expected |= {"feature_role_domains", "caller_supplied_concepts"}
     if set(value) != expected:
         raise PromptTSGError("Prompt TSG catalog envelope is invalid")
     if value["concept_policy"] not in {"DEVELOPMENT_OPEN", "FROZEN"}:
@@ -363,10 +360,6 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise PromptTSGError("Prompt TSG semantics are invalid")
     guidance = value["semantic_guidance"]
-    if "existing_value_return_operations" in value:
-        returning = _unique_strings(value["existing_value_return_operations"], "existing-value return operations")
-        if any(semantics.get(key) != "task_operation" for key in returning):
-            raise PromptTSGError("existing-value return semantics require declared operation concepts")
     if "semantic_layers" in value:
         layers = value["semantic_layers"]
         if (not isinstance(layers, dict) or set(layers) - (set(semantics) - {"task.root"})
@@ -488,46 +481,7 @@ def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
                     for a, _, b in selector.get("policy_relations", []) for key in (a, b))}
                 if background["operation_semantic_id"] not in connected:
                     raise PromptTSGError("candidate applicability is disconnected from its complete policy")
-    if "feature_role_domains" in value:
-        rules = value["feature_role_domains"]
-        callers = _unique_strings(value["caller_supplied_concepts"], "caller-supplied concepts")
-        if (not isinstance(rules, dict) or not rules
-            or any(semantics.get(key) != "data_object" for key in callers)):
-            raise PromptTSGError("feature role domains require declared source-object meanings")
-        for feature, rule in rules.items():
-            if (value.get("feature_scope_domains", {}).get(feature) != "subjects"
-                or not isinstance(rule, dict)
-                or set(rule) != {"applicable_roles", "inapplicable_roles", "caller_supplied_only"}
-                or type(rule["caller_supplied_only"]) is not bool):
-                raise PromptTSGError("feature role domain must declare a subject-role rule")
-            positive = _unique_strings(rule["applicable_roles"], "applicable subject roles")
-            negative = _unique_strings(rule["inapplicable_roles"], "inapplicable subject roles")
-            if (not positive or set(positive) & set(negative)
-                or (set(positive) | set(negative)) - {"value_input", "identifier_input", "resource", "destination"}):
-                raise PromptTSGError("feature role domain must preserve unspecified and conflicting roles")
-    if "feature_subject_properties" in value:
-        properties = value["feature_subject_properties"]
-        if (not isinstance(properties, dict) or not properties
-            or any(value.get("feature_scope_domains", {}).get(feature) != "subjects"
-                   or name != "character_sequence" or feature in value.get("feature_role_domains", {})
-                   for feature, name in properties.items())):
-            raise PromptTSGError("feature subject properties require a non-conflicting subject-domain declaration")
-    if "source_name_terms" in value:
-        names = value["source_name_terms"]
-        if (not isinstance(names, dict) or not names
-            or any(key not in semantics or key == "task.root" for key in names)):
-            raise PromptTSGError("source name terms require declared non-root concepts")
-        for terms in names.values():
-            if not _unique_strings(terms, "source name terms"):
-                raise PromptTSGError("source name terms cannot be empty")
     return value
-
-
-def has_required_source_name(catalog: Mapping[str, Any], concept_id: str, text: str) -> bool:
-    """Check a declared literal name prerequisite, never semantic entailment or absence."""
-    terms = catalog.get("source_name_terms", {}).get(concept_id, [])
-    return not terms or any(re.search(r"(?<![A-Za-z0-9_])" + re.escape(term)
-        + r"(?![A-Za-z0-9_])", text, flags=re.IGNORECASE) for term in terms)
 
 
 def catalog_sha256(catalog: Mapping[str, Any]) -> str:
@@ -676,8 +630,6 @@ def build_prompt_tsg(
     node_types = set(catalog["node_types"])
     edge_types = set(catalog["edge_types"])
     allowed = {tuple(item) for item in catalog["allowed_edges"]}
-    if len(facts) > 128 or len(relations) > 256:
-        raise PromptTSGError("Prompt TSG proposal exceeds bounds")
 
     root = _node("task", "task.root", 0, len(prompt), prompt, {})
     nodes = [root]
@@ -707,7 +659,6 @@ def build_prompt_tsg(
             or semantic_id == "task.root"
             or not isinstance(evidence, str)
             or not evidence
-            or len(evidence.encode("utf-8")) > 2048
             or type(occurrence) is not int
             or occurrence <= 0
             or not isinstance(attributes, Mapping)
@@ -718,8 +669,6 @@ def build_prompt_tsg(
         ):
             raise PromptTSGError("Prompt TSG fact value is invalid")
         start, end = _occurrence_span(prompt, evidence, occurrence)
-        if not has_required_source_name(catalog, semantic_id, evidence):
-            raise PromptTSGError("named concept lacks its required literal name in source evidence")
         node = _node(
             node_type,
             semantic_id,
@@ -851,8 +800,6 @@ def validate_prompt_tsg(
         or graph.prompt_sha256 != content_hash(prompt)
         or graph.catalog_sha256 != catalog_sha256(catalog)
         or not graph.nodes
-        or len(graph.nodes) > 129
-        or len(graph.edges) > 384
         or graph.nodes != tuple(sorted(graph.nodes, key=lambda item: item.node_id))
         or graph.edges != tuple(sorted(graph.edges, key=lambda item: item.edge_id))
         or graph.unresolved_semantics
@@ -1055,9 +1002,6 @@ def validate_prompt_tsg(
             )
         ):
             raise PromptTSGError("Prompt TSG node evidence is invalid")
-        if not has_required_source_name(catalog, node.semantic_id,
-                                        prompt[node.evidence_start:node.evidence_end]):
-            raise PromptTSGError("named concept lacks its required literal name in source evidence")
     for edge in graph.edges:
         source = node_by_id.get(edge.source_id)
         target = node_by_id.get(edge.target_id)

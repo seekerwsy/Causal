@@ -588,16 +588,6 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
                 evidence_text=row['evidence_text'], occurrence=row['occurrence']))
     for role in roles:
         incidence(role)
-    # Only a prospectively declared existing-value return licenses this role.
-    returning = set(catalog.get('existing_value_return_operations', []))
-    concepts = {f['local_id']: f['semantic_id'] for f in contract.facts}
-    for role in tuple(roles):
-        if (role['role'] == 'result' and concepts.get(role['operation']) in returning
-            and not any(r['operation'] == role['operation'] and r['subject'] == role['subject']
-                        and r['role'] == 'value_input' for r in roles)):
-            derived = {**role, 'role': 'value_input', 'derived_from': 'existing_value_return_result'}
-            roles.append(derived)
-            incidence(derived)
     contract = replace(contract, relations=tuple(edges), source_inventory={**contract.source_inventory,
         'operation_roles': roles, 'unit_impacts': impacts})
     compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
