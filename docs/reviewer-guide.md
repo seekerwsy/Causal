@@ -202,25 +202,23 @@ recovery, token-inventory responses and partial-patch machinery have been remove
 Before/after records remain inspectable; successful compilation does not certify a
 semantic repair. See the [construction workflow](tsg-workflow-stability.md).
 
-The pre-change implementation is preserved at `2d397e6fa` on
-`codex/pre-tsg-linear-refactor-20260925`. Frozen historical runs use their captured
-implementation. No paper, discovery rule, intervention arm, measurement endpoint,
-ITT denominator or independent verifier is changed by this refactor.
+Construction, candidate assessment and visualization share node projection; the
+viewer checks that saved graphs agree with their source contracts. Source quotations
+now map directly to canonical evidence, with no token-index intermediate or matching
+test adapter. Graph decoding reuses the record definitions instead of maintaining a
+second field schema. Visualization, before/after evidence and exported graphs remain.
 
-Validation in the isolated Python 3.12 reviewer environment passed all 102 cases
-in 29.28 seconds. The independent result replay ran within the smoke test; all
-20 smoke files are byte-identical to the preceding reference. TSG Python source
-falls from 7,581 to 7,082 lines; total source is 28,489 lines in 54 files. The
-suite retains 81 test functions and updates their repair checks to the complete
-revision interface. These are implementation checks, not live-model accuracy
-results. No provider call or protected evaluation task was used.
+The 2026-09-25 isolated Python 3.12 suite passed 108 cases in 30.35 seconds, including
+the independent result replay. All 20 smoke files are byte-identical to the preceding
+reference. Splitting existing combined scenarios gives 84 test functions; test Python
+code decreases by 195 lines to 6,466. Duplicate schema/prompt assertions are removed;
+scientific behavior checks remain. See [test scope and run policy](../tests/README.md).
 
-The subsequent shared-projection cleanup is backed up at `7cbb6f899` on
-`codex/pre-tsg-shared-projection-20260925`. Construction, candidate assessment and
-visualization share node projection; the viewer checks that saved graphs agree
-with their source contracts. The isolated suite passed 102 cases in 40.33 seconds,
-and all 20 smoke files remain identical. A browser check exercised the diagram,
-condition-edge source evidence and generation-layer toggle. TSG source now totals
-7,017 lines, and all Python source totals 28,424 lines (65 fewer). The original
-extraction records remain in the audit trace; this is not a new graph schema or
-a live-model accuracy result.
+TSG Python source totals 6,928 lines; all source totals 28,332 lines in 54 files,
+92 fewer than before this cleanup. This removes one conversion layer and duplicated
+decoding code; it is not a claim that all TSG responsibilities have been simplified.
+No paper, discovery rule, intervention arm, measurement endpoint, ITT denominator,
+independent verifier or live-model result changes. No provider call or protected
+evaluation task was used. The pre-change checkout is preserved at `88acb4d33` on
+`codex/pre-tsg-citation-test-trim-20260925`; earlier frozen runs retain their captured
+implementation and interpretation.

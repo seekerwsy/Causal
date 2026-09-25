@@ -3,7 +3,7 @@
 import json
 from copy import deepcopy
 import pytest
-from annotation_fixture import indexed_annotation
+from annotation_fixture import record_annotation
 from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
 from prompt_mechanism_study.tsg.prompt_contract_extract import extract_task_contract
 from prompt_mechanism_study.tsg.source_codec import contract_decision_request
@@ -35,7 +35,7 @@ def test_actual_messages_are_the_graph_evidence_and_raw_source_survives():
         seen.append(request)
         assert request["source_prompt"] == input_evidence_text(prepared["generation_input"])
         assert not {"arm", "seed", "outcome", "cwe", "task_id", "task_family"} & set(request)
-        return json.dumps(indexed_annotation(request, dict(
+        return json.dumps(record_annotation(request, dict(
             concepts=[
                 dict(concept_id="read_file", node_type="task_operation", definition="Read the named file."),
                 dict(concept_id="preserve_return", node_type="task_requirement", definition="Preserve the requested return value."),

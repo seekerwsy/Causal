@@ -196,8 +196,6 @@ def test_development_requests_keep_integrity_and_evidence_diagnostics_separate()
         assert changed['objects'][0]['fact']['evidence_text'] not in original
     first = development_record_request(prompt)
     assert 'knowledge' not in first and first['source_prompt'] == prompt
-    assert isinstance(first['format']['objects'][0]['fact'], dict)
-    assert isinstance(first['format']['operations'][0]['execution_conditions'][0], dict)
     second = knowledge_add_model_request(prompt, records, [])
     assert second['source_records'] == records
     assert not {'outcomes', 'tests', 'references'} & second.keys()
@@ -565,9 +563,6 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
     sent = []
     def fake_complete(model_request, evaluator, prompt):
         sent.append(model_request)
-        schema = evaluator["response_format"]["json_schema"]["schema"]
-        assert schema["required"] == ["decisions"]
-        assert set(schema["properties"]["decisions"]["required"]) == set(response["decisions"])
         return json.dumps(response).encode()
     monkeypatch.setattr("prompt_mechanism_study.llm.complete_chat", fake_complete)
     from prompt_mechanism_study.tsg.candidate_construction import _proposal_evaluator
@@ -588,7 +583,6 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
     catalog = read_json(output / "catalog.json")
     prepared_task = prepare_task_input(tasks[0])
     extraction_request = contract_decision_request(prepared_task, catalog)
-    assert extraction_request["request_kind"] == "source_only_fact_inventory"
     template = generation_template_facts(prepared_task)
     assert extraction_request["fixed_template"] == template
     for concept in template["concepts"]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from collections import Counter
 from itertools import combinations, product
 from enum import StrEnum
@@ -509,65 +509,17 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
 
     if not isinstance(value, Mapping) or value.get("schema_version") != "3.0":
         raise PromptTSGError("Prompt TSG serialized schema is invalid")
-    expected = {
-        "tsg_id",
-        "schema_version",
-        "task_id",
-        "prompt_sha256",
-        "extractor_id",
-        "catalog_sha256",
-        "nodes",
-        "edges",
-        "unresolved_semantics",
-    }
-    expected.add("unresolved_relations")
-    expected |= {"absent_semantics", "feature_assessments"}
-    if "scoped_feature_assessments" in value:
-        expected.add("scoped_feature_assessments")
-    if "requirement_structures" in value:
-        expected.add("requirement_structures")
-    if "requirement_scopes" in value:
-        expected.add("requirement_scopes")
-    if "requirement_relations" in value:
-        expected.add("requirement_relations")
+    optional = {"scoped_feature_assessments", "requirement_structures", "requirement_scopes", "requirement_relations"}
+    expected = ({field.name for field in fields(PromptTSG)} - optional) | (optional & value.keys()) | {"tsg_id"}
     if set(value) != expected:
         raise PromptTSGError("Prompt TSG serialized fields are invalid")
     try:
         if any(set(item) != {"scope", "feature_id", "state", "requirement_node_ids"}
                for item in value.get("scoped_feature_assessments", ())):
             raise PromptTSGError("scoped feature assessment serialized fields are invalid")
-        node_fields = {
-            "node_id",
-            "node_type",
-            "semantic_id",
-            "evidence_start",
-            "evidence_end",
-            "evidence_sha256",
-            "normalized_text_sha256",
-            "attributes",
-        }
-        edge_fields = {"edge_id", "source_id", "target_id", "edge_type"}
-        if any(set(item) != node_fields for item in value["nodes"]) or any(
-            set(item) != edge_fields for item in value["edges"]
-        ):
-            raise PromptTSGError("Prompt TSG serialized item fields are invalid")
-        nodes = tuple(
-            TSGNode(
-                item["node_id"],
-                item["node_type"],
-                item["semantic_id"],
-                item["evidence_start"],
-                item["evidence_end"],
-                item["evidence_sha256"],
-                item["normalized_text_sha256"],
-                tuple((key, flag) for key, flag in item["attributes"]),
-            )
-            for item in value["nodes"]
-        )
-        edges = tuple(
-            TSGEdge(item["edge_id"], item["source_id"], item["target_id"], item["edge_type"])
-            for item in value["edges"]
-        )
+        nodes = tuple(TSGNode(**{**item, "attributes": tuple((key, flag) for key, flag in item["attributes"])})
+                      for item in value["nodes"])
+        edges = tuple(TSGEdge(**item) for item in value["edges"])
         raw_unresolved_relations = value.get("unresolved_relations", [])
         if any(
             not isinstance(item, list)
@@ -577,24 +529,18 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
         ):
             raise PromptTSGError("Prompt TSG unresolved relations are invalid")
         graph = PromptTSG(
-            value["schema_version"],
-            value["task_id"],
-            value["prompt_sha256"],
-            value["extractor_id"],
-            value["catalog_sha256"],
-            nodes,
-            edges,
-            tuple(value["unresolved_semantics"]),
-            tuple(tuple(item) for item in raw_unresolved_relations),
-            tuple(value.get("absent_semantics", ())),
-            tuple(tuple(item) for item in value.get("feature_assessments", ())),
-            tuple(ScopedFeatureAssessment(feature_scope_from_record(item["scope"]),
-                item["feature_id"], item["state"], tuple(item["requirement_node_ids"]))
+            **{key: value[key] for key in ("schema_version", "task_id", "prompt_sha256", "extractor_id", "catalog_sha256")},
+            nodes=nodes, edges=edges, unresolved_semantics=tuple(value["unresolved_semantics"]),
+            unresolved_relations=tuple(tuple(item) for item in raw_unresolved_relations),
+            absent_semantics=tuple(value["absent_semantics"]),
+            feature_assessments=tuple(tuple(item) for item in value["feature_assessments"]),
+            scoped_feature_assessments=tuple(ScopedFeatureAssessment(
+                feature_scope_from_record(item["scope"]), item["feature_id"], item["state"], tuple(item["requirement_node_ids"]))
                 for item in value.get("scoped_feature_assessments", ())),
-            tuple((key, kind, tuple(members)) for key, kind, members in value.get("requirement_structures", ())),
-            tuple((key, kind, tuple(boundaries), target_class)
-                  for key, kind, boundaries, target_class in value.get("requirement_scopes", ())),
-            tuple(tuple(row) for row in value.get("requirement_relations", ())),
+            requirement_structures=tuple((key, kind, tuple(members)) for key, kind, members in value.get("requirement_structures", ())),
+            requirement_scopes=tuple((key, kind, tuple(boundaries), target_class)
+                for key, kind, boundaries, target_class in value.get("requirement_scopes", ())),
+            requirement_relations=tuple(tuple(row) for row in value.get("requirement_relations", ())),
         )
     except (KeyError, TypeError, ValueError):
         raise PromptTSGError("Prompt TSG serialized values are invalid") from None

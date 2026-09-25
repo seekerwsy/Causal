@@ -65,8 +65,8 @@ def record_semantics():
 
 
 def record_request(inventory):
-    from prompt_mechanism_study.tsg.source_codec import quoted_source_request, _OBJECT_ROLE_MEANINGS
-    request = quoted_source_request(inventory)
+    from prompt_mechanism_study.tsg.source_codec import _OBJECT_ROLE_MEANINGS
+    request = deepcopy(inventory)
     request.update(request_kind="source_only_atomic_records", binding_semantics="explicit_boundaries",
         operation_role_meanings=_OBJECT_ROLE_MEANINGS, record_semantics=record_semantics(),
         instructions=(
@@ -412,10 +412,8 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
     """Emit exactly the declared roles/targets and owner-bound guards, without LLM binding."""
     from prompt_mechanism_study.tsg.source_codec import (
         PromptContractExtractionError as Error,
-        _quoted_inventory_citation,
+        _source_citation,
         _inventory_concept,
-        _indexed_citation,
-        _source_tokens,
         _role_context_citation,
         _include_recorded_impacts,
     )
@@ -439,7 +437,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
     for record in records:
         key = record["record_id"]
         aliases[key] = f"fact.{len(nodes)+1}"
-        nodes.append(_quoted_inventory_citation(record["fact"], request, key))
+        nodes.append(record["fact"])
     condition_ids = {}
     for record in (*value["operations"], *value["requirements"]):
         owned = [(c, 'conditions') for c in record.get("execution_conditions", record.get("conditions", []))]
@@ -449,12 +447,11 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
             key = condition_ids.get(identity)
             if key is None:
                 key = f"fact.{len(nodes)+1}"
-                nodes.append(_quoted_inventory_citation(condition, request, f"{record['record_id']}.condition"))
+                nodes.append(condition)
                 condition_ids[identity] = key
             guards.append((key, aliases[record["record_id"]], condition, relation))
     # Compile the declared records directly. No legacy graph response, alias
     # merging, silent fact removal or inferred negative states intervene here.
-    tokens = _source_tokens(task['prompt'])
     derived = deepcopy(catalog)
     template = request['fixed_template']
     for concept in template['concepts']:
@@ -477,7 +474,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
         derived['semantic_guidance'][key] = concept['definition']
         local = f'fact.{index}'
         facts.append(dict(local_id=local, node_type=kind, semantic_id=key, attributes={},
-                          **_indexed_citation(task['prompt'], tokens, row)))
+                          **_source_citation(row, request, local)))
         layers[local] = fact_layer(row, request)
         for unit in row['source_units']:
             coverage[unit]['facts'].append(local)
@@ -490,8 +487,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
         tuple(facts), tuple(template_edges), (), (), tuple(value['unresolved_notes']), inventory)
     relations_by_source, roles, impacts = {}, [], {}
     def citation(row):
-        located = _quoted_inventory_citation({k: row[k] for k in ("evidence_source_unit", "evidence_text")}, request, "relation")
-        return {k: located[k] for k in ("evidence_start_token", "evidence_end_token")}
+        return _source_citation(row, request, "relation")
     def refs(values, choices):
         if len(set(values)) != len(values) or not set(values) <= choices:
             raise Error("record reference is duplicate, missing or has the wrong type")
@@ -500,7 +496,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
             or kind == 'precedes' and (source == target or layers[source] != 'runtime')):
             raise Error('record relation endpoints have incompatible layers or roles')
         relations_by_source.setdefault(source, []).append(dict(source=source, target=target,
-            edge_type=kind, **_indexed_citation(task['prompt'], tokens, citation(row))))
+            edge_type=kind, **citation(row)))
     for record in value["operations"]:
         key = aliases[record["record_id"]]
         for direction in ("inputs", "results"):
@@ -509,7 +505,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
                 role = dict(operation=key, subject=aliases[claim["subject"]],
                     role=claim.get("role", "result"), **citation(claim))
                 roles.append({**{k: role[k] for k in ('operation', 'subject', 'role')},
-                    **_role_context_citation(task['prompt'], tokens, role, contract.source_inventory)})
+                    **_role_context_citation(task['prompt'], role, contract.source_inventory)})
         for claim in record["precedes"]:
             refs([claim["operation"]], operations - {record["record_id"]})
             edge(key, 'precedes', aliases[claim['operation']], claim)
@@ -551,7 +547,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
     for key, owner, condition, relation in guards:
         if relation == 'context_for':
             edges.append(dict(source=key, target=owner, edge_type=relation,
-                **_indexed_citation(task['prompt'], tokens, citation(condition))))
+                **citation(condition)))
     for record in value["requirements"]:
         if record["scope_kind"] == "implementation":
             implementation = [f['local_id'] for f in contract.facts if f['node_type']=='task_operation'
@@ -559,7 +555,7 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
             if len(implementation) != 1:
                 raise Error('generation obligations require one source-supported implementation operation')
             edges.append(dict(source=aliases[record["record_id"]], target=_target_operations(record, implementation)[0],
-                edge_type="constrains", **_indexed_citation(task["prompt"], tokens, citation(record["fact"]))))
+                edge_type="constrains", **citation(record["fact"])))
     # Assemble the complete inventory before constructing the next contract.
     inventory = {**contract.source_inventory,
         "statement_kinds": modalities,
@@ -569,10 +565,10 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
         "requirement_structures": {aliases[key]: dict(kind=row['structure']['kind'],
             members=[aliases[m] for m in row['structure']['members']]) for key, row in requirements.items()},
         "unit_impacts": {key: {**impact,
-            **_indexed_citation(task['prompt'], tokens, citation(value['unit_impacts'][key]))}
+            **citation(value['unit_impacts'][key])}
             for key, impact in contract.source_inventory['unit_impacts'].items()}}
     owned_relations = {aliases[key]: [dict(source=aliases[r['source']], target=aliases[r['target']],
-        edge_type=r['edge_type'], **_indexed_citation(task['prompt'], tokens, citation(r)))
+        edge_type=r['edge_type'], **citation(r))
         for r in row['relations']] for key, row in requirements.items() if row['relations']}
     if owned_relations:
         inventory['requirement_relations'] = owned_relations
@@ -613,7 +609,7 @@ def _identify_new_meanings(value, request):
 def record_diagnostics(value, request):
     """Collect independent mechanical defects so one repair can address them together."""
     from prompt_mechanism_study.tsg.source_codec import (
-        _quoted_inventory_citation,
+        _source_citation,
         _inventory_concept,
         PromptContractExtractionError,
     )
@@ -698,7 +694,7 @@ def record_diagnostics(value, request):
         citations.append((unit+'.impact', impact))
     for path, fact in [*facts, *citations]:
         try:
-            _quoted_inventory_citation(fact, request, path)
+            _source_citation(fact, request, path)
         except PromptContractExtractionError as error:
             errors.append(str(error))
     owned = {unit for _, f in facts for unit in f['source_units']}

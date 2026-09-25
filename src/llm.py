@@ -59,12 +59,9 @@ def complete_chat(
     if source_first_delivery:
         remaining = dict(request_payload)
         ordered = {key: remaining.pop(key) for key in (
-            "request_kind", "annotation_phase", "source_prompt", "source_units", "source_tokens"
+            "request_kind", "annotation_phase", "source_prompt", "source_units"
         ) if key in remaining}
         ordered.update(remaining)
-        tokens = ordered.get("source_tokens")
-        if isinstance(tokens, dict) and all(isinstance(key, str) and key.isdecimal() for key in tokens):
-            ordered["source_tokens"] = {key: tokens[key] for key in sorted(tokens, key=int)}
         source_message = json.dumps(ordered, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     else:
         source_message = canonical_json(request_payload)

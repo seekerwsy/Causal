@@ -89,62 +89,13 @@ def scope_answer(scope, *, expression="not_expressed", applicability="applicable
     return answer
 
 
-def indexed_annotation(request, canonical):
-    """Test data conversion only; this is not an extractor or semantic reference."""
-    if request['request_kind'] in {'source_only_atomic_records', 'source_only_record_review'}:
-        return record_annotation(request, canonical)
-    source = request["source_prompt"]
-    starts, ends, offset = {}, {}, 0
-    for key, text in sorted(request["source_tokens"].items(), key=lambda item: int(item[0])):
-        position = source.index(text, offset)
-        starts[position] = int(key)
-        offset = position + len(text)
-        ends[offset] = int(key)
-
-    def span(row):
-        quote, occurrence = row["evidence_text"], row.get("occurrence", 1)
-        position = -1
-        for _ in range(occurrence):
-            position = source.index(quote, position + 1)
-        return position, position + len(quote)
-
-    def evidence(row):
-        position, end = span(row)
-        return dict(evidence_start_token=starts[position], evidence_end_token=ends[end])
-
-    template = request.get("fixed_template", {})
-    template_ids = {n["concept_id"]: n["local_id"] for n in template.get("nodes", [])}
-    if request["request_kind"] == "source_only_fact_inventory":
-        coverage, nodes = {}, []
-        concepts = {c["concept_id"]: c for c in canonical["concepts"]}
-        for n in canonical["nodes"]:
-            if n["concept_id"] in template_ids:
-                continue
-            units = [key for key, unit in request["source_units"].items()
-                     if span(unit)[0] < span(n)[1] and span(n)[0] < span(unit)[1]]
-            meaning = dict(concept_id=n["concept_id"]) if request["concept_policy"] == "FROZEN" else dict(concept=deepcopy(concepts[n["concept_id"]]))
-            nodes.append(dict(**meaning, source_units=units, layer=n.get("layer", "runtime"), **evidence(n)))
-        for key, unit in request["source_units"].items():
-            facts = [n for n in nodes if key in n["source_units"]]
-            # Mechanical fixture conversion only, never a source-semantic judgment.
-            coverage[key] = dict(status="represented" if facts else "no_task_fact",
-                                 reason="Source-authored synthetic fixture segment disposition.")
-        return dict(nodes=nodes, coverage=coverage,
-                    unresolved_notes=deepcopy(canonical["unresolved_notes"]))
-    raise AssertionError("unsupported fixture annotation format")
-
-
 def record_annotation(request, canonical):
     """Map independently authored fixture edges to complete source records."""
-    from prompt_mechanism_study.tsg.source_codec import _source_tokens
     if request['request_kind'] == 'source_only_record_review':
         return dict(records={r['record_id']: dict(status='supported', reason='Source-authored fixture.')
             for group in ('objects', 'operations', 'requirements') for r in request['records'][group]},
             source_units={key: dict(complete=True, reason='Source-authored fixture coverage.')
                           for key in request['source_units']})
-    base = {**request, 'request_kind': 'source_only_fact_inventory',
-            'source_tokens': {str(i): t.group() for i,t in enumerate(_source_tokens(request['source_prompt']),1)}}
-    indexed = indexed_annotation(base, canonical)
     template = {n['concept_id'] for n in request['fixed_template']['nodes']}
     authored = [n for n in canonical['nodes'] if n['concept_id'] not in template]
     meanings = {c['concept_id']: c for c in canonical.get('concepts', [])}
@@ -170,13 +121,25 @@ def record_annotation(request, canonical):
         if text.count(value) > 1:
             value = text[:text.index(value)+len(value)]
         return dict(evidence_source_unit=unit, evidence_text=value)
+    def span(row):
+        source, position = request['source_prompt'], -1
+        for _ in range(row.get('occurrence', 1)):
+            position = source.index(row['evidence_text'], position + 1)
+        return position, position + len(row['evidence_text'])
     facts = {}
-    for original, item in zip(authored, indexed['nodes']):
-        fact = {k:v for k,v in item.items() if not k.startswith('evidence_')}
-        fact.update(quote(original))
-        facts[original['local_id']] = fact
+    for original in authored:
+        units = [key for key, unit in request['source_units'].items()
+                 if span(unit)[0] < span(original)[1] and span(original)[0] < span(unit)[1]]
+        meaning = (dict(concept_id=original['concept_id']) if request['concept_policy'] == 'FROZEN'
+                   else dict(concept=deepcopy(meanings[original['concept_id']])))
+        facts[original['local_id']] = dict(**meaning, source_units=units,
+            layer=original.get('layer', 'runtime'), **quote(original))
     types = {n['local_id']: meanings[n['concept_id']]['node_type'] for n in authored}
-    result = dict(objects=[], operations=[], requirements=[], coverage=indexed['coverage'], unresolved_notes=indexed['unresolved_notes'])
+    coverage = {key: dict(status='represented' if any(key in f['source_units'] for f in facts.values())
+                         else 'no_task_fact', reason='Source-authored synthetic fixture segment disposition.')
+                for key in request['source_units']}
+    result = dict(objects=[], operations=[], requirements=[], coverage=coverage,
+                  unresolved_notes=deepcopy(canonical['unresolved_notes']))
     result['unit_impacts'] = {key: dict(effect='global', operations=[], reason='Authored complete fixture; no local exemption.',
         evidence_source_unit=key, evidence_text=unit['evidence_text']) for key,unit in request['source_units'].items()}
     roles = _authored_roles(canonical)

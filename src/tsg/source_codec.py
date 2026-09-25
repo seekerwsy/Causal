@@ -147,19 +147,18 @@ def _inventory_concept(row: Mapping[str, Any], request: Mapping[str, Any]) -> di
     return concept
 
 
-def _quoted_inventory_citation(row: Mapping[str, Any], request: Mapping[str, Any], path: str) -> dict[str, Any]:
+def _source_citation(row: Mapping[str, Any], request: Mapping[str, Any], path: str) -> dict[str, Any]:
     """Locate an exact, unique source-unit quote; the model supplies no positions."""
     quote, unit_id = row.get("evidence_text"), row.get("evidence_source_unit")
     if (not isinstance(quote, str) or not quote.strip() or not isinstance(unit_id, str)
-        or unit_id not in request["source_units"]
-        or any(k in row for k in ("evidence_start_token", "evidence_end_token"))):
+        or unit_id not in request["source_units"]):
         raise PromptContractExtractionError(f"{path}: inventory evidence requires a source unit and literal quote")
     unit = request["source_units"][unit_id]
     source = request["source_prompt"]
     unit_start = _literal_starts(source, unit["evidence_text"])[unit["occurrence"] - 1]
     tokens = _source_tokens(source)
-    starts = {token.start(): i for i, token in enumerate(tokens, 1)}
-    ends = {token.end(): i for i, token in enumerate(tokens, 1)}
+    starts = {token.start() for token in tokens}
+    ends = {token.end() for token in tokens}
     matches = [(unit_start + offset, unit_start + offset + len(quote))
                for offset in _literal_starts(unit["evidence_text"], quote)
                if unit_start + offset in starts and unit_start + offset + len(quote) in ends]
@@ -168,29 +167,7 @@ def _quoted_inventory_citation(row: Mapping[str, Any], request: Mapping[str, Any
             f"{path}: quote must identify one token-aligned occurrence inside its source unit; "
             f"found {len(matches)} matches in {unit_id} for {quote!r}. "
             "Copy the exact source text and include adjacent words to distinguish repeated mentions.")
-    left, right = matches[0]
-    result = {k: deepcopy(v) for k, v in row.items() if k not in {"evidence_text", "evidence_source_unit"}}
-    result.update(evidence_start_token=starts[left], evidence_end_token=ends[right])
-    return result
-
-
-def quoted_source_request(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Prepare source quotes for the record interface; positions stay internal."""
-    if (request.get("request_kind") != "source_only_fact_inventory"
-        or request.get("concept_policy") not in {"FROZEN", "DEVELOPMENT_OPEN"}):
-        raise PromptContractExtractionError("grouped inventory requires a source-fact request")
-    result = deepcopy(dict(request))
-    result.pop("source_tokens", None)
-    result["source_units"] = {key: {k: v for k, v in unit.items() if k not in {"evidence_start_token", "evidence_end_token"}}
-                              for key, unit in request["source_units"].items()}
-    result["evidence_coordinates"] = (
-        "For each node and participant relation, choose evidence_source_unit and an exact evidence_text quotation "
-        "that occurs once in that source unit, aligned to complete words or punctuation. Include enough surrounding "
-        "words to distinguish repeated mentions. The program finds positions; do not count tokens or occurrences. "
-        "A node's source_units retains all wider supporting clauses. Identity and relationship evidence are separate.")
-    result["source_object_meaning"] = _SOURCE_OBJECT_MEANING
-    result["operation_role_meanings"] = dict(_OBJECT_ROLE_MEANINGS)
-    return result
+    return dict(evidence_text=quote, occurrence=_literal_starts(source, quote).index(matches[0][0]) + 1)
 
 
 def _template_for_catalog(task: Mapping[str, Any], catalog: Mapping[str, Any]) -> dict[str, Any]:
@@ -213,43 +190,30 @@ def _source_units(task: Mapping[str, Any], *, fixed_template: bool) -> dict[str,
     if not fixed_template:
         segments = [(system_start, generation["system_prompt"]),
                     (language_start, generation["request"]["language"]), *segments]
-    tokens, result = _source_tokens(prompt), {}
+    result = {}
     for offset, segment in segments:
         for line in re.finditer(r"[^\r\n]+", segment):
             for sentence in re.finditer(r".+?(?:[.!?](?=\s|$)|$)", line.group()):
                 start = offset + line.start() + sentence.start()
-                end = offset + line.start() + sentence.end()
-                indices = [i for i, token in enumerate(tokens, 1) if token.start() >= start and token.end() <= end]
-                if indices:
-                    first, last = indices[0], indices[-1]
-                    left, right = tokens[first-1].start(), tokens[last-1].end()
+                tokens = _source_tokens(sentence.group())
+                if tokens:
+                    left, right = start + tokens[0].start(), start + tokens[-1].end()
                     text = prompt[left:right]
                     result[f"u{len(result)+1}"] = dict(evidence_text=text,
-                        occurrence=_literal_starts(prompt, text).index(left)+1,
-                        evidence_start_token=first, evidence_end_token=last)
+                        occurrence=_literal_starts(prompt, text).index(left)+1)
     return result
 
 
-def _indexed_citation(prompt: str, tokens: list, row: Mapping[str, Any]) -> dict[str, Any]:
-    start, end = row["evidence_start_token"], row["evidence_end_token"]
-    if type(start) is not int or type(end) is not int or not 1 <= start <= end <= len(tokens):
-        raise PromptContractExtractionError("invalid inclusive source-token endpoints")
-    left, right = tokens[start - 1].start(), tokens[end - 1].end()
-    quote = prompt[left:right]
-    return dict(evidence_text=quote, occurrence=_literal_starts(prompt, quote).index(left) + 1)
-
-
-def _role_context_citation(prompt: str, tokens: list, row: Mapping[str, Any],
+def _role_context_citation(prompt: str, row: Mapping[str, Any],
                            inventory: Mapping[str, Any]) -> dict[str, Any]:
     """Complete cited source context without deciding whether a role is entailed.
 
-    The raw binding response retains the model's exact selected tokens. Endpoint
-    source-unit ownership and token positions alone determine the context; no
+    The raw binding response retains the model's exact selected quotation. Endpoint
+    source-unit ownership and source positions alone determine the context; no
     semantic labels, keywords, references or outcomes choose additional text.
     """
-    _indexed_citation(prompt, tokens, row)  # Validate the original model anchor first.
-    left = tokens[row["evidence_start_token"] - 1].start()
-    right = tokens[row["evidence_end_token"] - 1].end()
+    left = _literal_starts(prompt, row["evidence_text"])[row["occurrence"] - 1]
+    right = left + len(row["evidence_text"])
     anchor_left, anchor_right = left, right
     endpoints = {row["operation"], row["subject"]}
     for key, unit in inventory["source_units"].items():
@@ -345,9 +309,14 @@ def contract_decision_request(
     task = prepare_task_input(task)
     template = _template_for_catalog(task, catalog)
     return {
-        "request_kind": "source_only_fact_inventory", "source_prompt": task["prompt"],
-        "source_tokens": {str(index): token.group() for index, token in enumerate(_source_tokens(task["prompt"]), 1)},
-        "evidence_coordinates": "Inclusive start/end keys from source_tokens. Tokens index the unchanged complete source_prompt, including punctuation; they carry no semantic labels.",
+        "request_kind": "source_context", "source_prompt": task["prompt"],
+        "evidence_coordinates": (
+            "For each node and participant relation, choose evidence_source_unit and an exact evidence_text quotation "
+            "that occurs once in that source unit, aligned to complete words or punctuation. Include enough surrounding "
+            "words to distinguish repeated mentions. The program finds positions; do not count tokens or occurrences. "
+            "A node's source_units retains all wider supporting clauses. Identity and relationship evidence are separate."),
+        "source_object_meaning": _SOURCE_OBJECT_MEANING,
+        "operation_role_meanings": dict(_OBJECT_ROLE_MEANINGS),
         "input_scope": "baseline_system_message_and_user_request",
         "message_roles": "System message has priority over User message. System message, User message and Task are provenance labels, not extra requirements. Language is an actual field supplied to the generator and must be considered with the message contents.",
         "concept_policy": catalog["concept_policy"],

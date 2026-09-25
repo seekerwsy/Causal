@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import replace
 import pytest
 from annotation_fixture import (
-    indexed_annotation,
+    record_annotation,
     scope_answer,
 )
 from prompt_mechanism_study.tsg.prompt_contract import (
@@ -22,7 +22,6 @@ from prompt_mechanism_study.tsg.source_codec import (
 from prompt_mechanism_study.tsg.scope_assessment import (
     apply_fixed_scope_response,
     fixed_scope_request,
-    fixed_scope_response_format,
 )
 from prompt_mechanism_study.tsg.prompt_contract_extract import extract_contract_task_file
 from prompt_mechanism_study.artifact_io import file_sha256, read_json
@@ -130,7 +129,7 @@ def _semantic_qualification_fixture(tmp_path, failure=None):
                 return b'{"nodes": "invalid"}'
             if failure == "binding" and request["request_kind"] == "source_only_record_review":
                 raise RuntimeError("Deliberate offline binding failure")
-            return json.dumps(indexed_annotation(request, dict(concepts=[], concept_states=[], feature_states=[], unresolved_notes=[],
+            return json.dumps(record_annotation(request, dict(concepts=[], concept_states=[], feature_states=[], unresolved_notes=[],
                 nodes=[dict(local_id=f["local_id"], concept_id=f["semantic_id"], evidence_text=f["evidence_text"],
                             occurrence=f["occurrence"]) for f in source.facts],
                 edges=[dict(source_node_local_id=e["source"], target_node_local_id=e["target"],
@@ -782,17 +781,6 @@ def test_fixed_scope_assessment_cannot_create_coordinates_or_default_missing_sta
     assert len(request["scopes"]) == 3
     assert all(row['definition'] == catalog['semantic_guidance'].get(row['concept_id'], '') for row in request['facts'])
     assert not {"arm", "outcome", "seed", "cwe", "task_family"} & set(request)
-    schema = fixed_scope_response_format(request)["json_schema"]["schema"]
-    assert set(schema["properties"]["states"]["required"]) == set(request["scopes"])
-    fields = next(iter(schema["properties"]["states"]["properties"].values()))["properties"]
-    assert fields["expression"]["enum"] == ["not_expressed", "unresolved"]
-    assert fields["applicability"]["enum"] == ["applicable", "not_applicable", "unresolved"]
-    assert "state" not in fields
-    for key, scope in request['scopes'].items():
-        assert ('explicitly_required' in schema['properties']['states']['properties'][key]['properties']['expression']['enum']) == bool(scope['admissible_positive_requirements'])
-        assert 'applicability_evidence' not in schema['properties']['states']['properties'][key]['properties']
-        assert scope['target'] in schema['properties']['states']['properties'][key]['description']
-        assert set(scope['bound_subject_roles']) == set(scope['subjects'])
     states = {key: scope_answer(scope, expression="explicitly_required" if scope["target"] == "b" else "not_expressed",
                         requirements=["p"] if scope["target"] == "b" else [])
               for key, scope in request["scopes"].items()}

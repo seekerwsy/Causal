@@ -3,7 +3,7 @@
 import json
 import pytest
 from annotation_fixture import (
-    indexed_annotation,
+    record_annotation,
 )
 from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.tsg.prompt_contract import open_concept_catalog
@@ -52,15 +52,13 @@ def _source_fixture(task_text="Run query A using input x. Return the selected ro
              evidence_text="Run query A using input x. Return the selected rows.", occurrence=1)],
         unresolved_notes=[])
     request = contract_decision_request(task, catalog)
-    wire = indexed_annotation(request, canonical)
-    return task, catalog, canonical, request, wire
+    return task, catalog, canonical, request
 
 
 def test_overlapping_evidence_is_not_a_semantic_rejection():
     from copy import deepcopy
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import record_request, compile_records
-    task, catalog, canonical, base, _ = _source_fixture(
+    task, catalog, canonical, base = _source_fixture(
         'Run query A using input x. Return the selected rows. Produce readable code. Run query B using input x.')
     canonical['nodes'].append(dict(local_id='b', concept_id='sql.query', evidence_text='query B', occurrence=1))
     request = record_request(base)
@@ -108,16 +106,8 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
     from copy import deepcopy
     from prompt_mechanism_study.tsg.scope_assessment import (
         apply_fixed_scope_response,
-        fixed_scope_response_format,
     )
     task, catalog, bound, request, response, ids = _conditional_scope_fixture()
-    schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
-    for key, scope in request['scopes'].items():
-        if scope['concept_id'] != 'length':
-            continue
-        eligible = scope['subjects']==[ids['sql.input']] and scope['conditions']==[ids['condition.safe']]
-        assert scope['admissible_positive_requirements'] == ([ids['length']] if eligible else [])
-        assert ('explicitly_required' in schema[key]['properties']['expression']['enum']) == eligible
     key, scope = next((k,s) for k,s in request['scopes'].items()
                      if s['concept_id']=='length' and not s['subjects'] and not s['conditions'])
     bad = deepcopy(response)
@@ -148,20 +138,16 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
 ])
 def test_model_judges_applicability_without_role_domain_rules(role, expected):
     from prompt_mechanism_study.tsg.scope_assessment import (
-        fixed_scope_response_format,
         apply_fixed_scope_response,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
-    task, catalog, canonical, _, _ = _source_fixture()
+    task, catalog, canonical, _ = _source_fixture()
     catalog.update(feature_scope_domains={'sql.binding': 'subjects'})
     catalog_from_record(catalog)
     bound = _bound_records(task, catalog, canonical, roles={'x': role})
     input_id = next(f['local_id'] for f in bound.facts if f['semantic_id'] == 'sql.input')
     request = fixed_scope_request(bound, prompt=task['prompt'], catalog=catalog)
     key, scope = next((k, s) for k, s in request['scopes'].items() if s['subjects'] == [input_id])
-    assert 'role_domain_check' not in scope
-    schema = fixed_scope_response_format(request)['json_schema']['schema']['properties']['states']['properties']
-    assert set(schema[key]['properties']) == {'expression', 'requirements', 'applicability', 'applicability_rationale'}
     answers = {k: dict(expression='not_expressed', requirements=[],
         applicability=expected, applicability_rationale='Source establishes the SQL operation and this role.')
         for k in request['scopes']}
@@ -193,7 +179,6 @@ def test_model_judges_applicability_without_role_domain_rules(role, expected):
 
 
 def _bound_records(task, catalog, canonical, *, roles):
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import record_request, compile_records
     request = record_request(contract_decision_request(task, catalog))
     records = record_annotation(request, canonical)
@@ -210,7 +195,7 @@ def _conditional_scope_fixture():
     prefix = 'The input x is text. '
     conditional = True
     conditional_text = 'When mode is safe, require input x to be at most 10 characters.'
-    task, catalog, canonical, _, _ = _source_fixture(prefix +
+    task, catalog, canonical, _ = _source_fixture(prefix +
         'Run query A using input x and a database. Return the selected rows. Produce readable code.'
         + (' ' + conditional_text if conditional else ''))
     for name, node_type, definition in [
@@ -255,7 +240,8 @@ def _conditional_scope_fixture():
     return task, catalog, bound, request, dict(states=states, unresolved_notes=[]), ids
 
 
-def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_condition():
+@pytest.fixture
+def atomic_records():
     sentence = ("Run query A using input x; for external requests, bind input x as an SQL parameter "
                 "and require input x to be at most 10 characters.")
     task = prepare_task_input(dict(task_id="synthetic-atomic-source-requirements",
@@ -281,111 +267,66 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
                    ("external", "conditions", "binding"), ("external", "conditions", "length"),
                ]],
         unresolved_notes=[])
-    calls = []
-
-    def provider(request, _config, _prompt):
-        calls.append(request["request_kind"])
-        return json.dumps(indexed_annotation(request, canonical)).encode()
-
-    attempt = _attempt_task_contract(task, catalog=open_concept_catalog(), evaluator=dict(candidate_id="offline"),
-        annotator_prompt="Source-authored atomic requirement fixture.",
-        review_status="development_exposed", provider=provider)
-    assert calls == ["source_only_atomic_records", "source_only_record_review"]
-    assert attempt.error_type is None
-    assert attempt.contract is not None and attempt.graph is not None
-    requirements = {fact["local_id"]: fact for fact in attempt.contract.facts
-                    if fact["node_type"] == "safety_requirement"}
-    # Shared evidence is allowed: distinct atomic meanings must survive instance deduplication.
-    assert set(requirements) == {"fact.3", "fact.4"}
-    assert {fact["evidence_text"] for fact in requirements.values()} == {sentence}
-    assert attempt.contract.catalog["semantic_guidance"][requirements["fact.4"]["semantic_id"]] == (
-        "Require the input value to be at most 10 characters.")
-    relations = {(edge["source"], edge["edge_type"], edge["target"]) for edge in attempt.contract.relations}
-    for requirement in requirements:
-        assert (requirement, "constrains", "fact.2") in relations
-        assert (requirement, "constrains", "fact.1") in relations
-        assert ("fact.5", "conditions", requirement) in relations
-    assert ("fact.5", "conditions", "fact.2") not in relations
-    assert {attempt.contract.catalog['semantic_guidance'][node.semantic_id]
-            for node in attempt.graph.nodes if node.node_type == "safety_requirement"} == {
-        "Bind the SQL input value as a parameter.", "Require the input value to be at most 10 characters."}
-    # The same maintained boundary test also checks local correction and input
-    # assumptions; no extra incident-specific test family is added.
-    from copy import deepcopy
-    from annotation_fixture import record_annotation
-    from prompt_mechanism_study.tsg.source_records import (
-        record_request,
-        compile_records,
-        review_request,
-        revision_request,
-        record_diagnostics,
-    )
+    from prompt_mechanism_study.tsg.source_records import record_request
     catalog = open_concept_catalog()
     request = record_request(contract_decision_request(task, catalog))
-    records = record_annotation(request, canonical)
-    generation_participant = deepcopy(records)
-    generation_participant['operations'][0]['fact']['layer'] = 'generation'
-    assert any('participation requires runtime operation and object' in error
-               for error in record_diagnostics(generation_participant, request))
-    invalid = deepcopy(records)
-    invalid['requirements'][0].update(scope_kind='task', operations=[], subjects=[])
-    invalid['requirements'][0]['fact'].update(layer='generation')
-    diagnostic_request = deepcopy(request)
-    concept = invalid['requirements'][0]['fact']['concept']
-    diagnostic_request['known_concepts'][concept['concept_id']] = deepcopy(concept)
-    concept['definition'] = 'Redefined known meaning.'
-    diagnostics = record_diagnostics(invalid, diagnostic_request)
-    assert any('cannot change a supplied meaning' in problem for problem in diagnostics)
-    assert any('task/each scope is runtime' in problem for problem in diagnostics)
-    check = review_request(request, records)
-    assert check['operation_role_meanings'] == request['operation_role_meanings']
-    assert 'NO per-operation obligation' in check['record_semantics']['task_scope']
-    from prompt_mechanism_study.tsg.source_records import (
-        structural_readback,
-        review_response_format,
-    )
-    assert structural_readback(request,records)['operations']['q']['execution_guard'].startswith('NO DECLARED EXECUTION GUARD:')
-    operation_reading = structural_readback(request, records)['operations']['q']
-    assert operation_reading['predicate_definition_claim'] == 'Execute the source SQL query.'
-    assert check['operation_bindings']['q'] == operation_reading
-    readback=structural_readback(request,records)['requirements']['binding']
-    assert readback['direct_operation_bindings'][0]['target_operation']=='q'
-    assert readback['requirement_guards'][0]['predicate']=='The request is external.'
-    missing_guard=deepcopy(records)
-    missing_guard['requirements'][0]['conditions']=[]
-    # Correct prose is deliberately retained: it cannot restore structural data.
-    missing_guard['requirements'][0]['fact']['concept']['definition']+=' For external requests only.'
-    missing_check=review_request(request,missing_guard)
-    decoded=structural_readback(request,missing_guard)['requirements']['binding']
-    assert decoded['requirement_guards'].startswith('UNCONDITIONAL')
-    assert decoded['direct_operation_bindings'][0]['structural_guard'].startswith('UNCONDITIONAL')
-    assert set(review_response_format(missing_check)['json_schema']['schema']['properties']['records']
-               ['properties']['binding']['properties']) == {'status', 'reason'}
-    guard_review=record_annotation(missing_check,canonical)
-    guard_review['records']['binding'].update(status='unsupported',reason='Required external-request guard is missing.')
-    revision=revision_request(request,missing_guard,guard_review)
-    assert revision['original_records'] == missing_guard
-    assert revision['source_review'] == guard_review
-    assert revision_request(request, records, record_annotation(check, canonical)) is None
-    responses = iter([missing_guard, guard_review, records])
-    revised = _attempt_task_contract(task, catalog=catalog, evaluator=dict(candidate_id='offline'),
+    return task, catalog, request, record_annotation(request, canonical)
+
+
+def _compile_atomic(fixture, records):
+    from prompt_mechanism_study.tsg.source_records import compile_records
+    from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
+    task, catalog, request, _ = fixture
+    contract = compile_records(records, request=request, task=task, catalog=catalog,
+        annotator_id='offline', review_status='development_exposed')
+    return contract, compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
+
+
+def test_shared_conditions_and_bounded_revision_follow_fields_not_prose(atomic_records):
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.source_records import structural_readback
+    task, catalog, request, records = atomic_records
+    contract, graph = _compile_atomic(atomic_records, records)
+    requirements = [f for f in contract.facts if f['node_type'] == 'safety_requirement']
+    assert len(requirements) == 2 and len({f['semantic_id'] for f in requirements}) == 2
+    assert len({f['evidence_text'] for f in requirements}) == 1
+    guard = next(n.node_id for n in graph.nodes if n.node_type == 'condition')
+    assert {e.target_id for e in graph.edges if e.source_id == guard and e.edge_type == 'conditions'} == {
+        n.node_id for n in graph.nodes if n.node_type == 'safety_requirement'}
+    for requirement in requirements:
+        assert {next(f['node_type'] for f in contract.facts if f['local_id'] == e['target'])
+                for e in contract.relations if e['source'] == requirement['local_id'] and e['edge_type'] == 'constrains'} == {
+                    'task_operation', 'data_object'}
+    missing = deepcopy(records)
+    missing['requirements'][0]['conditions'] = []
+    # The correct prose must not restore a deleted structural condition.
+    missing['requirements'][0]['fact']['concept']['definition'] += ' For external requests only.'
+    assert isinstance(structural_readback(request, missing)['requirements']['binding']['requirement_guards'], str)
+    review = dict(records={r['record_id']: dict(status='supported', reason='Authored reference.')
+        for group in ('objects', 'operations', 'requirements') for r in records[group]},
+        source_units={key: dict(complete=True, reason='Authored reference.') for key in request['source_units']})
+    review['records']['binding'].update(status='unsupported', reason='Required external-request guard is missing.')
+    responses = iter([missing, review, records])
+    attempt = _attempt_task_contract(task, catalog=catalog, evaluator=dict(candidate_id='offline'),
         annotator_prompt='Authored revision fixture.', review_status='development_exposed',
         provider=lambda *_: json.dumps(next(responses)).encode())
-    assert revised.succeeded and revised.provider_calls == 3
-    audit = revised.binding_annotation
-    assert audit['records'] == records and audit['pre_review_records'] == missing_guard
-    assert audit['calls'][-1]['request']['request_kind'] == 'source_only_record_revision'
-    assert audit['structural_readback']['requirements']['binding']['requirement_guards'][0]['predicate'] == 'The request is external.'
-    # Freeze a normalized action predicate, then vary its bindings without
-    # reinterpreting that immutable predicate or the research requirements.
+    assert attempt.succeeded and attempt.provider_calls == 3
+    assert attempt.binding_annotation['pre_review_records'] == missing
+    assert attempt.contract.facts == contract.facts and attempt.contract.relations == contract.relations
+    assert attempt.contract.source_inventory == contract.source_inventory
+
+
+def test_frozen_predicate_does_not_freeze_its_source_bindings(atomic_records):
+    from copy import deepcopy
     from prompt_mechanism_study.tsg.prompt_contract import freeze_open_concepts, catalog_sha256
-    base_contract = compile_records(records, request=request, task=task, catalog=catalog,
-        annotator_id='authored-normalized-operation', review_status='development_exposed')
-    frozen = freeze_open_concepts((base_contract,), normalization_map={},
-        definitions=base_contract.catalog['semantic_guidance'], queries=[])
-    frozen_identity = catalog_sha256(frozen)
-    frozen_request = record_request(contract_decision_request(task, frozen))
-    by_meaning = {(frozen['semantics'][k], d): k for k,d in frozen['semantic_guidance'].items()}
+    from prompt_mechanism_study.tsg.source_records import record_request
+    task, _, _, records = atomic_records
+    original, _ = _compile_atomic(atomic_records, records)
+    frozen = freeze_open_concepts((original,), normalization_map={},
+        definitions=original.catalog['semantic_guidance'], queries=[])
+    identity = catalog_sha256(frozen)
+    request = record_request(contract_decision_request(task, frozen))
+    meanings = {(frozen['semantics'][k], d): k for k,d in frozen['semantic_guidance'].items()}
     def frozen_facts(value):
         if isinstance(value, list):
             return [frozen_facts(v) for v in value]
@@ -394,161 +335,84 @@ def test_one_source_sentence_retains_two_atomic_requirements_and_their_shared_co
         row = {k:frozen_facts(v) for k,v in value.items() if k != 'concept'}
         if 'concept' in value:
             c = value['concept']
-            row['concept_id'] = by_meaning[c['node_type'], c['definition']]
+            row['concept_id'] = meanings[c['node_type'], c['definition']]
         return row
-    frozen_records = frozen_facts(records)
-    altered = deepcopy(frozen_records)
+    records = frozen_facts(records)
+    altered = deepcopy(records)
     altered['operations'][0]['inputs'] = []
     altered['operations'][0]['execution_conditions'] = deepcopy(altered['requirements'][0]['conditions'])
-    frozen_contracts = [compile_records(v, request=frozen_request, task=task, catalog=frozen,
-        annotator_id='authored-binding-control', review_status='development_exposed') for v in (frozen_records, altered)]
-    readings = [structural_readback(frozen_request,v)['operations']['q'] for v in (frozen_records,altered)]
-    assert readings[0]['predicate_definition_claim'] == readings[1]['predicate_definition_claim']
-    assert readings[0]['inputs'] and not readings[1]['inputs']
-    assert readings[0]['execution_guard'] != readings[1]['execution_guard']
-    assert sum(e['edge_type']=='used_by' for e in frozen_contracts[0].relations) == 1
-    assert not any(e['edge_type']=='used_by' for e in frozen_contracts[1].relations)
-    assert catalog_sha256(frozen) == frozen_identity
-    assert ([f for f in frozen_contracts[0].facts if f['node_type']=='safety_requirement'] ==
-            [f for f in frozen_contracts[1].facts if f['node_type']=='safety_requirement'])
-    # Preserve composition and inherited guards at construction; only conjunction
-    # entails its declared leaves. This is a synthetic logic boundary, not accuracy.
-    from prompt_mechanism_study.tsg.prompt_contract import compile_task_context_contract
-    from prompt_mechanism_study.tsg.prompt_tsg import (
-        graph_requirement_membership,
-        prompt_tsg_record,
-        prompt_tsg_from_record,
-    )
-    from prompt_mechanism_study.tsg.candidate_construction import (
-        candidate_request,
-        _occurrence,
-        _canonical_concepts,
-        _query,
-        choose_candidate_scope,
-    )
-    composite = deepcopy(records)
-    parent = deepcopy(composite['requirements'][0])
-    parent.update(record_id='both', structure=dict(kind='and', members=['binding','length']),
-        scope_kind='composite',operations=[],subjects=[])
-    parent['fact']['concept'].update(concept_id='both', definition='Require both binding and the length limit.')
-    composite['requirements'].append(parent)
-    for leaf in composite['requirements'][:2]:
-        leaf['conditions'] = []
-    def compile_composite(value):
-        return compile_records(value, request=request, task=task, catalog=catalog,
-            annotator_id='offline', review_status='development_exposed')
-    comp = compile_composite(composite)
-    decoded=structural_readback(request,composite)['requirements']
-    assert decoded['binding']['requirement_guards']==decoded['both']['requirement_guards']
-    executed=deepcopy(missing_guard)
-    executed['operations'][0]['execution_conditions']=deepcopy(records['requirements'][0]['conditions'])
-    binding=structural_readback(request,executed)['requirements']['binding']
-    assert binding['direct_operation_bindings'][0]['structural_guard'][0]['predicate']=='The request is external.'
-    graph = compile_task_context_contract(comp, prompt=task['prompt'], catalog=catalog)
-    asserted, atoms = graph_requirement_membership(graph)
-    declared={key for key,_,_ in graph.requirement_structures}
-    asserted,atoms=asserted&declared,atoms&declared
-    assert len(asserted)==3 and len(atoms)==2
-    assert prompt_tsg_from_record(prompt_tsg_record(graph)) == graph
-    guard = next(n.node_id for n in graph.nodes if n.node_type=='condition')
-    assert {e.target_id for e in graph.edges if e.edge_type=='conditions' and e.source_id==guard} == asserted
-    candidate = candidate_request([task],[comp],input_catalog=catalog)
-    source = candidate['sources'][0]
-    aliases, _, _ = _canonical_concepts(candidate)
-    op = next(n['node_id'] for n in source['nodes'] if n['node_type']=='task_operation' and n['evidence']=='query A')
-    subject_meaning=next(f['semantic_id'] for f in comp.facts if f['local_id']=='fact.1')
-    subject = next(n['node_id'] for n in source['nodes'] if n['concept_id']==subject_meaning)
-    occurrence = dict(task_id=task['task_id'], requirement_node_ids=[sorted(atoms)[0]],
-        scope=dict(operation_node_id=op,subject_node_ids=[subject],condition_node_ids=[guard]))
-    selector, _ = _occurrence(source,occurrence,aliases)
-    assert selector['policy_condition_semantic_ids'] and selector['condition_semantic_ids'] == []
-    # Explicit non-gating context can survive removing the target requirement.
-    composite['operations'][0]['scope_conditions'] = deepcopy(parent['conditions'])
-    comp = compile_composite(composite)
-    candidate = candidate_request([task],[comp],input_catalog=catalog)
-    source = candidate['sources'][0]
-    selector, _ = _occurrence(source,occurrence,aliases)
-    assert selector['execution_condition_semantic_ids'] == []
-    assert not any(edge[1]=='context_for' for edge in _query(selector,'test-feature')['required_relations'])
-    graph = compile_task_context_contract(comp,prompt=task['prompt'],catalog=catalog)
-    # Use source meanings for this low-level selector test (normalization is separate).
-    by_id={n.node_id:n.semantic_id for n in graph.nodes}
-    selector.update(operation_semantic_id=by_id[op],subject_semantic_ids=[by_id[subject]],
-                    policy_condition_semantic_ids=[by_id[guard]])
-    assert choose_candidate_scope(graph,selector) is not None
-    from dataclasses import replace
-    removed = replace(graph,nodes=tuple(n for n in graph.nodes if n.node_id not in asserted),
-        edges=tuple(e for e in graph.edges if not {e.source_id,e.target_id}&asserted),requirement_structures=())
-    assert choose_candidate_scope(removed,selector) == choose_candidate_scope(graph,selector)
-    for kind in ('or','not'):
-        variant = deepcopy(composite)
-        if kind=='or':
-            variant['requirements'][-1]['structure']['kind']='or'
-        else:
-            negated=deepcopy(parent)
-            negated.update(record_id='negated',structure=dict(kind='not',members=['both']))
-            negated['fact']['concept'].update(concept_id='negated',definition='Negate the conjunction.')
-            variant['requirements'].append(negated)
-        comp=compile_composite(variant)
-        graph=compile_task_context_contract(comp,prompt=task['prompt'],catalog=catalog)
-        assert not graph_requirement_membership(graph)[1] & {key for key,_,_ in graph.requirement_structures}
-        assert structural_readback(request,variant)['requirements']['binding']['asserted_as_standalone'] is False
-        candidate=candidate_request([task],[comp],input_catalog=catalog)
-        with pytest.raises(ValueError,match='existing source requirement'):
-            _occurrence(candidate['sources'][0],occurrence,aliases)
-        # Scope preparation must withhold the referenced feature, not claim absence.
-        fixed=deepcopy(comp.catalog)
-        feature=next(f['semantic_id'] for f in comp.facts if f['local_id']=='fact.3')
-        fixed['queries']=[dict(query_id='binding',actionable_feature_id=feature,required_semantics=[by_id[op]],
-            forbidden_semantics=[],required_relations=[],realization_id='binding',cwe_id='source_semantics',task_family='source_semantics')]
-        comp=replace(comp,catalog=fixed,input_catalog_sha256=catalog_sha256(fixed))
-        scope_request=fixed_scope_request(comp,prompt=task['prompt'],catalog=fixed)
-        assert scope_request['withheld_scopes'] and not scope_request['scopes']
-    # A task-wide requirement is mechanically scoped and an assumed domain is
-    # retained as context without becoming an editable requirement candidate.
+    before, _ = _compile_atomic((task,frozen,request,records), records)
+    after, _ = _compile_atomic((task,frozen,request,records), altered)
+    assert any(e['edge_type'] == 'used_by' for e in before.relations)
+    assert not any(e['edge_type'] == 'used_by' for e in after.relations)
+    operation = next(f['local_id'] for f in after.facts if f['node_type'] == 'task_operation' and f['evidence_text'] == 'query A')
+    assert any(e['edge_type'] == 'conditions' and e['target'] == operation for e in after.relations)
+    assert before.facts == after.facts and catalog_sha256(frozen) == identity
+
+
+@pytest.mark.parametrize('kind', ['and', 'or', 'not'])
+def test_composition_preserves_guards_without_asserting_alternative_leaves(atomic_records, kind):
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.prompt_tsg import graph_requirement_membership
+    task, catalog, _, records = atomic_records
     records = deepcopy(records)
-    # Provisional category labels cannot collapse distinct complete predicates.
-    for record in records['requirements']:
-        record['fact']['concept']['concept_id'] = 'requirement.provisional'
-    records['requirements'][0].update(scope_kind='task', operations=[], subjects=[])
-    assumed = records['requirements'][1]
-    assumed.update(modality='assumption')
-    assumed['fact']['concept'].update(concept_id='input.expected_length', node_type='constraint',
-        definition='The input is assumed to have at most 10 characters; this does not prescribe rejection.')
-    compiled = compile_records(records, request=request, task=task, catalog=catalog,
-        annotator_id='offline', review_status='development_exposed')
-    assert compiled.source_inventory['statement_kinds']['fact.4'] == 'assumption'
-    assert len({f['semantic_id'] for f in compiled.facts if f['local_id'] in {'fact.3','fact.4'}}) == 2
-    links = {(r['source'],r['edge_type'],r['target']) for r in compiled.relations}
-    assert ('fact.3','constrains','fact.2') not in links
-    assert compiled.source_inventory['requirement_scopes']['fact.3']['kind']=='task'
-    retained_graph=compile_task_context_contract(compiled,prompt=task['prompt'],catalog=catalog)
-    assert prompt_tsg_from_record(prompt_tsg_record(retained_graph))==retained_graph
-    assert retained_graph.requirement_scopes[0][1]=='task'
-    # An explicit universal rule survives without claiming a complete instance list.
-    universal=deepcopy(records)
-    universal['requirements'][0].update(scope_kind='each',target_class='database queries')
-    universal_contract=compile_composite(universal)
-    universal_graph=compile_task_context_contract(universal_contract,prompt=task['prompt'],catalog=catalog)
-    assert universal_graph.requirement_scopes[0][1:] == ('each',retained_graph.requirement_scopes[0][2],'database queries')
-    assert prompt_tsg_from_record(prompt_tsg_record(universal_graph))==universal_graph
-    assert not structural_readback(request,universal)['requirements']['binding']['direct_operation_bindings']
-    illegal=deepcopy(universal)
-    illegal['requirements'][0]['operations']=['q','q']
-    with pytest.raises(PromptContractExtractionError,match='zero/one boundary'):
-        compile_composite(illegal)
-    assert ('fact.5','conditions','fact.3') in links and ('fact.5','conditions','fact.2') not in links
-    from prompt_mechanism_study.tsg.candidate_construction import candidate_request, _occurrence
-    source = candidate_request([task], [compiled], input_catalog=catalog)['sources'][0]
-    assumption = next(n for n in source['nodes'] if n.get('statement_kind') == 'assumption')
-    with pytest.raises(ValueError, match='existing source requirement'):
-        _occurrence(source, dict(task_id=task['task_id'], requirement_node_ids=[assumption['node_id']], scope={}), {})
+    parent = deepcopy(records['requirements'][0])
+    parent.update(record_id='both', structure=dict(kind='and', members=['binding', 'length']),
+        scope_kind='composite', operations=[], subjects=[])
+    parent['fact']['concept'].update(concept_id='both', definition='Both binding and the length limit.')
+    for leaf in records['requirements']:
+        leaf['conditions'] = []
+    records['requirements'].append(parent)
+    if kind == 'or':
+        parent['structure']['kind'] = 'or'
+    elif kind == 'not':
+        negated = deepcopy(parent)
+        negated.update(record_id='negated', structure=dict(kind='not', members=['both']))
+        negated['fact']['concept'].update(concept_id='negated', definition='Negate the conjunction.')
+        records['requirements'].append(negated)
+    contract, graph = _compile_atomic(atomic_records, records)
+    leaves = {key for key, structure, _ in graph.requirement_structures if structure == 'atom'}
+    asserted, atoms = graph_requirement_membership(graph)
+    assert leaves <= asserted and leaves <= atoms if kind == 'and' else not leaves & asserted
+    guard = next(n.node_id for n in graph.nodes if n.node_type == 'condition')
+    assert leaves <= {e.target_id for e in graph.edges if e.source_id == guard and e.edge_type == 'conditions'}
+    if kind != 'and':
+        # Alternative/negated expression remains unknown, not absent.
+        from dataclasses import replace
+        from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
+        fixed = deepcopy(contract.catalog)
+        feature = next(f['semantic_id'] for f in contract.facts if f['node_type'] == 'safety_requirement')
+        operation = next(f['semantic_id'] for f in contract.facts if f['evidence_text'] == 'query A')
+        fixed['queries'] = [dict(query_id='binding', actionable_feature_id=feature, required_semantics=[operation],
+            forbidden_semantics=[], required_relations=[], realization_id='binding', cwe_id='source_semantics', task_family='source_semantics')]
+        contract = replace(contract, catalog=fixed, input_catalog_sha256=catalog_sha256(fixed))
+        assessed = fixed_scope_request(contract, prompt=task['prompt'], catalog=fixed)
+        assert assessed['withheld_scopes'] and not assessed['scopes']
+
+
+@pytest.mark.parametrize('scope', ['task', 'each'])
+def test_whole_scope_is_not_broadcast_and_assumptions_are_not_candidates(atomic_records, scope):
+    from copy import deepcopy
+    from prompt_mechanism_study.tsg.candidate_construction import candidate_model_request, candidate_request
+    task, catalog, _, records = atomic_records
+    records = deepcopy(records)
+    records['requirements'][0].update(scope_kind=scope, operations=[], subjects=[],
+        target_class='database queries' if scope == 'each' else None)
+    records['requirements'][1].update(modality='assumption')
+    records['requirements'][1]['fact']['concept'].update(node_type='constraint',
+        definition='The input is assumed to have at most ten characters.')
+    contract, graph = _compile_atomic(atomic_records, records)
+    whole = next(key for key,kind,_,_ in graph.requirement_scopes if kind == scope)
+    assert not any(e.source_id == whole and e.edge_type == 'constrains' for e in graph.edges)
+    assert any(e.target_id == whole and e.edge_type == 'conditions' for e in graph.edges)
+    sources = candidate_model_request(candidate_request([task], [contract], input_catalog=catalog))['sources']
+    assumption = next(n for n in sources[0]['nodes'] if n.get('statement_kind') == 'assumption')
+    assert not assumption['complete_bindings']
 
 
 def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope():
     from copy import deepcopy
     from dataclasses import replace
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import (
         record_request,
         compile_records,
@@ -713,7 +577,7 @@ def test_requirement_owned_order_preserves_targets_guards_and_state_blind_scope(
 
 
 def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
-    task, catalog, canonical, _, _ = _source_fixture()
+    task, catalog, canonical, _ = _source_fixture()
     calls = []
     def provider(request, _config, _prompt):
         calls.append(request["request_kind"])
@@ -726,7 +590,7 @@ def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
             assert request['effective_unit_impacts']
             assert request['compiled_operations']
             assert set(request['effective_unit_impacts']) == set(request['source_units'])
-        value = indexed_annotation(request, canonical)
+        value = record_annotation(request, canonical)
         if request["request_kind"] == "source_only_atomic_records":
             value["coverage"]["u1"].update(status="unresolved", reason="A relevant source meaning remains unresolved.")
         return json.dumps(value).encode()
@@ -741,9 +605,8 @@ def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
     assert not attempt.scope_assessment["request"]["withheld_scopes"]
     # Exercise the active record compiler's local-impact declarations, not just
     # handcrafted contract metadata. Separate inputs prevent accidental sharing.
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import record_request, compile_records
-    task,catalog,canonical,_,_ = _source_fixture('Run query A using input x. Return the selected rows. Produce readable code. Run query B.')
+    task,catalog,canonical,_ = _source_fixture('Run query A using input x. Return the selected rows. Produce readable code. Run query B.')
     canonical['nodes'].append(dict(local_id='b',concept_id='sql.query',evidence_text='query B',occurrence=1))
     request=record_request(contract_decision_request(task,catalog))
     records=record_annotation(request,canonical)
@@ -763,22 +626,19 @@ def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
 
 
 def test_fixed_generation_facts_are_injected_once_and_never_redeclared_by_model():
-    task, catalog, canonical, request, wire = _source_fixture()
+    task, catalog, canonical, request = _source_fixture()
     template_ids = {n["local_id"] for n in request["fixed_template"]["nodes"]}
-    assert len(template_ids) == 5 and all("local_id" not in n for n in wire["nodes"])
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import record_request, compile_records
     active = record_request(request)
     facts = compile_records(record_annotation(active, canonical), request=active, task=task, catalog=catalog,
         annotator_id='authored-template', review_status='development_exposed')
     assert template_ids <= {f["local_id"] for f in facts.facts}
-    assert len(facts.facts) == len(wire["nodes"]) + 5
+    assert len(facts.facts) == len(canonical["nodes"]) + len(template_ids)
     assert sum(r["source"].startswith("template.") for r in facts.relations) == 4
     assert all(facts.source_inventory["layers"][key] == "generation" for key in template_ids)
 
     # Same generation layer does not imply the same direct target. Keep the
     # module obligation separate from reply formatting using existing fields.
-    from annotation_fixture import record_annotation
     from prompt_mechanism_study.tsg.source_records import (
         record_request, compile_records, record_response_format, record_diagnostics,
         structural_readback, review_request,

@@ -26,7 +26,9 @@ review, revision and deterministic readback share `record_semantics`.
 The compiler maps records directly to an `OpenTaskContract` and the canonical
 TSG. The retired token-inventory model response and generic graph-response
 recovery adapter are gone. No alias merging or silent fact/edge removal repairs
-model outputs. Internal token positions only locate quoted source evidence.
+model outputs. Source quotes are located directly as quotation/occurrence pairs;
+there is no quote-to-token-index-to-quote conversion or token-index request.
+Lexical boundaries only delimit source units and validate quoted spans.
 
 The trace saves requests, response schemas, raw responses, pre-review records and
 graph, review, and revised records. Structural success is explicitly distinct from
