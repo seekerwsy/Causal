@@ -63,7 +63,7 @@ def _inventory_contract():
     return catalog, replace(contract, source_inventory=inventory)
 
 
-def test_local_input_and_result_can_be_the_same_source_object_and_metadata_roundtrips():
+def test_local_input_and_result_can_be_the_same_source_object_and_metadata_roundtrips(tmp_path):
     catalog, contract = _inventory_contract()
     graph = compile_task_context_contract(contract, prompt=SOURCE, catalog=catalog)
     assert len(graph.nodes) == len(contract.facts) + 1
@@ -77,6 +77,40 @@ def test_local_input_and_result_can_be_the_same_source_object_and_metadata_round
     assert "source_inventory" not in task_context_contract_record(authored)
     assert task_context_contract_from_record(task_context_contract_record(authored)) == authored
     assert authored.contract_id != contract.contract_id
+
+    # Candidates and the HTML viewer use the same record-derived nodes and graph.
+    from prompt_mechanism_study.tsg.candidate_construction import candidate_request
+    from prompt_mechanism_study.tsg.tsg_visualization import _source_graph_view, build_tsg_viewer
+    from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_record, validate_prompt_tsg
+    from prompt_mechanism_study.artifact_io import write_bundle
+    import json
+    task = dict(task_id=contract.task_id, prompt=SOURCE, language='python')
+    raw_graph = prompt_tsg_record(graph)
+    view = _source_graph_view(raw_graph, record, SOURCE, contract.catalog)
+    candidate = candidate_request([task], [contract], input_catalog=catalog)['sources'][0]
+    assert {row['node_id'] for row in candidate['nodes']} == {node.node_id for node in graph.nodes}
+    assert candidate['edges'] == view['graph']['edges']
+    assert len(view['edge_evidence']) == len(contract.relations)
+    assert {view['local_node_ids'][key] for key in ('g','j')} == set(view['generation_node_ids'])
+    conditional = next(edge for edge in graph.edges if edge.edge_type == 'conditions')
+    quote = view['edge_evidence'][conditional.edge_id]
+    assert SOURCE[quote['start']:quote['end']] == 'If remote, validate buffer'
+    changed = replace(graph, edges=tuple(edge for edge in graph.edges if edge != conditional))
+    validate_prompt_tsg(changed, prompt=SOURCE, catalog=contract.catalog)
+    with pytest.raises(ValueError, match='differs from its source records'):
+        _source_graph_view(prompt_tsg_record(changed), record, SOURCE, contract.catalog)
+    bundle = tmp_path / 'extraction'
+    write_bundle(bundle, {'report.json': {'status': 'NON_CLAIM_TEST_ARTIFACT'},
+        'graphs.json': [raw_graph], 'contracts.json': [record],
+        'responses.json': [dict(task_id=contract.task_id, status='success')]})
+    tasks = tmp_path / 'tasks.json'
+    tasks.write_text(json.dumps([task]), encoding='utf-8')
+    output = tmp_path / 'viewer.html'
+    result = build_tsg_viewer(tasks, (bundle,), output)
+    assert result['compiled_graphs'] == 1 and result['provider_calls'] == 0
+    html = output.read_text(encoding='utf-8')
+    assert '__TSG_DATA__' not in html and '__DAGRE_SOURCE__' not in html
+    assert 'If remote, validate buffer' in html and conditional.edge_id in html
 
 
 @pytest.mark.parametrize("section", ["source_units", "operation_roles"])

@@ -17,7 +17,7 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     requirement_matches_policy,
     select_feature_scope,
     FeatureScope,
-    _occurrence_span,
+    source_nodes,
 )
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
@@ -78,9 +78,7 @@ def fixed_scope_request(
         {key for key,row in facts.items() if row['node_type'] in REQUIREMENT_TYPES})
     links = {(row["source"], row["edge_type"], row["target"]) for row in contract.relations}
     selectors = catalog.get("feature_scope_selectors", {})
-    graph_nodes = {(node.semantic_id, node.evidence_start, node.evidence_end): node.node_id for node in graph.nodes}
-    local_to_node = {key: graph_nodes[(row["semantic_id"], *_occurrence_span(prompt, row["evidence_text"], row["occurrence"]))]
-                     for key, row in facts.items()}
+    local_to_node = {key: node.node_id for key, node in source_nodes(contract.facts, prompt=prompt).items()}
     root = next(node for node in graph.nodes if node.semantic_id == "task.root")
     local_to_node["task.root"] = root.node_id
     node_to_local = {value: key for key, value in local_to_node.items()}

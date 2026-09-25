@@ -18,7 +18,12 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     _occurrence_span,
     load_catalog,
     prompt_tsg_from_record,
+    prompt_tsg_record,
+    source_nodes,
     validate_prompt_tsg,
+)
+from prompt_mechanism_study.tsg.prompt_contract import (
+    compile_task_context_contract, task_context_contract_from_record,
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_input_for_prompt
@@ -133,27 +138,31 @@ def _export_prompts(comparisons: list[dict], output: Path, generation_system_pro
     return {"markdown": md_path.name, "json": json_path.name, "zip": zip_path.name}
 
 
-def _graph_edge_evidence(raw_graph: dict | None, contract: dict | None, prompt: str, catalog: dict | None) -> dict:
-    """Validate each displayed graph against its own source and concept catalog."""
-    edges = {}
+def _source_graph_view(raw_graph: dict | None, contract: dict | None, prompt: str, catalog: dict | None) -> dict:
+    """Display the record-derived graph; a saved graph is a checked projection."""
     if raw_graph is None:
-        return edges
-    graph = prompt_tsg_from_record(raw_graph)
-    if catalog is None:
-        raise ValueError("graph's exact catalog is required for evidence verification")
-    validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
-    if contract and contract["schema_version"] == "3.0":
-        local_nodes = {}
-        for fact in contract["facts"]:
-            start, end = _occurrence_span(prompt, fact["evidence_text"], fact["occurrence"])
-            local_nodes[fact["local_id"]] = next(node.node_id for node in graph.nodes
-                if node.semantic_id == fact["semantic_id"] and node.evidence_start == start and node.evidence_end == end)
-        for row in contract["relations"]:
-            edge = next(edge for edge in graph.edges if edge.source_id == local_nodes[row["source"]]
-                        and edge.target_id == local_nodes[row["target"]] and edge.edge_type == row["edge_type"])
-            start, end = _occurrence_span(prompt, row["evidence_text"], row["occurrence"])
-            edges[edge.edge_id] = {"start": start, "end": end}
-    return edges
+        return dict(graph=None, edge_evidence={})
+    saved = prompt_tsg_from_record(raw_graph)
+    if contract is None:
+        if catalog is None:
+            raise ValueError("graph's exact catalog is required for evidence verification")
+        validate_prompt_tsg(saved, prompt=prompt, catalog=catalog)
+        return dict(graph=raw_graph, edge_evidence={})
+    record = task_context_contract_from_record(contract)
+    graph = compile_task_context_contract(record, prompt=prompt)
+    if graph != saved or catalog is not None and graph.catalog_sha256 != content_hash(catalog):
+        raise ValueError('saved graph differs from its source records or catalog')
+    local_ids = {key:node.node_id for key,node in source_nodes(record.facts, prompt=prompt).items()}
+    edge_ids = {(edge.source_id, edge.edge_type, edge.target_id): edge.edge_id for edge in graph.edges}
+    evidence = {}
+    for row in record.relations:
+        key = edge_ids[local_ids[row['source']], row['edge_type'], local_ids[row['target']]]
+        start, end = _occurrence_span(prompt, row['evidence_text'], row['occurrence'])
+        evidence[key] = dict(start=start, end=end)
+    layers = (record.source_inventory or {}).get('layers', {})
+    return dict(graph=prompt_tsg_record(graph), edge_evidence=evidence, local_node_ids=local_ids,
+        generation_node_ids=[node_id for key,node_id in local_ids.items()
+                             if layers.get(key) == 'generation' or key.startswith('template.')])
 
 
 def build_tsg_viewer(
@@ -192,13 +201,12 @@ def build_tsg_viewer(
                 catalog = catalogs.get(graph.catalog_sha256) or (contract or {}).get("catalog")
                 if catalog is None and catalog_path is not None:
                     catalog = load_catalog(catalog_path)
-            edges = _graph_edge_evidence(raw_graph, contract, task["prompt"], catalog)
+            view = _source_graph_view(raw_graph, contract, task["prompt"], catalog)
             cases[task_id] = {"task_id": task_id, "prompt": task["prompt"],
                               "case_number": task.get("case_number", list(tasks).index(task_id) + 1),
                               "source_prompt": task.get("source_prompt", task["prompt"]),
                               "language": task.get("language", "unknown"), "source_label": task.get("cwe", ""),
-                              "graph": raw_graph, "contract": contract, "catalog": catalog,
-                              "edge_evidence": edges, "error": response.get("error_message"),
+                              "contract": contract, "catalog": catalog, **view, "error": response.get("error_message"),
                               "annotation_response": response,
                               "inventory_request": requests.get(task_id),
                               "generation_input": task.get("generation_input"),
@@ -206,22 +214,11 @@ def build_tsg_viewer(
                                   ("BOUND_PARTIAL" if response.get("scope_assessment") else "INTERMEDIATE")
                                   if response.get("status") == "failed" else "COMPILED"),
                               "representation_status": response.get("representation_status", "automatic_extraction")}
-            if raw_graph and contract and contract.get("schema_version") == "3.0":
-                local_ids = {}
-                for fact in contract["facts"]:
-                    start, end = _occurrence_span(task["prompt"], fact["evidence_text"], fact["occurrence"])
-                    local_ids[fact["local_id"]] = next(n["node_id"] for n in raw_graph["nodes"]
-                        if n["semantic_id"] == fact["semantic_id"]
-                        and n["evidence_start"] == start and n["evidence_end"] == end)
-                cases[task_id]["local_node_ids"] = local_ids
-                layers = contract.get("source_inventory", {}).get("layers", {})
-                cases[task_id]["generation_node_ids"] = [node_id for local_id, node_id in local_ids.items()
-                    if layers.get(local_id) == "generation" or local_id.startswith("template.")]
             if task_id in comparisons:
                 comparison = comparisons[task_id]
                 for version in comparison["versions"]:
-                    version["edge_evidence"] = _graph_edge_evidence(
-                        version["graph"], version["contract"], version["prompt"], version["catalog"])
+                    version.update(_source_graph_view(
+                        version["graph"], version["contract"], version["prompt"], version["catalog"]))
                 cases[task_id]["graph_comparison"] = comparison
     results = None
     if results_root is not None:

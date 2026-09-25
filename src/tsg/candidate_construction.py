@@ -38,6 +38,7 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     validate_feature_scope,
     validate_prompt_tsg,
     _occurrence_span,
+    source_nodes,
 )
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 from prompt_mechanism_study.tsg.source_records import (
@@ -381,18 +382,14 @@ def candidate_request(tasks: Sequence[dict], contracts: Sequence[OpenTaskContrac
         seen.add(contract.task_id)
         prompt = by_task[contract.task_id]["prompt"]
         graph = compile_task_context_contract(contract, prompt=prompt, catalog=catalog)
+        modalities = (contract.source_inventory or {}).get("statement_kinds", {})
+        kinds = {node.node_id: modalities[key] for key,node in source_nodes(contract.facts, prompt=prompt).items()
+                 if key in modalities}
         nodes = [dict(node_id=node.node_id, node_type=node.node_type, concept_id=node.semantic_id,
                       definition=contract.catalog["semantic_guidance"].get(node.semantic_id, ""),
-                      evidence=prompt[node.evidence_start:node.evidence_end])
-                 for node in sorted(graph.nodes, key=lambda n: n.node_id)]
-        modalities = (contract.source_inventory or {}).get("statement_kinds", {})
-        for fact in contract.facts:
-            if fact["local_id"] not in modalities:
-                continue
-            left, right = _occurrence_span(prompt, fact["evidence_text"], fact["occurrence"])
-            match = next(n for n in graph.nodes if n.semantic_id == fact["semantic_id"]
-                         and (n.evidence_start, n.evidence_end) == (left, right))
-            next(n for n in nodes if n["node_id"] == match.node_id)["statement_kind"] = modalities[fact["local_id"]]
+                      evidence=prompt[node.evidence_start:node.evidence_end],
+                      **({'statement_kind': kinds[node.node_id]} if node.node_id in kinds else {}))
+                 for node in graph.nodes]
         # Outcomes, predicted feature states, task labels and unrelated metadata are not copied.
         sources.append(dict(task_id=graph.task_id, source_prompt=prompt,
                             prompt_sha256=graph.prompt_sha256, prompt_tsg_id=graph.tsg_id,

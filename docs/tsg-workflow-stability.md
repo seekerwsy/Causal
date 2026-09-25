@@ -35,6 +35,22 @@ the compiler cannot certify that it repaired the review findings. Independent
 source-reference evaluation must measure that risk. No live-model improvement
 is claimed by this refactor.
 
+## Shared candidate and visualization projection
+
+The saved source contract owns facts, bindings, conditions and scope. Graphs are
+its deterministic projections. `prompt_tsg.source_nodes` supplies the same local-ID
+to graph-node transformation to construction, scope assessment, candidates and the
+viewer; none of these readers rematches nodes by concept text or evidence span.
+Graph validation retains schema, identity, endpoint and composition checks in one
+place instead of repeating them while building nodes.
+
+When a viewer case contains both a contract and a saved graph, the viewer derives
+the graph from the contract and checks the saved projection agrees. A disagreement
+is reported rather than displayed as a different interpretation. Graph-only
+artifacts remain inspectable after source/catalog validation, without invented
+relation citations. Node/edge evidence, generation-layer display, graph comparison,
+SVG export, prompt comparison and saved-result inspection remain available.
+
 ## Preserved meaning
 
 - Objects and operations have explicit identities. Participant roles, execution

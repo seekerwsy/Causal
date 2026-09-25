@@ -235,19 +235,24 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
 
 
 def compile_task_context_contract(
-    contract: OpenTaskContract, *, prompt: str, catalog: Mapping[str, Any],
+    contract: OpenTaskContract, *, prompt: str, catalog: Mapping[str, Any] | None = None,
 ) -> PromptTSG:
-    """Compile the source record once; structural checks do not certify meaning."""
+    """Derive the graph from source records; optionally check the input vocabulary.
+
+    Extraction/candidate callers supply the original catalog to enforce its frozen
+    boundary. Display callers use the saved contract's catalog, never infer it from
+    a second graph. This projection does not certify source semantics.
+    """
     if not isinstance(contract, OpenTaskContract):
         raise PromptTSGError("open task contract is required")
     if (contract.schema_version != "3.0" or contract.prompt_sha256 != content_hash(prompt)
-        or contract.input_catalog_sha256 != catalog_sha256(catalog)
+        or catalog is not None and contract.input_catalog_sha256 != catalog_sha256(catalog)
         or contract.arms_or_outcomes_used is not False or contract.review_status not in _REVIEW_STATUSES):
         raise PromptTSGError("open contract envelope is invalid")
     derived = catalog_from_record(contract.catalog)
-    if catalog["concept_policy"] == "FROZEN" and derived != catalog:
+    if catalog is not None and catalog["concept_policy"] == "FROZEN" and derived != catalog:
         raise PromptTSGError("frozen vocabulary changed during extraction")
-    if catalog["concept_policy"] == "DEVELOPMENT_OPEN":
+    if catalog is not None and catalog["concept_policy"] == "DEVELOPMENT_OPEN":
         # Development may append source meanings, never alter the supplied
         # candidate family, domain rules or known concept definitions.
         extensible = {"semantics", "semantic_guidance"}

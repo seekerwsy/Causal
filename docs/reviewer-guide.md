@@ -214,3 +214,13 @@ falls from 7,581 to 7,082 lines; total source is 28,489 lines in 54 files. The
 suite retains 81 test functions and updates their repair checks to the complete
 revision interface. These are implementation checks, not live-model accuracy
 results. No provider call or protected evaluation task was used.
+
+The subsequent shared-projection cleanup is backed up at `7cbb6f899` on
+`codex/pre-tsg-shared-projection-20260925`. Construction, candidate assessment and
+visualization share node projection; the viewer checks that saved graphs agree
+with their source contracts. The isolated suite passed 102 cases in 40.33 seconds,
+and all 20 smoke files remain identical. A browser check exercised the diagram,
+condition-edge source evidence and generation-layer toggle. TSG source now totals
+7,017 lines, and all Python source totals 28,424 lines (65 fewer). The original
+extraction records remain in the audit trace; this is not a new graph schema or
+a live-model accuracy result.

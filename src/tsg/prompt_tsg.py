@@ -603,6 +603,26 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
     return graph
 
 
+def source_nodes(facts: Sequence[Mapping[str, Any]], *, prompt: str) -> dict[str, TSGNode]:
+    """Project source IDs and citations deterministically, without graph matching."""
+    nodes = {}
+    for fact in facts:
+        if not isinstance(fact, Mapping) or set(fact) != {
+            'local_id', 'node_type', 'semantic_id', 'evidence_text', 'occurrence', 'attributes'}:
+            raise PromptTSGError('Prompt TSG fact fields are invalid')
+        key = fact['local_id']
+        if not isinstance(key, str) or not key.strip() or key in nodes or key == 'task.root':
+            raise PromptTSGError('Prompt TSG fact identity is invalid')
+        if (not isinstance(fact['evidence_text'], str) or not fact['evidence_text']
+            or type(fact['occurrence']) is not int or fact['occurrence'] < 1
+            or not isinstance(fact['attributes'], Mapping)):
+            raise PromptTSGError('Prompt TSG fact value is invalid')
+        left, right = _occurrence_span(prompt, fact['evidence_text'], fact['occurrence'])
+        nodes[key] = _node(fact['node_type'], fact['semantic_id'], left, right,
+                           prompt[left:right], fact['attributes'])
+    return nodes
+
+
 def build_prompt_tsg(
     *,
     task_id: str,
@@ -626,62 +646,10 @@ def build_prompt_tsg(
     require_text(task_id, "task_id")
     require_text(prompt, "prompt")
     require_text(extractor_id, "extractor_id")
-    semantics = catalog["semantics"]
-    node_types = set(catalog["node_types"])
-    edge_types = set(catalog["edge_types"])
     allowed = {tuple(item) for item in catalog["allowed_edges"]}
-
     root = _node("task", "task.root", 0, len(prompt), prompt, {})
-    nodes = [root]
-    local_nodes: dict[str, TSGNode] = {}
-    for fact in facts:
-        if not isinstance(fact, Mapping) or set(fact) != {
-            "local_id",
-            "node_type",
-            "semantic_id",
-            "evidence_text",
-            "occurrence",
-            "attributes",
-        }:
-            raise PromptTSGError("Prompt TSG fact fields are invalid")
-        local_id = fact["local_id"]
-        node_type = fact["node_type"]
-        semantic_id = fact["semantic_id"]
-        evidence = fact["evidence_text"]
-        occurrence = fact["occurrence"]
-        attributes = fact["attributes"]
-        if (
-            not isinstance(local_id, str)
-            or not local_id.strip()
-            or local_id in local_nodes
-            or node_type not in node_types
-            or semantics.get(semantic_id) != node_type
-            or semantic_id == "task.root"
-            or not isinstance(evidence, str)
-            or not evidence
-            or type(occurrence) is not int
-            or occurrence <= 0
-            or not isinstance(attributes, Mapping)
-            or any(
-                key not in catalog["attribute_names"] or type(value) is not bool
-                for key, value in attributes.items()
-            )
-        ):
-            raise PromptTSGError("Prompt TSG fact value is invalid")
-        start, end = _occurrence_span(prompt, evidence, occurrence)
-        node = _node(
-            node_type,
-            semantic_id,
-            start,
-            end,
-            prompt[start:end],
-            attributes,
-        )
-        if any(item.node_id == node.node_id for item in nodes):
-            raise PromptTSGError("Prompt TSG fact is duplicated")
-        local_nodes[local_id] = node
-        nodes.append(node)
-
+    local_nodes = source_nodes(facts, prompt=prompt)
+    nodes = [root, *local_nodes.values()]
     edges = []
     for node in nodes[1:]:
         if node.node_type in {
@@ -698,51 +666,18 @@ def build_prompt_tsg(
         else:
             edge_type = "requires"
         edges.append(_edge(root, node, edge_type, allowed))
-    seen_relations = set()
     for relation in relations:
-        if not isinstance(relation, Mapping) or set(relation) != {
-            "edge_type",
-            "source",
-            "target",
-        }:
+        if not isinstance(relation, Mapping) or set(relation) != {"source", "target", "edge_type"}:
             raise PromptTSGError("Prompt TSG relation fields are invalid")
-        edge_type = relation["edge_type"]
-        source = local_nodes.get(relation["source"])
-        target = local_nodes.get(relation["target"])
-        identity = (relation["source"], edge_type, relation["target"])
-        if (
-            edge_type not in edge_types
-            or source is None
-            or target is None
-            or identity in seen_relations
-        ):
-            raise PromptTSGError("Prompt TSG relation is invalid")
-        seen_relations.add(identity)
-        edges.append(_edge(source, target, edge_type, allowed))
-
+        if relation['source'] not in local_nodes or relation['target'] not in local_nodes:
+            raise PromptTSGError("Prompt TSG relation endpoint is missing")
+        edges.append(_edge(local_nodes[relation['source']], local_nodes[relation['target']],
+                           relation['edge_type'], allowed))
     unresolved = _unique_strings(unresolved_semantics, "unresolved semantics")
-    if any(item not in semantics or item == "task.root" for item in unresolved):
-        raise PromptTSGError("Prompt TSG unresolved semantic is outside the catalog")
-    unresolved_relation_values = []
-    for relation in unresolved_relations:
-        if (
-            not isinstance(relation, (list, tuple))
-            or len(relation) != 3
-            or any(not isinstance(item, str) or not item.strip() for item in relation)
-        ):
-            raise PromptTSGError("Prompt TSG unresolved relation is invalid")
-        source_semantic, edge_type, target_semantic = relation
-        if (
-            source_semantic not in semantics
-            or edge_type not in edge_types
-            or target_semantic not in semantics
-            or (semantics[source_semantic], edge_type, semantics[target_semantic])
-            not in allowed
-        ):
-            raise PromptTSGError("Prompt TSG unresolved relation is outside the catalog")
-        unresolved_relation_values.append(tuple(relation))
-    if len(unresolved_relation_values) != len(set(unresolved_relation_values)):
-        raise PromptTSGError("Prompt TSG unresolved relations are duplicated")
+    if any(not isinstance(row, (list, tuple)) or len(row) != 3
+           or any(not isinstance(value, str) or not value for value in row) for row in unresolved_relations):
+        raise PromptTSGError('Prompt TSG unresolved relation fields are invalid')
+    unresolved_relation_values = [tuple(row) for row in unresolved_relations]
     if schema_version != "3.0":
         raise PromptTSGError("active Prompt TSG requires schema 3.0")
     ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
@@ -989,6 +924,9 @@ def validate_prompt_tsg(
     for node in graph.nodes:
         if (
             semantics.get(node.semantic_id) != node.node_type
+            or node.node_type not in catalog['node_types']
+            or any(key not in catalog['attribute_names'] or type(value) is not bool
+                   for key, value in node.attributes)
             or not 0 <= node.evidence_start <= node.evidence_end <= len(prompt)
             or node.evidence_sha256
             != content_hash(prompt[node.evidence_start : node.evidence_end])
