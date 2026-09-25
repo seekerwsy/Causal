@@ -121,11 +121,15 @@ refactor changes ownership and storage, not FCI/RD selection, Atomic four-arm
 assignment, security endpoints, task-unit ITT or independent result arithmetic.
 See [the test guide](../tests/README.md) for current validation.
 
+The subsequent source trim removes the four-field candidate-response replay
+branch, unused external response-schema loading and the redundant extraction
+wrapper. Atomic binding and source-support counting now operate on one factor
+directly, keeping the saved artifact shapes and independent task accounting.
+The checkpoint is `codex/pre-source-trim-20260925` at `4717e176a`.
+
 Validation on 2026-09-25 used the isolated Python 3.12 reviewer installation and
-fresh output paths: 108 tests passed in 30.52 seconds; all 20 smoke files matched
-the preceding reference byte for byte. The source dependency scan found zero
-direct mutual module imports, down from two pairs, and no imports from
-`experiment/` into `verification/`. Python source remains 54 files and 28,318
-physical lines (14 fewer); this is a dependency/data-boundary refactor, not a
-large reduction in supported capabilities. No model call, protected task, formal
-experiment or paper modification was involved.
+fresh output paths: 108 tests passed in 32.31 seconds; all 20 smoke files matched
+the preceding reference byte for byte. Python source remains 54 files and 28,145
+physical lines (173 fewer in this trim). Visualization and independent arithmetic
+remain supported. No model call, protected task, formal experiment or paper
+modification was involved.

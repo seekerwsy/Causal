@@ -310,7 +310,7 @@ def _review(request, response, draft):
                            for factor in draft["factors"]])
 
 
-def _compact_response(request, response):
+def _bare_decisions(request, response):
     """Translate authored decisions only; expectations retain their original full scopes."""
     wire = candidate_model_request(request)
     refs = {}
@@ -334,11 +334,16 @@ def _compact_response(request, response):
     return dict(decisions=decisions)
 
 
-def _explicit_background_response(request, response, evidence_text, *, operation_definition=None,
+def _compact_response(request, response):
+    return _explicit_background_response(request, response)
+
+
+def _explicit_background_response(request, response, evidence_text=None, *, operation_definition=None,
                                   subject_definitions=None):
     """Authored current-wire decisions; no source semantics are certified by this helper."""
-    compact = _compact_response(request, response)
+    compact = _bare_decisions(request, response)
     for source in candidate_model_request(request)["sources"]:
+        quote = evidence_text or source["source_prompt"]
         override = next((n["node_ref"] for n in source["nodes"] if n["definition"] == operation_definition), None)
         for node in source["nodes"]:
             if "complete_bindings" not in node:
@@ -361,14 +366,20 @@ def _explicit_background_response(request, response, evidence_text, *, operation
                 retained = {operation, *subjects, *guards}
                 decision["applicability_bindings"][binding["binding_ref"]] = dict(
                     operation_ref=operation, subject_refs=subjects, execution_condition_refs=guards,
-                    independent_source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
+                    independent_source_evidence=[dict(evidence_text=quote, occurrence=1)],
                     rationale="Authored reference: the cited non-target task requires this actual background without the policy.",
                     component_decisions=[dict(node_ref=key, decision="retain" if key in retained else "omit_not_needed",
-                        source_evidence=[dict(evidence_text=evidence_text, occurrence=1)],
+                        source_evidence=[dict(evidence_text=quote, occurrence=1)],
                         rationale="Authored retained coordinate." if key in retained else
                                   "The retained operation and subjects distinguish the comparison without this input.")
                         for key in sorted({operation, *inputs, *guards})])
     return compact
+
+
+def _source_bindings(proposal):
+    return sorted((f["definition"], o["task_id"], tuple(o["requirement_node_ids"]),
+                   json.dumps(o["scope"], sort_keys=True))
+                  for f in proposal["factors"] for o in f["source_occurrences"])
 
 
 def _prepared_proposal():
@@ -395,18 +406,19 @@ def test_atomic_source_nodes_stay_separate_and_equivalent_occurrences_pool_befor
     assert draft["formal_execution_authorized"] is False
     compact = _compact_response(request, response)
     selected = compile_candidate_proposal(request, compact, design)
-    assert selected["factors"] == draft["factors"]
+    assert _source_bindings(selected) == _source_bindings(draft)
     assert selected["response_sha256"] == content_hash(compact)
-    assert len(json.dumps(compact)) < len(json.dumps(response))
     assert all(source["task_id"] not in json.dumps(candidate_model_request(request)) for source in request["sources"])
     # A model cannot revise targets/conditions, invent keys, skip units or bundle nodes.
-    for change in ("invented", "scope", "omission"):
+    for change in ("invented", "scope", "omission", "old_wire"):
         altered = json.loads(json.dumps(compact))
         first = next(iter(altered["decisions"]))
         if change == "invented":
             altered["decisions"]["T999.N999"] = altered["decisions"].pop(first)
         elif change == "scope":
             altered["decisions"][first]["scope"] = {}
+        elif change == "old_wire":
+            altered["decisions"][first].pop("applicability_bindings")
         else:
             altered["decisions"].pop(first)
         with pytest.raises(ValueError, match="requirement decision.*fields"):
@@ -474,7 +486,7 @@ def test_compound_source_node_cannot_be_split_into_different_candidate_meanings(
     legacy = compile_candidate_proposal(request, response, _design())
     compact = _compact_response(request, response)
     assert len(compact["decisions"]) == 1
-    assert compile_candidate_proposal(request, compact, _design())["factors"] == legacy["factors"]
+    assert _source_bindings(compile_candidate_proposal(request, compact, _design())) == _source_bindings(legacy)
 
 
 def test_reviewed_factors_emit_both_atomic_edits_without_support_filtering():
@@ -744,13 +756,15 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 for node in request["sources"][0]["nodes"] if node["node_type"] in {"safety_requirement", "task_requirement"}])
         draft = compile_candidate_proposal(request, response, _design())
         compact = _compact_response(request, response)
-        assert compile_candidate_proposal(request, compact, _design())["factors"] == draft["factors"]
+        selected_draft = compile_candidate_proposal(request, compact, _design())
+        assert _source_bindings(selected_draft) == _source_bindings(draft)
+        draft = selected_draft
         if choice:
             child = next(n for n in candidate_model_request(request)["sources"][0]["nodes"]
                          if n["node_type"] == "safety_requirement" and n["complete_bindings"] == [])
             invalid = json.loads(json.dumps(compact))
             invalid["decisions"][child["node_ref"]] = dict(status="include", label="Member",
-                definition=child["definition"], rationale="A member is not an independently asserted requirement.")
+                definition=child["definition"], rationale="A member is not an independently asserted requirement.", applicability_bindings={})
             with pytest.raises(ValueError, match="no complete source binding"):
                 compile_candidate_proposal(request, invalid, _design())
         if kind in {"task", "each", "objects"}:

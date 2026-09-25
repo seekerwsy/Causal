@@ -491,53 +491,48 @@ def _expand_unit_decisions(request, response):
     for source, short in zip(request["sources"], short_sources, strict=True):
         source_nodes[source["task_id"]] = {item["node_ref"]: node["node_id"]
             for node, item in zip(sorted(source["nodes"], key=lambda n: n["node_id"]), short["nodes"], strict=True)}
-    # Four-field decisions are retained only to replay frozen pre-background responses.
-    # The active request/schema always requires an explicit choice for every binding.
-    active = any(isinstance(row, dict) and "applicability_bindings" in row for row in response["decisions"].values())
     factors, dispositions = [], []
     for ref, row in response["decisions"].items():
-        _fields(row, {"status", "label", "definition", "rationale"}
-                | ({"applicability_bindings"} if active else set()), "requirement decision")
+        _fields(row, {"status", "label", "definition", "rationale", "applicability_bindings"}, "requirement decision")
         if row["status"] not in {"include", "not_actionable", "unresolved"}:
             raise ValueError("requirement decision status is invalid")
         require_text(row["rationale"], "requirement decision rationale")
         occurrences = bindings[ref]
-        if active:
-            expected = {f"{ref}.B{i}": occurrence for i, occurrence in enumerate(occurrences, 1)}
-            _fields(row["applicability_bindings"], set(expected), "applicability binding decisions")
-            occurrences = []
-            for binding_ref, occurrence in expected.items():
-                choice = row["applicability_bindings"][binding_ref]
-                if row["status"] != "include":
-                    if choice is not None:
-                        raise ValueError("excluded requirement cannot select an applicability binding")
-                    continue
-                _fields(choice, {"operation_ref", "subject_refs", "execution_condition_refs",
-                                 "independent_source_evidence", "rationale", "component_decisions"},
-                        "included applicability binding")
-                refs = source_nodes[occurrence["task_id"]]
-                def resolve(value):
-                    if not isinstance(value, str) or value not in refs:
-                        raise ValueError("applicability binding references an unknown source node")
-                    return refs[value]
-                for name in ("subject_refs", "execution_condition_refs"):
-                    if (not isinstance(choice[name], list) or any(not isinstance(value, str) for value in choice[name])
-                            or len(set(choice[name])) != len(choice[name])):
-                        raise ValueError("applicability binding refs must be unique source-node lists")
-                if not isinstance(choice["component_decisions"], list):
-                    raise ValueError("applicability component decisions must be an array")
-                components = []
-                for item in choice["component_decisions"]:
-                    _fields(item, {"node_ref", "decision", "source_evidence", "rationale"},
-                            "applicability component decision")
-                    components.append(dict(node_id=resolve(item["node_ref"]),
-                        **{key: item[key] for key in ("decision", "source_evidence", "rationale")}))
-                occurrences.append(dict(occurrence,
-                    applicability_scope=dict(operation_node_id=resolve(choice["operation_ref"]),
-                        subject_node_ids=sorted(resolve(value) for value in choice["subject_refs"]),
-                        condition_node_ids=sorted(resolve(value) for value in choice["execution_condition_refs"])),
-                    applicability_support=dict(source_evidence=choice["independent_source_evidence"],
-                        rationale=choice["rationale"], component_decisions=components)))
+        expected = {f"{ref}.B{i}": occurrence for i, occurrence in enumerate(occurrences, 1)}
+        _fields(row["applicability_bindings"], set(expected), "applicability binding decisions")
+        occurrences = []
+        for binding_ref, occurrence in expected.items():
+            choice = row["applicability_bindings"][binding_ref]
+            if row["status"] != "include":
+                if choice is not None:
+                    raise ValueError("excluded requirement cannot select an applicability binding")
+                continue
+            _fields(choice, {"operation_ref", "subject_refs", "execution_condition_refs",
+                             "independent_source_evidence", "rationale", "component_decisions"},
+                    "included applicability binding")
+            refs = source_nodes[occurrence["task_id"]]
+            def resolve(value):
+                if not isinstance(value, str) or value not in refs:
+                    raise ValueError("applicability binding references an unknown source node")
+                return refs[value]
+            for name in ("subject_refs", "execution_condition_refs"):
+                if (not isinstance(choice[name], list) or any(not isinstance(value, str) for value in choice[name])
+                        or len(set(choice[name])) != len(choice[name])):
+                    raise ValueError("applicability binding refs must be unique source-node lists")
+            if not isinstance(choice["component_decisions"], list):
+                raise ValueError("applicability component decisions must be an array")
+            components = []
+            for item in choice["component_decisions"]:
+                _fields(item, {"node_ref", "decision", "source_evidence", "rationale"},
+                        "applicability component decision")
+                components.append(dict(node_id=resolve(item["node_ref"]),
+                    **{key: item[key] for key in ("decision", "source_evidence", "rationale")}))
+            occurrences.append(dict(occurrence,
+                applicability_scope=dict(operation_node_id=resolve(choice["operation_ref"]),
+                    subject_node_ids=sorted(resolve(value) for value in choice["subject_refs"]),
+                    condition_node_ids=sorted(resolve(value) for value in choice["execution_condition_refs"])),
+                applicability_support=dict(source_evidence=choice["independent_source_evidence"],
+                    rationale=choice["rationale"], component_decisions=components)))
         if row["status"] == "include":
             if not bindings[ref]:
                 raise ValueError("included requirement has no complete source binding")
@@ -1080,15 +1075,7 @@ def build_candidate_catalog(
                 read_json_exact(request_bundle / "prompt.json"),
             )
         response = json_object(raw)
-        if evaluator_path is not None:
-            # New model calls must use the current interface. Legacy four-field
-            # parsing is available only when replaying a retained response.
-            _fields(response, {"decisions"}, "requirement decision response")
-            if not isinstance(response["decisions"], dict):
-                raise ValueError("complete requirement decisions must be an object")
-            for row in response["decisions"].values():
-                _fields(row, {"status", "label", "definition", "rationale", "applicability_bindings"},
-                        "current requirement decision")
+        _fields(response, {"decisions"}, "requirement decision response")
         review = read_json_exact(review_path) if review_path is not None else None
         proposal = compile_candidate_proposal(request, response, design, review)
         catalog = _candidate_catalog(contracts, proposal, design, review)
@@ -1203,7 +1190,7 @@ def _candidate_catalog(contracts, proposal, design, review):
 
 def _proposal_evaluator(path):
     from prompt_mechanism_study.tsg.prompt_contract_extract import _evaluator
-    evaluator = _evaluator(read_json_exact(path), path)
+    evaluator = _evaluator(read_json_exact(path))
     if any(type(evaluator.get(key)) is not int or evaluator[key] <= 0
            for key in ("maximum_input_bytes", "max_response_bytes")) or not any(
                evaluator.get(key) for key in ("maximum_output_tokens", "maximum_completion_tokens")):

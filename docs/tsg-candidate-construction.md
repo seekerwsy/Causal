@@ -399,3 +399,10 @@ are unqualified development edits, not accepted ADD/REMOVE policies. The candida
 revision implements explicitly reviewed support and independent background coordinates
 on authored controls. The two old natural edits have not been requalified under it;
 matching IDs or dropping preservation checks would not establish either semantic judgment.
+
+Current candidate requests and retained model responses use the same complete
+`decisions` format, including explicit `applicability_bindings`. Four-field
+responses without those bindings are no longer accepted by the active path.
+Old frozen responses require their captured Git implementation. The normalization
+compiler still accepts explicitly authored bound records in offline diagnostics;
+those records are not a second model response interface.

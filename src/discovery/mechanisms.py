@@ -89,39 +89,35 @@ def bind_task_hypothesis(
         raise MechanismRegistryError("instance hypotheses require the active open graph schema")
     if (
         len(factor_feature_ids) != 1
-        or len(set(factor_feature_ids)) != len(factor_feature_ids)
-        or len(factor_operations) != len(factor_feature_ids)
-        or any(op not in {"add", "remove"} for op in factor_operations)
+        or len(factor_operations) != 1
+        or factor_operations[0] not in {"add", "remove"}
     ):
         raise MechanismRegistryError(
             "a local hypothesis needs one explicit factor and edit operations"
         )
+    feature, edit = factor_feature_ids[0], factor_operations[0]
     context_semantics = set(query["required_semantics"]) | set(query["forbidden_semantics"])
     context_semantics |= {
         semantic
         for source, _, target in query["required_relations"]
         for semantic in (source, target)
     }
-    if context_semantics & set(factor_feature_ids):
+    if feature in context_semantics:
         raise MechanismRegistryError("hypothesis context must be invariant to its target features")
     if factor_scopes:
-        if len(factor_scopes) != len(factor_feature_ids) or factor_subject_node_ids:
+        if len(factor_scopes) != 1 or factor_subject_node_ids:
             raise MechanismRegistryError(
                 "each factor needs one exact scope, without legacy subject coordinates"
             )
-        if target_operation_node_id is not None and any(
-            scope.operation_node_id != target_operation_node_id for scope in factor_scopes
-        ):
-            raise MechanismRegistryError(
-                "factor scopes conflict with the shared operation coordinate"
-            )
+        scope = factor_scopes[0]
+        if target_operation_node_id is not None and scope.operation_node_id != target_operation_node_id:
+            raise MechanismRegistryError("factor scopes conflict with the shared operation coordinate")
         try:
-            for scope in factor_scopes:
-                validate_feature_scope(graph, scope)
+            validate_feature_scope(graph, scope)
         except PromptTSGError as error:
             raise MechanismRegistryError(str(error)) from error
-        operations = {scope.operation_node_id for scope in factor_scopes}
-        target_operation_node_id = next(iter(operations)) if len(operations) == 1 else None
+        target_operation_node_id = scope.operation_node_id
+        operations = {target_operation_node_id}
     else:
         target = next(
             (node for node in graph.nodes if node.node_id == target_operation_node_id), None
@@ -144,26 +140,16 @@ def bind_task_hypothesis(
     nodes = {node for binding, _ in matches for node in binding}
     edges = {edge for _, binding in matches for edge in binding}
     by_id = {node.node_id: node for node in graph.nodes}
-    if factor_subject_node_ids and len(factor_subject_node_ids) != len(factor_feature_ids):
+    if len(factor_subject_node_ids) > 1:
         raise MechanismRegistryError("each factor needs exactly one subject coordinate")
-    for subject, edit in zip(factor_subject_node_ids, factor_operations):
-        if subject is None:
-            continue
-        subject_edges = [
-            edge
-            for edge in graph.edges
-            if edge.source_id == subject
-            and edge.target_id == target_operation_node_id
-            and edge.edge_type == "used_by"
-        ]
+    subject = factor_subject_node_ids[0] if factor_subject_node_ids else None
+    if subject is not None:
+        subject_edges = [e for e in graph.edges if e.source_id == subject
+                         and e.target_id == target_operation_node_id and e.edge_type == "used_by"]
         if subject not in by_id or by_id[subject].node_type != "data_object" or not subject_edges:
-            raise MechanismRegistryError(
-                "factor subject must be a source-bound input of this operation"
-            )
+            raise MechanismRegistryError("factor subject must be a source-bound input of this operation")
         if edit != "add":
-            raise MechanismRegistryError(
-                "subject-specific REMOVE needs a separately qualified source-scope rule"
-            )
+            raise MechanismRegistryError("subject-specific REMOVE needs a separately qualified source-scope rule")
         nodes.add(subject)
         edges.update(edge.edge_id for edge in subject_edges)
     requirements = {
@@ -172,26 +158,13 @@ def bind_task_hypothesis(
         if edge.target_id in operations and edge.edge_type == "constrains"
     }
     if factor_scopes:
-        assessments = [
-            scoped_feature_assessment(graph, feature, scope)
-            for feature, scope in zip(factor_feature_ids, factor_scopes, strict=True)
-        ]
-        target_requirements = {
-            key for item in assessments if item for key in item.requirement_node_ids
-        }
-        for scope in factor_scopes:
-            nodes.update(
-                (scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids)
-            )
-        states = tuple(item.state if item else "unresolved" for item in assessments)
+        assessment = scoped_feature_assessment(graph, feature, scope)
+        target_requirements = set(assessment.requirement_node_ids) if assessment else set()
+        nodes.update((scope.operation_node_id, *scope.subject_node_ids, *scope.condition_node_ids))
+        states = (assessment.state if assessment else "unresolved",)
     else:
-        target_requirements = {
-            node for node in requirements if by_id[node].semantic_id in factor_feature_ids
-        }
-        states = tuple(
-            feature_state(graph, feature, target_operation_node_id).value
-            for feature in factor_feature_ids
-        )
+        target_requirements = {node for node in requirements if by_id[node].semantic_id == feature}
+        states = (feature_state(graph, feature, target_operation_node_id).value,)
     target_requirements = requirement_owned_nodes(graph, target_requirements)
     nodes |= target_requirements
     nodes.update(endpoint for requirement in target_requirements

@@ -733,45 +733,6 @@ def audit_discovery_positivity(
     scope_bindings_path: Path,
 ) -> dict[str, object]:
     """Audit source support for frozen open-graph factor scopes."""
-    if load_catalog(catalog_path)["schema_version"] != "2.0":
-        raise ValueError("source support requires an open-graph catalog")
-    return _audit_scoped_discovery_positivity(
-        tasks_path, graph_bundles, catalog_path, scope_bindings_path, output, graph_artifact
-    )
-
-
-def _source_policy(record):
-    """Decode one Atomic policy; research-branch Pair records are not accepted."""
-    from prompt_mechanism_study.tsg.representation import (
-        AnalysisScope,
-        AtomicPolicyKey,
-        PolicyFactor,
-        Operation,
-    )
-
-    if set(record) != {"analysis_scope", "factor", "outcome_id"}:
-        raise ValueError("main source support requires an Atomic policy record")
-    scope = dict(record["analysis_scope"])
-    for key in ("language_scope", "api_scope", "task_archetype_scope"):
-        scope[key] = tuple(scope[key])
-    factor = record["factor"]
-    return AtomicPolicyKey(
-        AnalysisScope(**scope),
-        PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"])),
-        record["outcome_id"],
-    )
-
-
-def _audit_scoped_discovery_positivity(
-    tasks_path, graph_bundles, catalog_path, scope_path, output, graph_artifact
-):
-    """Produce scope-bound, outcome-free source rows and selector inputs in one path.
-
-    Every task/policy has a disposition. One globally bound scope per feature/task
-    prevents selecting a different input after seeing its state or counting more
-    operations as additional independent tasks. Source-semantic/role qualification
-    and intervention readiness remain separate from these mechanical counts.
-    """
     from prompt_mechanism_study.artifact_io import file_sha256, read_json_exact
     from prompt_mechanism_study.tsg.representation import Operation, freeze_source_eligibility
     from prompt_mechanism_study.discovery.prioritization import (
@@ -790,7 +751,7 @@ def _audit_scoped_discovery_positivity(
     tasks, catalog, config = (
         _task_records(tasks_path),
         load_catalog(catalog_path),
-        read_json_exact(scope_path),
+        read_json_exact(scope_bindings_path),
     )
     task_ids = [task["task_id"] for task in tasks]
     if (
@@ -825,10 +786,7 @@ def _audit_scoped_discovery_positivity(
     if len({p.policy_key for p in policies}) != len(policies):
         raise ValueError("scoped source policies must be unique")
 
-    def factors(policy):
-        return (policy.factor,)
-
-    features = {f.actionable_feature_id for policy in policies for f in factors(policy)}
+    features = {policy.factor.actionable_feature_id for policy in policies}
     definitions = config["factor_definitions"]
     if set(definitions) != features:
         raise ValueError("every source factor needs one global scope definition")
@@ -859,7 +817,7 @@ def _audit_scoped_discovery_positivity(
         )
 
         validate_generated_scope_config(
-            config, tasks, graphs, catalog, relative_to=scope_path.parent
+            config, tasks, graphs, catalog, relative_to=scope_bindings_path.parent
         )
     rule = config["support_rule"]
     if (
@@ -897,7 +855,7 @@ def _audit_scoped_discovery_positivity(
         )
 
         bound = config["representation_qualification"]
-        qualification_path = scope_path.parent / bound["bundle"]
+        qualification_path = scope_bindings_path.parent / bound["bundle"]
         qualification_digest = bundle_digest(qualification_path)
         if qualification_digest != bound["bundle_sha256"]:
             raise ValueError("source qualification bundle identity differs")
@@ -933,7 +891,7 @@ def _audit_scoped_discovery_positivity(
     source_rows, summaries, coverage, atomic_groups = ([], [], [], {})
     for policy in policies:
         policy_rows, resolved = ([], [])
-        policy_factors = factors(policy)
+        feature = policy.factor.actionable_feature_id
         expected_cells = ("0", "1")
         population = policy.analysis_scope
         for task in tasks:
@@ -943,67 +901,26 @@ def _audit_scoped_discovery_positivity(
                 and task["api_family"] in population.api_scope
                 and (task["task_archetype"] in population.task_archetype_scope)
             )
-            checks = []
+            check = None
             if in_population:
-                for factor in policy_factors:
-                    feature = factor.actionable_feature_id
-                    raw_scope = bindings[key]["factor_scopes"][feature]
-                    checks.append(
-                        freeze_source_eligibility(
-                            policy,
-                            task_id=key,
-                            task_unit_id=task["task_unit_id"],
-                            prompt=task["prompt"],
-                            graph=graphs.get(key),
-                            catalog=catalog,
-                            factor_scope=(
-                                feature_scope_from_record(raw_scope)
-                                if raw_scope is not None
-                                else None
-                            ),
-                            factor_feature_id=feature,
-                            eligibility_policy_sha256=content_hash(definitions[feature]),
-                        )
-                    )
-            known = bool(checks) and all(
-                (
-                    check.context_state is QueryState.PRESENT
-                    and check.factor_scope is not None
-                    and (check.feature_state in {QueryState.PRESENT, QueryState.ABSENT})
-                    for check in checks
+                raw_scope = bindings[key]["factor_scopes"][feature]
+                check = freeze_source_eligibility(
+                    policy, task_id=key, task_unit_id=task["task_unit_id"],
+                    prompt=task["prompt"], graph=graphs.get(key), catalog=catalog,
+                    factor_scope=feature_scope_from_record(raw_scope) if raw_scope is not None else None,
+                    factor_feature_id=feature,
+                    eligibility_policy_sha256=content_hash(definitions[feature]),
                 )
-            )
-            unknown = bool(checks) and any(
-                (
-                    check.prompt_tsg_id is None
-                    or check.factor_scope is None
-                    or check.context_state is QueryState.UNRESOLVED
-                    or (
-                        check.context_state is QueryState.PRESENT
-                        and check.feature_state is QueryState.UNRESOLVED
-                    )
-                    for check in checks
-                )
-            )
-            cell = (
-                "".join(
-                    (
-                        str(
-                            int(
-                                check.feature_state
-                                is (
-                                    QueryState.PRESENT
-                                    if check.operation is Operation.ADD
-                                    else QueryState.ABSENT
-                                )
-                            )
-                        )
-                        for check in checks
-                    )
-                )
-                if known
-                else None
-            )
+            checks = [] if check is None else [check]  # Saved artifact keeps its existing shape.
+            known = check is not None and (
+                check.context_state is QueryState.PRESENT and check.factor_scope is not None
+                and check.feature_state in {QueryState.PRESENT, QueryState.ABSENT})
+            unknown = check is not None and (
+                check.prompt_tsg_id is None or check.factor_scope is None
+                or check.context_state is QueryState.UNRESOLVED
+                or check.context_state is QueryState.PRESENT and check.feature_state is QueryState.UNRESOLVED)
+            target_state = QueryState.PRESENT if policy.factor.operation is Operation.ADD else QueryState.ABSENT
+            cell = str(int(check.feature_state is target_state)) if known else None
             row = dict(
                 policy_key=policy.policy_key,
                 task_id=key,
@@ -1022,35 +939,18 @@ def _audit_scoped_discovery_positivity(
                 natural_state_resolved=known,
                 source_state_unknown=unknown,
                 target_state_cell=cell,
-                confirmation_baseline_source_eligible=bool(checks)
-                and all((check.eligible for check in checks)),
+                confirmation_baseline_source_eligible=check is not None and check.eligible,
                 intervention_readiness="NOT_ESTABLISHED_BY_SOURCE_STATE",
                 covariates=tuple(map(tuple, task["covariates"])),
             )
             row["feature_reliability"] = {}
-            for check in checks:
-                if check.factor_scope is None or qualification is None:
-                    continue
-                operation = next(
-                    (
-                        node
-                        for node in graphs[key].nodes
-                        if node.node_id == check.factor_scope.operation_node_id
-                    )
-                )
-                profiles = [
-                    p
-                    for p in qualification["profiles"]
-                    if p["language"] == task["language"]
-                    and p["operation_semantic_id"] == operation.semantic_id
-                    and (p["feature_id"] == check.actionable_feature_id)
-                ]
+            if check is not None and check.factor_scope is not None and qualification is not None:
+                operation = next(n for n in graphs[key].nodes if n.node_id == check.factor_scope.operation_node_id)
+                profiles = [p for p in qualification["profiles"] if p["language"] == task["language"]
+                    and p["operation_semantic_id"] == operation.semantic_id and p["feature_id"] == feature]
                 if {p["expected_state"] for p in profiles} >= {"present", "absent"} and all(
-                    (p["passed"] and p["reliability_lower_bound"] is not None for p in profiles)
-                ):
-                    row["feature_reliability"][check.actionable_feature_id] = min(
-                        (p["reliability_lower_bound"] for p in profiles)
-                    )
+                    p["passed"] and p["reliability_lower_bound"] is not None for p in profiles):
+                    row["feature_reliability"][feature] = min(p["reliability_lower_bound"] for p in profiles)
             if tuple((name for name, _ in row["covariates"])) != covariate_names:
                 raise ValueError("source covariates differ from their frozen schema")
             policy_rows.append(row)
@@ -1067,19 +967,9 @@ def _audit_scoped_discovery_positivity(
             for field in ("source_lineage_id", "language", "api_family", "task_archetype")
         }
         missing_qualification = qualification is None or any(
-            (
-                factor.actionable_feature_id not in row["feature_reliability"]
-                for factor in policy_factors
-                for row in resolved
-            )
-        )
-        low_reliability = any(
-            (
-                value < rule["minimum_feature_reliability"]
-                for row in resolved
-                for value in row["feature_reliability"].values()
-            )
-        )
+            feature not in row["feature_reliability"] for row in resolved)
+        low_reliability = any(value < rule["minimum_feature_reliability"]
+            for row in resolved for value in row["feature_reliability"].values())
         unknown_count = sum((row["source_state_unknown"] for row in population_rows))
         reasons = []
         if not population_rows:
@@ -1112,18 +1002,9 @@ def _audit_scoped_discovery_positivity(
                 population_task_units=len(population_rows),
                 resolved_task_units=len(resolved),
                 unknown_task_units=unknown_count,
-                context_excluded_task_units=sum(
-                    (
-                        bool(row["source_assessments"])
-                        and any(
-                            (
-                                c.context_state in {QueryState.ABSENT, QueryState.NOT_APPLICABLE}
-                                for c in row["source_assessments"]
-                            )
-                        )
-                        for row in population_rows
-                    )
-                ),
+                context_excluded_task_units=sum(bool(row["source_assessments"])
+                    and row["source_assessments"][0].context_state in {QueryState.ABSENT, QueryState.NOT_APPLICABLE}
+                    for row in population_rows),
                 state_or_cell_task_units=tuple(
                     ((cell, len(cells[cell])) for cell in expected_cells)
                 ),
@@ -1189,7 +1070,7 @@ def _audit_scoped_discovery_positivity(
         task_file_sha256=file_sha256(tasks_path),
         catalog_sha256=catalog_sha256(catalog),
         graph_bundle_sha256=sorted(graph_digests),
-        scope_bindings_sha256=file_sha256(scope_path),
+        scope_bindings_sha256=file_sha256(scope_bindings_path),
         representation_qualification_sha256=qualification_digest,
         implementation_sha256=file_sha256(Path(__file__)),
         arms_or_outcomes_used=False,
@@ -1215,6 +1096,30 @@ def _audit_scoped_discovery_positivity(
         },
     )
     return report
+
+
+
+def _source_policy(record):
+    """Decode one Atomic policy; research-branch Pair records are not accepted."""
+    from prompt_mechanism_study.tsg.representation import (
+        AnalysisScope,
+        AtomicPolicyKey,
+        PolicyFactor,
+        Operation,
+    )
+
+    if set(record) != {"analysis_scope", "factor", "outcome_id"}:
+        raise ValueError("main source support requires an Atomic policy record")
+    scope = dict(record["analysis_scope"])
+    for key in ("language_scope", "api_scope", "task_archetype_scope"):
+        scope[key] = tuple(scope[key])
+    factor = record["factor"]
+    return AtomicPolicyKey(
+        AnalysisScope(**scope),
+        PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"])),
+        record["outcome_id"],
+    )
+
 
 
 def _task_records(path: Path) -> list[dict[str, object]]:

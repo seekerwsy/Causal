@@ -60,7 +60,8 @@ relation citations. Node/edge evidence, generation-layer display, graph comparis
 SVG export, prompt comparison and saved-result inspection remain available.
 The viewer overlays the separately saved states after checking the source graph.
 
-`extract_task_contract` only constructs source semantics. The batch extraction
+`extract_task_contract` directly calls `source_records.attempt_graph` to construct
+source semantics. Extraction and qualification replay share that entry point. The batch extraction
 command subsequently calls `assess_candidate_scopes`; this function can also
 consume an existing source attempt with its matching frozen catalog. A failed
 assessment is recorded separately and does not mark successful source extraction
@@ -120,3 +121,8 @@ The implementation before this simplification is preserved on
 and results retain their original interpretation in [experiments](experiments/).
 Old frozen traces must use their captured implementation and request schemas;
 the current package does not maintain a second compatibility extraction path.
+
+Response schemas are constructed from the current request. Evaluator settings
+select the model and generation parameters; an external response-schema file is
+not an active configuration option. Historical evaluator files remain replayable
+only with the implementation that consumed them.

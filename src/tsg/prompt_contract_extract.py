@@ -54,7 +54,7 @@ def extract_task_contract(
     binding and scope requests, raw responses and partial failures.
     """
 
-    attempt = _attempt_source_graph(
+    attempt = attempt_graph(
         task,
         catalog=catalog,
         evaluator=evaluator,
@@ -87,26 +87,10 @@ def _attempt_task_contract(
     provider: Provider,
 ) -> ExtractionAttempt:
     """One path: build source semantics, then assess candidate-specific scopes."""
-    graph_attempt = _attempt_source_graph(task, catalog=catalog, evaluator=evaluator,
+    graph_attempt = attempt_graph(task, catalog=catalog, evaluator=evaluator,
         annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
     return assess_candidate_scopes(graph_attempt, task=task, catalog=catalog,
         evaluator=evaluator, annotator_prompt=annotator_prompt, provider=provider)
-
-
-def _attempt_source_graph(
-    task: Mapping[str, Any],
-    *,
-    catalog: Mapping[str, Any],
-    evaluator: Mapping[str, Any],
-    annotator_prompt: str,
-    review_status: str,
-    provider: Provider,
-) -> ExtractionAttempt:
-    """Close raw responses and call counts even when deterministic parsing fails."""
-    if catalog.get("schema_version") != "2.0":
-        raise PromptContractExtractionError("active extraction requires an open-graph catalog")
-    return attempt_graph(task, catalog=catalog, evaluator=evaluator,
-        annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
 
 
 def assess_candidate_scopes(
@@ -209,7 +193,7 @@ def extract_contract_task_file(
     selected = [prepare_task_input(task) for task in selected]
     if catalog.get("concept_policy") == "DEVELOPMENT_OPEN" and review_status != "development_exposed":
         raise PromptContractExtractionError("open concept development requires an explicit development exposure")
-    evaluator = _evaluator(read_json(evaluator_path), evaluator_path)
+    evaluator = _evaluator(read_json(evaluator_path))
     annotator_prompt = annotator_prompt_path.read_text(encoding="utf-8").strip()
     if not annotator_prompt:
         raise PromptContractExtractionError("contract annotator prompt is empty")
@@ -350,7 +334,7 @@ def extract_contract_task_file(
     return report
 
 
-def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
+def _evaluator(value: Any) -> dict[str, Any]:
     base_fields = {
         "schema_version",
         "candidate_id",
@@ -366,15 +350,12 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
         "max_response_bytes",
         "max_attempts",
     }
-    structured_fields = {"response_format_path", "response_format_sha256"}
     optional_fields = {"maximum_output_tokens", "maximum_input_bytes", "maximum_completion_tokens", "thinking_budget", "chat_template_kwargs"}
     present_fields = set(value) if isinstance(value, dict) else set()
     if (
         not isinstance(value, dict)
         or not base_fields <= present_fields
-        or present_fields - base_fields - structured_fields - optional_fields
-        or bool(present_fields & structured_fields)
-        != bool(structured_fields <= present_fields)
+        or present_fields - base_fields - optional_fields
         or value["schema_version"] != "1.0"
         or value["provider"] not in {"ali_bailian_pay_as_you_go", "deepseek", "local_vllm"}
         or any(not isinstance(value[key], str) or not value[key].strip()
@@ -392,26 +373,7 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
                for key in optional_fields - {"chat_template_kwargs"})
     ):
         raise PromptContractExtractionError("contract evaluator is invalid")
-    if not structured_fields <= set(value):
-        return value
-    format_path = (evaluator_path.parent / value["response_format_path"]).resolve()
-    try:
-        format_path.relative_to(evaluator_path.parent.resolve())
-    except ValueError:
-        raise PromptContractExtractionError("response format escapes evaluator directory") from None
-    if file_sha256(format_path) != value["response_format_sha256"]:
-        raise PromptContractExtractionError("response format identity drifted")
-    response_format = read_json(format_path)
-    if (
-        not isinstance(response_format, dict)
-        or set(response_format) != {"type", "json_schema"}
-        or response_format["type"] != "json_schema"
-        or not isinstance(response_format["json_schema"], dict)
-        or response_format["json_schema"].get("strict") is not True
-        or not isinstance(response_format["json_schema"].get("schema"), dict)
-    ):
-        raise PromptContractExtractionError("contract response format is invalid")
-    return {**value, "response_format": response_format}
+    return value
 
 
 def _rows(value: Any, label: str) -> list[dict[str, Any]]:

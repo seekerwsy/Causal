@@ -50,13 +50,13 @@ calls retain successful source extraction, absent assessments remain unknown,
 and a state table cannot attach to a different source contract. Independent
 qualification replays the saved source and assessment outputs; these changes
 reuse the existing scientific scenarios without increasing the test case count.
-Python test code totals 6,484 lines.
+Python test code totals 6,498 lines.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the
-independent verifier once. The 2026-09-25 isolated run passed in 30.52 seconds;
-its slowest checks were power replay (13.18 s), budget/dispatch replay (5.61 s),
-and the seven-stage smoke (4.16 s). These protect statistical replay, planned
+independent verifier once. The 2026-09-25 isolated run passed in 32.31 seconds;
+its slowest checks were power replay (13.02 s), budget/dispatch replay (5.61 s),
+and the seven-stage smoke (3.97 s). These protect statistical replay, planned
 assignment accounting and independent result reconstruction. They need not run
 after each local TSG edit. The focused TSG/input/candidate checks took 4.14 seconds.
 All 20 smoke output files matched the preceding run byte for byte.
@@ -65,3 +65,8 @@ Earlier suite reductions and frozen result replays remain on
 `codex/pre-artifact-scope-20260923` at `f1cd0011`. The implementation and tests
 before the module-boundary refactor are on
 `codex/pre-module-boundaries-20260925` at `570219573`.
+
+The current-wire candidate fixture now includes explicit applicability bindings.
+An old four-field response is rejected rather than silently assigned a background.
+Existing scope/requirement expectations remain checked; no historical format
+compatibility test is needed in the production path.

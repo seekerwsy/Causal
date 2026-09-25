@@ -745,7 +745,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
             digest = hashlib.sha256(raw.encode()).hexdigest() if raw is not None else None
             if raw_row["response_sha256"] != digest:
                 raise PromptContractQualificationError("raw response identity differs")
-        from prompt_mechanism_study.tsg.prompt_contract_extract import _attempt_source_graph
+        from prompt_mechanism_study.tsg.source_records import attempt_graph
         if binding is None or len(binding.get("calls", [])) != 1 + binding["provider_calls"]:
             raise PromptContractQualificationError("source record trace is incomplete")
         retained = iter(binding["calls"])
@@ -762,7 +762,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
             if saved["error"] is not None:
                 raise RuntimeError(saved["error"]["message"])
             return raw.encode()
-        replay = _attempt_source_graph(task, catalog=catalog, evaluator={"candidate_id": candidate_id.removeprefix("single-evidence:")},
+        replay = attempt_graph(task, catalog=catalog, evaluator={"candidate_id": candidate_id.removeprefix("single-evidence:")},
             annotator_prompt="Retained-response verification.", review_status=report["review_status"], provider=provider)
         if mismatches or next(retained, None) is not None or replay.provider_calls != 1 + binding["provider_calls"]:
             raise PromptContractQualificationError("atomic record execution replay differs")
