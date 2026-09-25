@@ -244,7 +244,7 @@ def _development_sources(*, include_template=False):
                        *[(local, "constrains", target) for local, kind, _, _ in facts
                          if kind == "safety_requirement" for target in ("op", "value")],
                    ]],
-            concept_states=[], feature_states=[], unresolved_notes=[],
+            concept_states=[], unresolved_notes=[],
         )
         if include_template:
             task = prepare_task_input(task)
@@ -436,7 +436,7 @@ def _one_requirement_request(*, compound):
                for local, _, concept, quote in facts],
         edges=[dict(source_node_local_id=source, edge_type=relation, target_node_local_id=target,
                     evidence_text=task["prompt"], occurrence=1) for source, relation, target in links],
-        concept_states=[], feature_states=[], unresolved_notes=[])
+        concept_states=[], unresolved_notes=[])
     contract = authored_contract(response, task=task, catalog=open_concept_catalog(),
                                            annotator_id="synthetic-offline", review_status="development_exposed")
     request = candidate_request([task], [contract])
@@ -652,7 +652,7 @@ def _whole_policy_source(kind, text, *, present=True, guard=False, choice=False,
                for key, _, concept, quote in rows],
         edges=[dict(source_node_local_id=a, edge_type=relation, target_node_local_id=b,
                     evidence_text=task["prompt"], occurrence=1) for a, relation, b in links],
-        concept_states=[], feature_states=[], unresolved_notes=[])
+        concept_states=[], unresolved_notes=[])
     supplied_catalog = catalog or open_concept_catalog()
     contract = authored_contract(supplied, task=task, catalog=supplied_catalog,
         annotator_id="authored-projection-reference", review_status="development_exposed")
@@ -690,7 +690,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
     )
     from prompt_mechanism_study.tsg.scope_assessment import (
         fixed_scope_request,
-        apply_fixed_scope_response,
+        assess_fixed_scope_response,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import (
         requirement_owned_nodes,
@@ -782,15 +782,15 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 applicability_rationale="Authored reference: the unchanged task processes requests and writes logs; the whole-task resource comparison preserves both operations.",
                 expression="explicitly_required" if present else "not_expressed", requirements=["r"] if present else [])},
                 unresolved_notes=[])
-            applied = apply_fixed_scope_response(json.dumps(answer).encode(), request=req, contract=fresh, prompt=fresh_task["prompt"], catalog=catalog)
-            final = compile_task_context_contract(applied, prompt=fresh_task["prompt"], catalog=catalog)
+            applied = assess_fixed_scope_response(json.dumps(answer).encode(), request=req, contract=fresh, prompt=fresh_task["prompt"], catalog=catalog)
+            final = compile_task_context_contract(fresh, feature_states=applied["states"], prompt=fresh_task["prompt"], catalog=catalog)
             state = final.scoped_feature_assessments[0]
             assert state.state == ("present" if present else "absent")
             assert not state.scope.condition_node_ids
-            return fresh_task, applied, final, state.scope
+            return fresh_task, fresh, final, state.scope, applied["states"]
 
-        absent_task, absent, absent_graph, absent_scope = assessed(False)
-        present_task, present, present_graph, present_scope = assessed(True)
+        absent_task, absent, absent_graph, absent_scope, absent_states = assessed(False)
+        present_task, present, present_graph, present_scope, present_states = assessed(True)
         assert sum(a["kind"] == "requirement_scope" for a in open_graph_assertions(prompt_tsg_record(present_graph)).values()) == len(present_graph.requirement_scopes)
         # Policy-only guard/choice nodes disappear without altering task selection.
         assert choose_candidate_scope(absent_graph, selector) == absent_scope
@@ -814,19 +814,18 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
             impostor = replace(present, relations=present.relations + (dict(source="r", edge_type="constrains",
                 target="op", evidence_text=present_task["prompt"], occurrence=1),))
             with pytest.raises(PromptTSGError, match="complete policy binding"):
-                compile_task_context_contract(impostor, prompt=present_task["prompt"], catalog=catalog)
+                compile_task_context_contract(impostor, feature_states=present_states, prompt=present_task["prompt"], catalog=catalog)
             for state in ("absent", "not_applicable"):
-                negative = replace(impostor, feature_states=tuple(dict(r, state=state, requirements=[])
-                                                                 for r in impostor.feature_states))
+                negative = tuple(dict(r, state=state, requirements=[]) for r in present_states)
                 with pytest.raises(PromptTSGError, match="negative policy state"):
-                    compile_task_context_contract(negative, prompt=present_task["prompt"], catalog=catalog)
+                    compile_task_context_contract(impostor, feature_states=negative, prompt=present_task["prompt"], catalog=catalog)
             legacy = json.loads(json.dumps(catalog))
             legacy["feature_scope_selectors"][feature].pop("applicability_scope", None)
             legacy["feature_scope_selectors"][feature].update(scope_kind="targets",
                 operation_semantic_id=catalog["normalization_map"]["task_operation::processing"])
             legacy_contract = replace(present, catalog=legacy, input_catalog_sha256=catalog_sha256(legacy))
             with pytest.raises(PromptTSGError, match="explicit object policy selector"):
-                compile_task_context_contract(legacy_contract, prompt=present_task["prompt"], catalog=legacy)
+                compile_task_context_contract(legacy_contract, feature_states=present_states, prompt=present_task["prompt"], catalog=legacy)
             # Uncertain source influence is passed to the semantic assessor;
             # program locality rules no longer withhold this candidate.
             inventory = json.loads(json.dumps(present.source_inventory))
@@ -874,11 +873,11 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
         if guard:
             broken = replace(present, relations=tuple(r for r in present.relations if r["edge_type"] != "conditions"))
             with pytest.raises(PromptTSGError, match="complete policy binding"):
-                compile_task_context_contract(broken, prompt=present_task["prompt"], catalog=catalog)
+                compile_task_context_contract(broken, feature_states=present_states, prompt=present_task["prompt"], catalog=catalog)
             for lost_state in ("absent", "not_applicable"):
-                contradicted = replace(broken, feature_states=tuple(dict(r, state=lost_state, requirements=[]) for r in broken.feature_states))
+                contradicted = tuple(dict(r, state=lost_state, requirements=[]) for r in present_states)
                 with pytest.raises(PromptTSGError, match="negative policy state"):
-                    compile_task_context_contract(contradicted, prompt=present_task["prompt"], catalog=catalog)
+                    compile_task_context_contract(broken, feature_states=contradicted, prompt=present_task["prompt"], catalog=catalog)
         for source_present, operation in ((False, "add"), (True, "remove")):
             source_task, source_graph, source_scope = ((present_task, present_graph, present_scope) if source_present else
                                                        (absent_task, absent_graph, absent_scope))
@@ -891,7 +890,7 @@ def test_complete_policy_projection_and_both_edits_preserve_scope_and_internal_c
                 assert "For the named source objects:" in rendered["prompt"]
                 assert "For the runtime task as a whole:" not in rendered["prompt"]
             assert "Process the request and write the diagnostic log. Return status." in rendered["prompt"]
-            _, _, target_graph, _ = assessed(not source_present, rendered["prompt"])
+            _, _, target_graph, _, _ = assessed(not source_present, rendered["prompt"])
             targets = source_graph.scoped_feature_assessments[0].requirement_node_ids
             preserved = {n.node_id for n in source_graph.nodes if n.node_type != "task"} - requirement_owned_nodes(source_graph, targets)
             mapped = {n.node_id: next(m.node_id for m in target_graph.nodes if m.semantic_id == n.semantic_id
@@ -941,7 +940,7 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
     )
     from prompt_mechanism_study.tsg.scope_assessment import (
         fixed_scope_request,
-        apply_fixed_scope_response,
+        assess_fixed_scope_response,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import _edge, requirement_owned_nodes
     from prompt_mechanism_study.discovery.mechanisms import (
@@ -982,7 +981,7 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
                    for key, _, concept, quote in rows],
             edges=[dict(source_node_local_id=a, edge_type=kind, target_node_local_id=b,
                         evidence_text=quote, occurrence=1) for a, kind, b, quote in links],
-            concept_states=[], feature_states=[], unresolved_notes=[])
+            concept_states=[], unresolved_notes=[])
         source_catalog = catalog or open_concept_catalog()
         contract = authored_contract(response, task=task, catalog=source_catalog,
             annotator_id="authored-policy-support-reference", review_status="development_exposed")
@@ -1103,14 +1102,18 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         assert row["admissible_positive_requirements"] == (["r"] if present else [])
         answer = dict(states={key: dict(applicability="applicable", applicability_rationale="Account insertion remains independently specified.",
             expression="explicitly_required" if present else "not_expressed", requirements=["r"] if present else [])}, unresolved_notes=[])
-        contract = apply_fixed_scope_response(json.dumps(answer).encode(), request=request, contract=contract, prompt=task["prompt"], catalog=catalog)
-        graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
+        assessment = assess_fixed_scope_response(json.dumps(answer).encode(), request=request, contract=contract, prompt=task["prompt"], catalog=catalog)
+        graph = compile_task_context_contract(contract, feature_states=assessment["states"], prompt=task["prompt"], catalog=catalog)
         scope = graph.scoped_feature_assessments[0].scope
         assert choose_candidate_scope(graph, selector) == scope
         assert next(n.semantic_id for n in graph.nodes if n.node_id == scope.operation_node_id) == selector["applicability_scope"]["operation_semantic_id"]
         return task, contract, graph, scope
 
     absent, present = assessed(False), assessed(True)
+    request = fixed_scope_request(present[1], prompt=present[0]["prompt"], catalog=catalog)
+    present_states = [dict(target=r["target"], subjects=r["subjects"], conditions=r["conditions"],
+        concept_id=r["concept_id"], state="present", requirements=["r"], rationale="Authored binding.")
+        for r in request["scopes"].values()]
     duplicate_background = replace(absent[2], nodes=tuple(replace(n,
         semantic_id=selector["applicability_scope"]["operation_semantic_id"])
         if n.semantic_id == catalog["normalization_map"]["task_operation::returning"] else n for n in absent[2].nodes))
@@ -1130,7 +1133,7 @@ def test_candidate_local_edit_scope_preserves_background_shared_support_and_unkn
         else:
             inventory["requirement_relations"]["r"][0].update(source="insert", target="hash")
         with pytest.raises(ValueError, match="complete policy binding"):
-            compile_task_context_contract(replace(present[1], source_inventory=inventory), prompt=present[0]["prompt"], catalog=catalog)
+            compile_task_context_contract(replace(present[1], source_inventory=inventory), feature_states=present_states, prompt=present[0]["prompt"], catalog=catalog)
 
     for operation, source_case, target_case in (("remove", present, absent), ("add", absent, present)):
         source_task, _, source_graph, scope = source_case

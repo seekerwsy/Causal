@@ -8,11 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from prompt_mechanism_study.artifact_io import file_sha256, read_json, write_bundle, loads_exact_json
+from prompt_mechanism_study.artifact_io import file_sha256, read_json, write_bundle
 from prompt_mechanism_study.llm import complete_chat
 from prompt_mechanism_study.tsg.source_records import ExtractionAttempt, attempt_graph
 from prompt_mechanism_study.tsg.prompt_contract import (
-    compile_task_context_contract,
     task_context_contract_record,
     OpenTaskContract,
 )
@@ -22,16 +21,16 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     load_catalog,
     prompt_tsg_record,
 )
+from prompt_mechanism_study.tsg.source_records import record_response_format
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.tsg.task_input import prepare_task_input
 from prompt_mechanism_study.tsg.source_codec import (
     PromptContractExtractionError,
     contract_decision_request,
-    contract_response_format,
 )
 from prompt_mechanism_study.tsg.scope_assessment import (
     _inventory_status,
-    apply_fixed_scope_response,
+    assess_fixed_scope_response,
     fixed_scope_request,
     fixed_scope_response_format,
 )
@@ -49,13 +48,13 @@ def extract_task_contract(
     review_status: str,
     provider: Provider = complete_chat,
 ) -> tuple[OpenTaskContract, PromptTSG, dict[str, Any], bytes]:
-    """Extract one task; the final two values are the fact-inventory request/raw.
+    """Extract source semantics only; the final two values are the request/raw.
 
     Use extract_contract_task_file for a replayable package retaining fact,
     binding and scope requests, raw responses and partial failures.
     """
 
-    attempt = _attempt_task_contract(
+    attempt = _attempt_source_graph(
         task,
         catalog=catalog,
         evaluator=evaluator,
@@ -90,7 +89,7 @@ def _attempt_task_contract(
     """One path: build source semantics, then assess candidate-specific scopes."""
     graph_attempt = _attempt_source_graph(task, catalog=catalog, evaluator=evaluator,
         annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
-    return _assess_candidate_scopes(graph_attempt, task=task, catalog=catalog,
+    return assess_candidate_scopes(graph_attempt, task=task, catalog=catalog,
         evaluator=evaluator, annotator_prompt=annotator_prompt, provider=provider)
 
 
@@ -110,7 +109,7 @@ def _attempt_source_graph(
         annotator_prompt=annotator_prompt, review_status=review_status, provider=provider)
 
 
-def _assess_candidate_scopes(
+def assess_candidate_scopes(
     graph_attempt: ExtractionAttempt, *, task: Mapping[str, Any],
     catalog: Mapping[str, Any], evaluator: Mapping[str, Any],
     annotator_prompt: str, provider: Provider,
@@ -141,24 +140,24 @@ def _assess_candidate_scopes(
                 scope_raw = provider(scope_request, {**evaluator, "response_format": scope_format}, annotator_prompt)
                 scope_assessment.update(response_text=scope_raw.decode("utf-8"),
                                         response_sha256=hashlib.sha256(scope_raw).hexdigest())
-                contract = apply_fixed_scope_response(scope_raw, request=scope_request, contract=contract,
-                                                      prompt=task["prompt"], catalog=catalog)
-                graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
+                scope_assessment["assessment"] = assess_fixed_scope_response(scope_raw, request=scope_request,
+                    contract=contract, prompt=task["prompt"], catalog=catalog)
                 scope_assessment["status"] = "COMPLETE_WITH_UNKNOWN_PRESERVED"
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception as error:
+        if scope_assessment is None:
+            raise  # Invalid assessment setup is a caller error, not a model verdict.
         rejected = getattr(error, "provider_response", None)
         failure = (dict(response_envelope_text=rejected.decode("utf-8"),
                         response_envelope_sha256=hashlib.sha256(rejected).hexdigest())
                    if isinstance(rejected, bytes) else None)
         if scope_assessment is not None:
-            scope_assessment.update(error_type=type(error).__name__, error_message=str(error))
+            scope_assessment.update(status="FAILED", error_type=type(error).__name__, error_message=str(error))
             if failure is not None:
                 scope_assessment["provider_failure"] = failure
                 failure = None
         return replace(graph_attempt, provider_calls=provider_calls, contract=contract, graph=graph,
-            error_type=type(error).__name__, error_message=f"task {task['task_id']}: {error}",
             scope_assessment=scope_assessment, provider_failure=failure)
     return replace(graph_attempt, provider_calls=provider_calls, contract=contract, graph=graph,
                    scope_assessment=scope_assessment)
@@ -175,7 +174,7 @@ def extract_contract_task_file(
     review_status: str = "prospective_frozen",
     provider: Provider = complete_chat,
     max_workers: int = 1,
-    qualification_reference_path: Path | None = None,
+    reference_context: dict | None = None,
 ) -> dict[str, Any]:
     """Extract one frozen selection into a reviewable contract-and-graph bundle."""
 
@@ -214,25 +213,8 @@ def extract_contract_task_file(
     annotator_prompt = annotator_prompt_path.read_text(encoding="utf-8").strip()
     if not annotator_prompt:
         raise PromptContractExtractionError("contract annotator prompt is empty")
-    reference = None
-    reference_binding = {}
-    if qualification_reference_path is not None:
-        from prompt_mechanism_study.tsg.prompt_contract_qualification import (
-            representation_implementation_identity,
-            validate_open_source_reference,
-        )
-        if catalog.get("concept_policy") != "FROZEN" or catalog.get("schema_version") != "2.0":
-            raise PromptContractExtractionError("source-semantic qualification requires frozen open concepts")
-        reference_bytes = qualification_reference_path.read_bytes()
-        reference = loads_exact_json(reference_bytes)
-        reference_binding = dict(task_file_sha256=file_sha256(tasks_path),
-            task_selection_sha256=file_sha256(selection_path), task_selection_record_sha256=content_hash(selection),
-            catalog_sha256=catalog_sha256(catalog), evaluator_sha256=file_sha256(evaluator_path),
-            annotator_prompt_sha256=file_sha256(annotator_prompt_path),
-            representation_implementation_sha256=representation_implementation_identity(),
-            candidate_id=f"single-evidence:{evaluator['candidate_id']}")
-        validate_open_source_reference(reference, bindings=reference_binding, tasks=selected)
-        reference_binding["qualification_reference_sha256"] = hashlib.sha256(reference_bytes).hexdigest()
+    reference = reference_context.get("reference") if reference_context else None
+    reference_binding = reference_context.get("bindings", {}) if reference_context else {}
 
     def extract(task: Mapping[str, Any]) -> ExtractionAttempt:
         return _attempt_task_contract(
@@ -261,7 +243,7 @@ def extract_contract_task_file(
             {
                 "task_id": task["task_id"],
                 "response_format_sha256": content_hash(
-                    contract_response_format(attempt.request)
+                    record_response_format(attempt.request)
                 ),
                 "provider_calls": attempt.provider_calls,
                 "status": "complete" if attempt.succeeded else "failed",
@@ -301,7 +283,7 @@ def extract_contract_task_file(
             else "PROMPT_CONTRACT_EXTRACTION_FAILED"
         ),
         "protocol_id": "open_tsg_instance_contract_v3_partial_evidence",
-        "annotation_policy_id": "atomic_records_review_patch_compile_scopes",
+        "annotation_policy_id": "source_records_with_separate_candidate_states",
         "model_visible_routing_labels": False,
         "input_scope": "baseline_system_message_and_user_request",
         "tasks": len(selected),
@@ -313,6 +295,8 @@ def extract_contract_task_file(
             for attempt in extracted if attempt.binding_annotation is not None),
         "graph_annotation_calls": len(extracted) + sum(attempt.binding_annotation["provider_calls"]
             for attempt in extracted if attempt.binding_annotation is not None),
+        "candidate_assessment_failed_task_ids": [a.contract.task_id for a in extracted
+            if a.scope_assessment and a.scope_assessment["status"] == "FAILED"],
         "fixed_scope_assessment_calls": sum(attempt.scope_assessment["provider_calls"]
             for attempt in extracted if attempt.scope_assessment is not None),
         "source_inventory_incomplete_task_units": sum(
@@ -348,6 +332,8 @@ def extract_contract_task_file(
             "report.json": report,
             "contracts.json": contracts,
             "graphs.json": graphs,
+            "factor-states.json": [attempt.scope_assessment['assessment'] for attempt in extracted
+                if attempt.scope_assessment and 'assessment' in attempt.scope_assessment],
             "requests.json": requests,
             "responses.json": responses,
             **({"qualification-reference.json": reference, "selection.json": selection}
@@ -437,10 +423,10 @@ def _rows(value: Any, label: str) -> list[dict[str, Any]]:
 __all__ = [
     "PromptContractExtractionError",
     "contract_decision_request",
-    "contract_response_format",
     "extract_contract_task_file",
     "extract_task_contract",
+    "assess_candidate_scopes",
     "fixed_scope_request",
     "fixed_scope_response_format",
-    "apply_fixed_scope_response",
+    "assess_fixed_scope_response",
 ]

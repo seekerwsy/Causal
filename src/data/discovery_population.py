@@ -22,7 +22,6 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     catalog_sha256,
     feature_scope_from_record,
     load_catalog,
-    prompt_tsg_from_record,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text
 from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest
@@ -805,8 +804,8 @@ def _audit_scoped_discovery_positivity(
     for bundle in graph_bundles:
         verify_bundle(bundle)
         graph_digests.append(bundle_digest(bundle))
-        for row in read_json(bundle / graph_artifact):
-            graph = prompt_tsg_from_record(row)
+        from prompt_mechanism_study.tsg.scope_assessment import load_assessed_graphs
+        for graph in load_assessed_graphs(bundle, graph_artifact):
             if graph.task_id in graphs or graph.task_id not in task_ids:
                 raise ValueError("source support graph task is duplicate or outside the selection")
             graphs[graph.task_id] = graph

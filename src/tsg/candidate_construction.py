@@ -1242,8 +1242,8 @@ def bind_candidate_scopes(
     for bundle in graph_bundles:
         verify_bundle(bundle)
         digests.append(bundle_digest(bundle))
-        for row in read_json_exact(bundle / "graphs.json"):
-            graph = prompt_tsg_from_record(row)
+        from prompt_mechanism_study.tsg.scope_assessment import load_assessed_graphs
+        for graph in load_assessed_graphs(bundle):
             if (
                 graph.task_id in graphs
                 or graph.task_id not in task_ids

@@ -84,141 +84,48 @@ The [test guide](../tests/README.md) identifies scientific boundaries checked by
 the default suite. Source preparation and historical experiment administration
 are not prerequisites to reproduce the smoke.
 
-## Framework responsibilities
+## Module and artifact boundaries
 
-The framework-wide refactor starts from `dec567472`, preserved on local branch
-`codex/pre-framework-refactor-20260924`. There is no compatibility copy of the
-removed paths in the active package.
+The workflow calls stage functions and saves their outputs. Stage modules do not
+call back into the workflow. `experiment/reporting.py` only builds result tables;
+`target_workflow.write_target_result_bundle` calls the public independent verifier
+and writes the reviewer package. Formal report authorization belongs to
+`verification/reporting.py`; the formal execution path remains inactive.
 
-| Area | Current responsibility and retained boundary |
+The representation path saves two different outputs:
+
+| Artifact | Meaning and consumers |
 | --- | --- |
-| Entry and source preparation | `cli.py` routes the study; `data/commands.py` contains author data commands. Source contracts and independent review decisions are supplied inputs; frozen v4/v5 identities, source evidence and task partitions remain verified. |
-| Representation | `tsg/source_records.py` owns extraction attempts and record compilation; `prompt_contract_extract.py` orchestrates graph construction and scope assessment without a reverse import from the producer. Conditions, scope and unknown semantics remain unchanged. |
-| Prioritization | `discovery/prioritization.py` retains the current PAG/FCI implementation, RD ranking, fixed candidate slots and Full/RD-only comparison. The unused adjacency-only adapter is removed. |
-| Freeze and assignment | `experiment/study_planning.py`, `study_design.py` and `randomization.py` retain prospective scope, budgets, independent task units and exact arm/seed assignment. These checks implement research boundaries rather than historical recovery. |
-| Measurement | `measurement/security_profiles.py` is the security implementation. Functional judgment remains separate; the native worker and its Docker adapter are together in `native_behavior.py`. Host-isolation protections remain. |
-| Outcomes and reporting | `experiment/outcomes.py`, `inference.py` and `reporting.py` assemble assigned outcomes, estimate effects and build tables. Unused one-off paired/model summaries are removed. The frozen development screen remains distinct from confirmatory inference. |
-| Independent verification | `verification/` retains its separate assignment and statistical replay. It does not import production estimators to manufacture agreement. |
-| Shared mechanics | `llm.py` provides one explicit chat attempt for cloud or local models. `artifact_io.py` handles JSON and hashes; v4/v5 dataset identities and bytes remain distinct. |
+| `contracts.json`, `graphs.json` | Source facts and their canonical graph, including conditions, scope and source uncertainty; candidate proposal reads these without outcome data. |
+| `factor-states.json` | Candidate applicability/expression judgments tied to the exact source contract; scope binding and discovery consume an assessed graph projection. |
+| `responses.json` | Raw extraction/review/assessment requests and responses, including separate failures; independent qualification replays each output. |
 
-The input contraction is preserved against `6b0e8b220` on local branch
-`codex/pre-input-contraction-20260924`. Automatic contract production, evidence
-repair loops, source-review packet production, v4/v5 corpus assembly and the
-closed-catalog qualification packet builder are removed from the active package.
-Raw source import and supplied-contract import remain available under `data`.
-Use `data verify-inputs BUNDLE` for frozen v4/v5 inputs and
-`data verify-source-review ROUND` for independently supplied historical review
-records. See [the input boundary](contract-content-cleaning.md).
+A failed candidate assessment does not mark successful source extraction as
+failed. Missing judgments remain unknown and still reduce candidate coverage.
+The viewer checks the source projection, then displays the separate assessments
+on that graph. It does not maintain another interpretation of source semantics.
+Source-contract schema 4 replaces the combined schema 3; graph schema 3 and
+concept-catalog schema 2 are unchanged. Replay old frozen contracts with their
+captured Git version, rather than converting them in the active method.
 
-This is a deliberate reduction in preparation capability. It does not change
-TSG extraction, FCI/RD selection, four-arm assignment, outcome accounting or
-inference. Existing historical artifacts retain their original interpretation
-and require their captured producer if rebuilding them is necessary. The formal
-protocol remains inactive.
+Qualification depends on extraction for retained-response replay; extraction
+never imports qualification. The CLI validates a prospective reference before
+model calls. Response schemas belong to `source_records.py`; the low-level codec
+does not dispatch back to that producer. No new module, generic stage framework,
+semantic rule engine or compatibility path was added.
 
-Validation of the input contraction on 2026-09-24 used the isolated Python 3.12
-environment installed for the preceding framework review, with fresh test output
-directories: 100 tests passed in 29.88 seconds. All 20 smoke files remain
-byte-identical to the pre-refactor reference. The released v5 bundle still verifies
-with 2,165 task units and manifest
-`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
-All retained function bodies in the four reduced data modules are unchanged;
-source imports and static unused-name checks pass. These checks involve no model
-calls, new effect evidence or paper changes.
+The pre-refactor checkout is preserved on
+`codex/pre-module-boundaries-20260925` at `570219573`. Historical changes and run
+records remain in Git and the explicitly archival experiment documents. This
+refactor changes ownership and storage, not FCI/RD selection, Atomic four-arm
+assignment, security endpoints, task-unit ITT or independent result arithmetic.
+See [the test guide](../tests/README.md) for current validation.
 
-Python source under `src/` decreased from 35,115 to 29,670 physical lines
-(including comments and blank lines), across 54 files. The data modules decreased
-from 9,297 to 3,907 lines. These figures exclude fixtures, tests and documents;
-fixed synthetic input fixtures now replace tests of the retired producers.
-
-## Current-format cleanup
-
-The next contraction starts from `91f3ffd33`, preserved on
-`codex/pre-tsg-oracle-contraction-20260924`. Active TSG construction and loading
-now require graph schema 3 and concept-catalog schema 2. Earlier graph formats
-must use their captured Git implementation; there is no silent conversion.
-Current graph serialization and content identities remain unchanged. Context
-queries no longer accept unused CWE/task-family filters: they inspect the bound
-source structure, and missing relations remain unresolved rather than absent.
-
-The unused `python.cwe89.dynamic_identifier_and_values.v1` measurement profile
-is retired. Path and XML v1 profiles remain because the frozen registry still
-references them; their original interpretation is preserved, not upgraded in
-place. Path profiles share sink traversal while retaining their distinct guard
-rules and diagnostic reasons. Changing their scientific measurement rules would
-require a prospective configuration change, not a cleanup of code.
-
-The isolated Python 3.12 suite passed all 100 cases (29.18 seconds); a subsequent
-path-diagnostic preservation fix passed the 9 affected measurement cases. All 20
-smoke outputs match the preceding version byte for byte. Across 54 already exposed
-calibration snippets, all 18 retained profiles produced identical full decisions
-before and after the refactor (972 comparisons). This checks implementation
-equivalence, not universal Oracle accuracy or real-model performance.
-
-`src/` now has 29,521 Python lines, 149 fewer than the preceding contraction.
-The statistical estimators, arm design and independent result arithmetic were
-not changed. No provider calls or paper edits were made.
-
-## Task-bound measurement and explicit model configuration
-
-The subsequent revision starts from `7d5a42ad2`, preserved on
-`codex/pre-semantic-boundary-simplification-20260924`. New AST evaluation of file
-permissions and credential source returns `unknown` until a task-bound endpoint
-is supplied. The name/write-pattern heuristics are removed; no generic verifier
-is added. See the prospective measurement amendment in [the protocol](protocol.md).
-Qualification exposes `qualified_profiles` and per-profile reasons; a partial
-report does not approve blocked profiles or silently narrow a planned experiment.
-
-Candidate proposal and TSG extraction accept the frozen model/provider settings
-through the existing supported transports. A particular vendor, model name,
-credential variable and zero-temperature setting are no longer coded into the
-candidate path. Responses and evaluator configuration remain bound to the saved
-request, with one attempt and finite call limits.
-
-The duplicated power/baseline lineage predicates in budget construction and its
-record validation are shared. Budget qualification requirements and independent
-statistical verification remain in place; this is not a claim that the entire
-research-administration layer has been retired. Specialized TSG property checks
-were still present in that revision; the following revision removes them.
-Diagnostic scope enumeration remains. No paper change or live model call is
-part of this implementation revision.
-
-Validation used the isolated Python 3.12 review environment with a fresh output
-directory: 101 cases passed in 28.82 seconds. All 20 smoke files remain
-byte-identical to the preceding reference. Across 54 exposed calibration snippets,
-the 16 unchanged profiles returned identical full decisions (864 comparisons).
-This is a preservation check, not an accuracy estimate. The two withdrawn static
-profiles reduce evaluable coverage; no replacement behavioral endpoint has been
-qualified by this change. `src/` contains 54 Python files and 29,372 physical lines,
-149 fewer than before this revision.
-
-## Current TSG construction boundary
-
-The [representation protocol](protocol.md) separates structural checks from model
-semantic judgments and independent reference evaluation. Records compile directly
-into the source contract and graph. The model uses one record schema for extraction
-and, when the single review finds problems, one complete revision. Old graph-response
-recovery, token-inventory responses and partial-patch machinery have been removed.
-Before/after records remain inspectable; successful compilation does not certify a
-semantic repair. See the [construction workflow](tsg-workflow-stability.md).
-
-Construction, candidate assessment and visualization share node projection; the
-viewer checks that saved graphs agree with their source contracts. Source quotations
-now map directly to canonical evidence, with no token-index intermediate or matching
-test adapter. Graph decoding reuses the record definitions instead of maintaining a
-second field schema. Visualization, before/after evidence and exported graphs remain.
-
-The 2026-09-25 isolated Python 3.12 suite passed 108 cases in 30.35 seconds, including
-the independent result replay. All 20 smoke files are byte-identical to the preceding
-reference. Splitting existing combined scenarios gives 84 test functions; test Python
-code decreases by 195 lines to 6,466. Duplicate schema/prompt assertions are removed;
-scientific behavior checks remain. See [test scope and run policy](../tests/README.md).
-
-TSG Python source totals 6,928 lines; all source totals 28,332 lines in 54 files,
-92 fewer than before this cleanup. This removes one conversion layer and duplicated
-decoding code; it is not a claim that all TSG responsibilities have been simplified.
-No paper, discovery rule, intervention arm, measurement endpoint, ITT denominator,
-independent verifier or live-model result changes. No provider call or protected
-evaluation task was used. The pre-change checkout is preserved at `88acb4d33` on
-`codex/pre-tsg-citation-test-trim-20260925`; earlier frozen runs retain their captured
-implementation and interpretation.
+Validation on 2026-09-25 used the isolated Python 3.12 reviewer installation and
+fresh output paths: 108 tests passed in 30.52 seconds; all 20 smoke files matched
+the preceding reference byte for byte. The source dependency scan found zero
+direct mutual module imports, down from two pairs, and no imports from
+`experiment/` into `verification/`. Python source remains 54 files and 28,318
+physical lines (14 fewer); this is a dependency/data-boundary refactor, not a
+large reduction in supported capabilities. No model call, protected task, formal
+experiment or paper modification was involved.

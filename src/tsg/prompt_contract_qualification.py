@@ -17,14 +17,11 @@ from prompt_mechanism_study.artifact_io import (
     file_sha256,
     loads_exact_json,
 )
-from prompt_mechanism_study.tsg.prompt_contract import (
-    compile_task_context_contract,
-)
 from prompt_mechanism_study.tsg.source_codec import (
     contract_decision_request,
-    contract_response_format,
 )
 from prompt_mechanism_study.tsg.prompt_tsg import load_catalog, prompt_tsg_record
+from prompt_mechanism_study.tsg.source_records import record_response_format
 from prompt_mechanism_study.records import canonical_json, content_hash
 
 
@@ -213,6 +210,29 @@ def representation_implementation_identity() -> str:
     )]
     paths.append(folder.parent / "llm.py")
     return content_hash({path.name: file_sha256(path) for path in paths})
+
+
+def prepare_source_reference(*, reference_path, tasks_path, selection_path, catalog_path,
+                             evaluator_path, annotator_prompt_path):
+    """Validate a prewritten reference at the command boundary, before model calls."""
+    from prompt_mechanism_study.tsg.task_input import prepare_task_input
+    from prompt_mechanism_study.tsg.prompt_tsg import catalog_sha256
+    catalog, evaluator = load_catalog(catalog_path), read_json(evaluator_path)
+    if catalog.get("concept_policy") != "FROZEN":
+        raise PromptContractQualificationError("source-semantic qualification requires frozen open concepts")
+    selection = read_json(selection_path)
+    by_id = {task["task_id"]: task for task in read_json(tasks_path)}
+    tasks = [prepare_task_input(by_id[key]) for key in selection["task_ids"]]
+    reference_bytes = reference_path.read_bytes()
+    reference = loads_exact_json(reference_bytes)
+    bindings = dict(task_file_sha256=file_sha256(tasks_path), task_selection_sha256=file_sha256(selection_path),
+        task_selection_record_sha256=content_hash(selection), catalog_sha256=catalog_sha256(catalog),
+        evaluator_sha256=file_sha256(evaluator_path), annotator_prompt_sha256=file_sha256(annotator_prompt_path),
+        representation_implementation_sha256=representation_implementation_identity(),
+        candidate_id=f"single-evidence:{evaluator['candidate_id']}")
+    validate_open_source_reference(reference, bindings=bindings, tasks=tasks)
+    bindings["qualification_reference_sha256"] = hashlib.sha256(reference_bytes).hexdigest()
+    return dict(reference=reference, bindings=bindings)
 
 
 def validate_open_source_reference(reference: dict, *, bindings: dict, tasks: list[dict]) -> None:
@@ -620,7 +640,8 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
                           evaluator_path, annotator_prompt_path, output, assertion_review_path):
     """Replay facts, bindings and scopes, then score the complete reference selection."""
     from prompt_mechanism_study.tsg.scope_assessment import (
-        apply_fixed_scope_response,
+        assess_fixed_scope_response,
+        assessed_graph,
         fixed_scope_request,
         fixed_scope_response_format,
     )
@@ -657,7 +678,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         representation_implementation_sha256=representation_implementation_identity(), candidate_id=candidate_id)
     if (catalog.get("concept_policy") != "FROZEN"
         or any(report.get(k) != v for k, v in bindings.items())
-        or report.get("annotation_policy_id") != "atomic_records_review_patch_compile_scopes"
+        or report.get("annotation_policy_id") != "source_records_with_separate_candidate_states"
         or report.get("response_protocol_id") != "source_covered_layered_bindings_expression_v1"
         or report.get("model_visible_routing_labels") is not False
         or report.get("arms_or_outcomes_used") is not False):
@@ -692,6 +713,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
     responses = indexed("responses", read_json(extraction_bundle / "responses.json"), True)
     contracts = indexed("contracts", read_json(extraction_bundle / "contracts.json"))
     graphs = indexed("graphs", read_json(extraction_bundle / "graphs.json"))
+    assessments = indexed("factor states", read_json(extraction_bundle / "factor-states.json"))
     reviews = indexed("reviews", audit.get("cases", []))
     failed = {row["task_id"] for row in report["failed_task_units"]}
     if (failed != {key for key, row in responses.items() if row["status"] == "failed"}
@@ -701,6 +723,8 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         or report.get("record_review_and_repair_calls") != sum(row.get("binding_annotation", {}).get("provider_calls", 0) for row in responses.values())
         or report.get("fixed_scope_assessment_calls") != sum(row.get("scope_assessment", {}).get("provider_calls", 0) for row in responses.values())
         or report.get("graph_annotation_calls") != report.get("initial_record_calls", 0) + report.get("record_review_and_repair_calls", 0)
+        or report["candidate_assessment_failed_task_ids"] != [k for k, r in responses.items()
+            if r.get("scope_assessment", {}).get("status") == "FAILED"]
         or report["graphs"] != len(graphs) or report["contracts"] != len(contracts)):
         raise PromptContractQualificationError("extraction failure/call accounting differs")
     results = []
@@ -710,7 +734,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         from prompt_mechanism_study.tsg.source_records import record_request
         request = record_request(contract_decision_request(task, catalog))
         if (requests[key] != dict(task_id=key, request=request)
-            or response["response_format_sha256"] != content_hash(contract_response_format(request))):
+            or response["response_format_sha256"] != content_hash(record_response_format(request))):
             raise PromptContractQualificationError("source graph request replay differs")
         scope = response.get("scope_assessment")
         binding = response.get("binding_annotation")
@@ -745,6 +769,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         if replay.raw != (response["response_text"].encode() if response["response_text"] is not None else None):
             raise PromptContractQualificationError("retained record response differs from extraction trace")
         replayed, graph, replay_failed = replay.contract, replay.graph, not replay.succeeded
+        assessment = None
         if graph is not None and not replay_failed:
             expected_scope = fixed_scope_request(replayed, prompt=prompt, catalog=catalog)
             if (scope is None or scope["request"] != expected_scope
@@ -759,11 +784,11 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
                 try:
                     if scope["response_text"] is None:
                         raise ValueError("scope response unavailable")
-                    replayed = apply_fixed_scope_response(scope["response_text"].encode(), request=expected_scope,
+                    assessment = assess_fixed_scope_response(scope["response_text"].encode(), request=expected_scope,
                         contract=replayed, prompt=prompt, catalog=catalog)
-                    graph = compile_task_context_contract(replayed, prompt=prompt, catalog=catalog)
                 except (ValueError, PromptContractExtractionError):
-                    replay_failed = True
+                    if scope["status"] != "FAILED":
+                        raise PromptContractQualificationError("scope failure status differs")
         elif scope is not None:
             raise PromptContractQualificationError("scope assessment exists without completed source bindings")
         actual = prompt_tsg_record(graph) if graph is not None else None
@@ -771,12 +796,16 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         if (replay_failed != (key in failed) or actual != graphs.get(key)
             or (task_context_contract_record(replayed) if actual is not None else None) != contracts.get(key)):
             raise PromptContractQualificationError("raw annotation replay differs from saved partial/full output")
+        if assessment != assessments.get(key) or assessment != (scope or {}).get("assessment"):
+            raise PromptContractQualificationError("candidate assessment replay differs")
+        if graph is not None:
+            actual = prompt_tsg_record(assessed_graph(replayed, assessment, prompt=prompt, catalog=catalog))
         scored = evaluate_open_semantic_case(actual, prompt=prompt, expected=case,
             assertion_review=reviews.get(key), extraction_failed=key in failed, contract=contracts.get(key))
         scored["raw_graph_response_sha256"] = response["response_sha256"]
         scored["raw_binding_response_sha256"] = binding["response_sha256"] if binding else None
         scored["raw_scope_response_sha256"] = scope["response_sha256"] if scope else None
-        scored["compiler_unresolved_notes"] = list(replayed.unresolved_notes) if replayed else []
+        scored["compiler_unresolved_notes"] = (list(replayed.unresolved_notes) if replayed else []) + (assessment or {}).get("unresolved_notes", [])
         scored["source_inventory_status"] = scope["request"]["source_inventory_status"] if scope else None
         scored["withheld_scope_count"] = len(scope["request"]["withheld_scopes"]) if scope else 0
         if scope and scope["request"]["source_inventory_status"]["status"] == "INCOMPLETE":

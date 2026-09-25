@@ -280,14 +280,6 @@ def _represented_unit_operations(contract: OpenTaskContract) -> dict[str, set[st
     return result
 
 
-def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the active atomic-record response schema."""
-    if request.get("request_kind") == "source_only_atomic_records":
-        from prompt_mechanism_study.tsg.source_records import record_response_format
-        return record_response_format(request)
-    raise PromptContractExtractionError("unsupported source response request")
-
-
 def _literal_starts(text: str, fragment: str) -> list[int]:
     starts: list[int] = []
     offset = 0

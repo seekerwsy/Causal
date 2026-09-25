@@ -82,8 +82,8 @@ source records: requirements include composition, guards and target scope
   -> existing qualification positivity, folds and prioritization
 ```
 
-Uncommitted atomic source records can be locally patched during construction; the
-program then compiles their graph bindings. This does not authorize the candidate stage to change source
+Source records can be revised once after source review; the program then
+compiles the returned complete records into graph bindings. This does not authorize the candidate stage to change source
 nodes. The [current TSG workflow](tsg-workflow-stability.md) specifies the bounded
 review/repair policy and its development evidence. Historical repair comparisons
 retain their original outcomes.
@@ -100,10 +100,13 @@ deleting its user repetition. Generic template wording is not automatically
 equivalent to a specific policy. Source definition reuse does not certify new binds.
 
 Graph construction now returns an inspectable source graph before any candidate
-state call. `_assess_candidate_scopes` consumes that graph, applies the frozen
+state call. `assess_candidate_scopes` consumes that graph, applies the frozen
 candidate domains and judges applicability/expression. It cannot add, split or
 rebind source facts. Its failure preserves the graph and leaves candidate states
-unknown. This separation changes responsibilities and artifacts, not the meaning
+unknown. Candidate states are saved in `factor-states.json`, bound to the
+source contract identity. `contracts.json` and `graphs.json` contain source
+semantics only; downstream consumers project states without rewriting them.
+This separation changes responsibilities and artifacts, not the meaning
 of existing scope judgments or the seven scientific stages.
 
 ## What the model proposes

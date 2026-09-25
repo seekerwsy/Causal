@@ -171,6 +171,8 @@ def build_tsg_viewer(
     review_root: Path | None = None,
 ) -> dict[str, Any]:
     """Export verified extraction bundles; no provider calls, filtering, or estimators."""
+    from prompt_mechanism_study.tsg.scope_assessment import load_assessed_graphs
+
     tasks = {task["task_id"]: task for task in read_json(tasks_path)}
     cases: dict[str, dict] = {}
     reports = []
@@ -180,6 +182,7 @@ def build_tsg_viewer(
         catalogs = read_json(root / "catalogs.json") if (root / "catalogs.json").exists() else {}
         prepared_tasks = {task["task_id"]: task for task in read_json(root / "tasks.json")} if (root / "tasks.json").exists() else {}
         graphs = {row["task_id"]: row for row in read_json(root / "graphs.json")}
+        assessed = {g.task_id: prompt_tsg_record(g) for g in load_assessed_graphs(root)}
         contracts = {row["task_id"]: row for row in read_json(root / "contracts.json")}
         requests = ({row["task_id"]: row["request"] for row in read_json(root / "requests.json")}
                     if (root / "requests.json").exists() else {})
@@ -202,6 +205,8 @@ def build_tsg_viewer(
                 if catalog is None and catalog_path is not None:
                     catalog = load_catalog(catalog_path)
             view = _source_graph_view(raw_graph, contract, task["prompt"], catalog)
+            if task_id in assessed:
+                view["graph"] = assessed[task_id]
             cases[task_id] = {"task_id": task_id, "prompt": task["prompt"],
                               "case_number": task.get("case_number", list(tasks).index(task_id) + 1),
                               "source_prompt": task.get("source_prompt", task["prompt"]),

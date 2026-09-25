@@ -1,178 +1,24 @@
-"""Result tables and reviewer bundle for the active schema-3 study."""
-
+"""Pure result-table assembly; execution and independent verification live outside."""
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
-
-from prompt_mechanism_study.artifact_io import write_bundle
 from prompt_mechanism_study.experiment.inference import (
-    ConfirmatoryEffectStatus,
-    EvidenceLevel,
-    SharedEvidenceRecord,
-    TargetSelectorYieldResult,
+    ConfirmatoryEffectStatus, EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult,
 )
-from prompt_mechanism_study.discovery.prioritization import (
-    ConfirmationDispatchManifest,
-    FixedSlotLedger,
-    PolicyTrack,
-    SharedConfirmationUnion,
-    SlotStatus,
-)
-from prompt_mechanism_study.experiment.randomization import (
-    AssignedArmITTRecord,
-    TargetRandomizationPlan,
-    TargetTaskBundle,
-)
+from prompt_mechanism_study.discovery.prioritization import PolicyTrack, SlotStatus
+from prompt_mechanism_study.experiment.study_design import FormalReportAuthorization
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest
-from prompt_mechanism_study.verification import (
-    load_and_verify_target_result_bundle,
-    target_result_package_index,
-    verify_target_shared_evidence,
-    verify_target_study_freezes,
-)
-from prompt_mechanism_study.experiment.study_design import (
-    ConfirmationFreeze,
-    DiscoveryDesignFreeze,
-    FormalBudgetPreflight,
-    FormalReportAuthorization,
-    StudyFreezeIndex,
-)
-from prompt_mechanism_study.experiment.study_planning import (
-    FreezeArtifactReference,
-    RQ1BudgetQualification,
-    StudyDesignError,
-)
-from prompt_mechanism_study.verification.verifier import _check_target_result_components
-from prompt_mechanism_study.verification.reporting import verify_target_execution_artifacts
-
-
-def authorize_target_report(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: Any,
-    task_bundles: Sequence[Any],
-    assignments: Sequence[Any],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: Any,
-    yields: Any,
-    execution_environment: FreezeArtifactReference,
-    execution_command: FreezeArtifactReference,
-    provider_call_ledger: FreezeArtifactReference,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> FormalReportAuthorization:
-    """Authorize claim-bearing tables only after the exact formal chain verifies."""
-
-    if type(evidence) is not SharedEvidenceRecord:
-        raise TypeError("formal report authorization requires shared target evidence")
-    if type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("formal report authorization requires target selector yields")
-    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
-        raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
-    if preflight.actual_power_results is None:
-        raise StudyDesignError("formal claims require the actual task-support power check")
-    verify_target_execution_artifacts(
-        discovery=discovery, confirmation=confirmation, evidence=evidence,
-        environment_reference=execution_environment, command_reference=execution_command,
-        provider_ledger_reference=provider_call_ledger, execution_artifacts=execution_artifacts,
-    )
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    if (
-        evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != frozen_assignments
-        or evidence.plan != budget.power_and_margin_memo.target_itt_plan()
-    ):
-        raise StudyDesignError("report evidence drifted from the formal confirmation freeze")
-    confirmation_task_units = {
-        task.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for task in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    if not assigned_task_units <= confirmation_task_units:
-        raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
-    freeze_verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    if (
-        freeze_verification.get("status") != "TARGET_STUDY_FREEZE_VERIFIED"
-        or evidence_verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED"
-    ):
-        raise StudyDesignError("formal report inputs did not independently verify")
-    return FormalReportAuthorization(
-        manifest.protocol_id,
-        FreezeArtifactReference(
-            index.study_freeze_index_id,
-            content_hash(index),
-        ),
-        FreezeArtifactReference(
-            evidence.shared_evidence_record_id,
-            content_hash(evidence),
-        ),
-        FreezeArtifactReference(
-            yields.target_selector_yield_result_id,
-            content_hash(yields),
-        ),
-        FreezeArtifactReference(
-            evidence.ledger.evidence_ledger_id,
-            content_hash(evidence.ledger),
-        ),
-        execution_environment,
-        execution_command,
-        provider_call_ledger,
-        content_hash(freeze_verification),
-        content_hash(evidence_verification),
-        evidence.evidence_level.value,
-    )
 
 
 def build_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
     authorization: FormalReportAuthorization | None = None,
+    *, verification: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Build claim-gated RQ tables from the one independently verified v3 record."""
-
-    if type(evidence) is not SharedEvidenceRecord or type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("target RQ tables require shared evidence and fixed-slot yields")
-    verification = verify_target_shared_evidence(evidence, yields)
-    if verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED":
-        raise ValueError("target shared evidence did not verify")
-    return _build_target_rq_tables(evidence, yields, authorization, verification)
-
-
-def _build_target_rq_tables(
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization | None,
-    verification: Mapping[str, object],
-) -> dict[str, Any]:
-    """Assemble tables from evidence independently checked by this invocation."""
+    """Assemble tables from evidence and the caller's independent verification result."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[Any]] = {}
     for slot in yields.slots:
         slots_by_selector.setdefault((slot.track, slot.model_id, slot.selector_id), []).append(slot)
@@ -360,103 +206,3 @@ def _build_target_rq_tables(
     }
     report["target_rq_tables_id"] = content_id("target_rq_tables_", report)
     return report
-
-
-def write_target_result_bundle(
-    output: Path,
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization | None = None,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Write the one exact target-v3 reviewer package and verify its stored bytes."""
-
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    frozen_task_bundles = tuple(
-        sorted(
-            task_bundles,
-            key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
-        )
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    report = _build_target_rq_tables(evidence, yields, authorization, evidence_verification)
-    verification = _check_target_result_components(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=frozen_task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        evidence_verification=evidence_verification,
-        authorization=authorization,
-        execution_artifacts=execution_artifacts,
-    )
-    package_index = target_result_package_index(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=frozen_task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        verification=verification,
-        authorization=authorization,
-        execution_artifacts=execution_artifacts,
-    )
-    write_bundle(
-        output,
-        {
-            "package_index.json": package_index,
-            "data_role_manifest.json": manifest,
-            "rq1_budget_qualification.json": budget,
-            "discovery_design_freeze.json": discovery,
-            "fixed_slot_ledger.json": ledger,
-            "shared_confirmation_union.json": union,
-            "confirmation_dispatch_manifest.json": dispatch,
-            "target_randomization_plan.json": randomization_plan,
-            "confirmation_task_bundles.json": frozen_task_bundles,
-            "assignments.json": frozen_assignments,
-            "formal_budget_preflight.json": preflight,
-            "confirmation_freeze.json": confirmation,
-            "study_freeze_index.json": index,
-            "shared_evidence_record.json": evidence,
-            "target_selector_yield_result.json": yields,
-            "formal_report_authorization.json": authorization,
-            "execution_artifacts.json": execution_artifacts,
-            "rq_tables.json": report,
-            "verification.json": verification,
-        },
-    )
-    return load_and_verify_target_result_bundle(output)

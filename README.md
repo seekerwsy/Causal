@@ -29,7 +29,7 @@ TSG edges express source semantics, not causal relationships. An unexpressed
 requirement does not imply insecure generated code; unknown does not mean absent.
 Post-assignment compliance, generation success and drift never filter the ITT
 denominator. Secure-code yield, Oracle coverage, functionality and joint success
-remain separate. Current TSG uses graph schema 3 and concept-catalog schema 2;
+remain separate. Current TSG uses source-contract schema 4, graph schema 3 and concept-catalog schema 2;
 older formats are replayed with their captured Git implementation.
 TSG program validation checks structure, references and source locations, not
 semantic entailment. Models judge source meaning and candidate applicability;
@@ -97,7 +97,10 @@ Contracts and independent source judgments are supplied inputs; the prototype
 does not run a separate contract-production and repair campaign. Extraction, generation and functional review share
 `llm.py`; each stage retains its own response interpretation. File serialization
 is shared in `artifact_io.py`, while result arithmetic is independently replayed
-in `verification/`. Result tables are built by `experiment/reporting.py`.
+in `verification/`. `experiment/reporting.py` builds tables without calling the
+verifier or writing files; `target_workflow.py` coordinates verification and
+package writing. Source graphs and candidate-state tables are saved separately,
+so changing an assessment does not rewrite source semantics.
 
 | Author operation | Entry or guide |
 | --- | --- |

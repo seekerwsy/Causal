@@ -324,6 +324,7 @@ def _run_visualize_tsg(args: argparse.Namespace, _: argparse.ArgumentParser) -> 
 def _run_extract_contracts(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     from prompt_mechanism_study.tsg.prompt_contract_extract import extract_contract_task_file
 
+    from prompt_mechanism_study.tsg.prompt_contract_qualification import prepare_source_reference
     report = extract_contract_task_file(
         args.tasks,
         args.catalog,
@@ -332,7 +333,10 @@ def _run_extract_contracts(args: argparse.Namespace, _: argparse.ArgumentParser)
         args.selection,
         args.output,
         max_workers=args.workers,
-        qualification_reference_path=args.qualification_reference,
+        reference_context=(prepare_source_reference(reference_path=args.qualification_reference,
+            tasks_path=args.tasks, selection_path=args.selection, catalog_path=args.catalog,
+            evaluator_path=args.evaluator, annotator_prompt_path=args.annotator_prompt)
+            if args.qualification_reference else None),
         review_status="development_exposed" if args.development_exposed else "prospective_frozen",
     )
     return _emit_status(report)

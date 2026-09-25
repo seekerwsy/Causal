@@ -29,12 +29,12 @@ def task_context_contract_record(contract: OpenTaskContract) -> dict[str, Any]:
 
 def task_context_contract_from_record(value: Mapping[str, Any]) -> OpenTaskContract:
     """Parse the active source-only contract format."""
-    if not isinstance(value, Mapping) or value.get("schema_version") != "3.0":
+    if not isinstance(value, Mapping) or value.get("schema_version") != "4.0":
         raise PromptTSGError("open task contract format is required")
     try:
         record = dict(value)
         identity = record.pop("contract_id", None)
-        for key in ("facts", "relations", "concept_states", "feature_states", "unresolved_notes"):
+        for key in ("facts", "relations", "concept_states", "unresolved_notes"):
             record[key] = tuple(record[key])
         contract = OpenTaskContract(**record)
     except (KeyError, TypeError, ValueError):
@@ -59,7 +59,6 @@ class OpenTaskContract:
     facts: tuple[dict[str, Any], ...]
     relations: tuple[dict[str, Any], ...]
     concept_states: tuple[dict[str, str], ...]
-    feature_states: tuple[dict[str, Any], ...]
     unresolved_notes: tuple[str, ...]
     source_inventory: dict[str, Any] | None = None
 
@@ -236,6 +235,7 @@ def _validate_source_inventory(contract: OpenTaskContract, *, prompt: str,
 
 def compile_task_context_contract(
     contract: OpenTaskContract, *, prompt: str, catalog: Mapping[str, Any] | None = None,
+    feature_states=(),
 ) -> PromptTSG:
     """Derive the graph from source records; optionally check the input vocabulary.
 
@@ -245,7 +245,7 @@ def compile_task_context_contract(
     """
     if not isinstance(contract, OpenTaskContract):
         raise PromptTSGError("open task contract is required")
-    if (contract.schema_version != "3.0" or contract.prompt_sha256 != content_hash(prompt)
+    if (contract.schema_version != "4.0" or contract.prompt_sha256 != content_hash(prompt)
         or catalog is not None and contract.input_catalog_sha256 != catalog_sha256(catalog)
         or contract.arms_or_outcomes_used is not False or contract.review_status not in _REVIEW_STATUSES):
         raise PromptTSGError("open contract envelope is invalid")
@@ -286,7 +286,7 @@ def compile_task_context_contract(
     # the allowed meanings; it does not turn an omitted label into absence or
     # erase independently source-bound positive facts elsewhere in the task.
     features, scoped_features = [], []
-    for row in contract.feature_states:
+    for row in feature_states:
         basic = {"target", "concept_id", "state", "rationale"}
         scoped = set(row) == basic | {"subjects", "conditions", "requirements"}
         if set(row) != basic and not scoped:

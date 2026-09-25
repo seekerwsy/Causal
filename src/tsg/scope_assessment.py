@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import Any
-from dataclasses import replace
 from prompt_mechanism_study.artifact_io import json_object
 from prompt_mechanism_study.tsg.prompt_contract import (
     compile_task_context_contract,
@@ -309,10 +308,10 @@ def fixed_scope_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
         "name": "fixed_source_scope_states", "strict": True, "schema": schema}}
 
 
-def apply_fixed_scope_response(
+def assess_fixed_scope_response(
     raw: bytes, *, request: Mapping[str, Any], contract: OpenTaskContract,
     prompt: str, catalog: Mapping[str, Any],
-) -> OpenTaskContract:
+) -> dict[str, Any]:
     """Bind each state to its requested scope; malformed or conflicting rows stay unknown."""
     if request != fixed_scope_request(contract, prompt=prompt, catalog=catalog):
         raise PromptContractExtractionError("scope request does not bind its exact source contract")
@@ -323,11 +322,10 @@ def apply_fixed_scope_response(
         or any(not isinstance(note, str) for note in value["unresolved_notes"])
         or set(value["states"]) - set(request["scopes"])):
         raise PromptContractExtractionError("fixed scope response fields are invalid")
-    notes = [*contract.unresolved_notes, *value["unresolved_notes"]]
+    notes = list(value["unresolved_notes"])
     assessments = []
     # The preceding annotations supply facts and bindings only; no omitted
     # scope answer is a default or evidence of absence.
-    base = replace(contract, feature_states=())
     for key, scope in request["scopes"].items():
         supplied = value["states"].get(key)
         row = {name: scope[name] for name in ("target", "subjects", "conditions", "concept_id")}
@@ -361,14 +359,47 @@ def apply_fixed_scope_response(
                        rationale=f"Applicability ({applicability}): {supplied['applicability_rationale']} Expression ({expression}): {_scope_expression_rationale(scope, expression)}")
             try:
                 if error is None:
-                    compile_task_context_contract(replace(base, feature_states=(row,)),
-                                                  prompt=prompt, catalog=catalog)
+                    compile_task_context_contract(contract, feature_states=(row,), prompt=prompt, catalog=catalog)
             except PromptTSGError as failure:
                 error = str(failure)
         if error:
             row.update(state="unresolved", requirements=[], rationale="No valid source-bound assessment.")
             notes.append(f"unresolved_fixed_scope: {key}: {error}")
         assessments.append(row)
-    result = replace(base, feature_states=tuple(assessments), unresolved_notes=tuple(notes))
-    compile_task_context_contract(result, prompt=prompt, catalog=catalog)
+    return dict(task_id=contract.task_id, source_contract_id=contract.contract_id,
+        states=assessments, unresolved_notes=notes)
+
+
+def assessed_graph(contract, assessment, *, prompt, catalog=None):
+    """Project candidate states without mutating or serializing a second source contract."""
+    if assessment is not None and (
+        assessment.get('task_id') != contract.task_id or assessment.get('source_contract_id') != contract.contract_id
+    ):
+        raise PromptContractExtractionError('candidate assessment belongs to another source contract')
+    return compile_task_context_contract(contract, prompt=prompt, catalog=catalog,
+        feature_states=assessment['states'] if assessment is not None else ())
+
+
+def load_assessed_graphs(bundle, graph_artifact='graphs.json'):
+    """Read source graphs and, when present, their separate candidate-state table."""
+    from prompt_mechanism_study.artifact_io import read_json
+    from prompt_mechanism_study.tsg.prompt_contract import task_context_contract_from_record
+    from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_from_record
+    graphs = [prompt_tsg_from_record(row) for row in read_json(bundle / graph_artifact)]
+    path = bundle / 'factor-states.json'
+    if not path.exists():
+        return graphs
+    rows = read_json(path)
+    assessments = {row['task_id']: row for row in rows}
+    if len(assessments) != len(rows) or set(assessments) - {g.task_id for g in graphs}:
+        raise PromptContractExtractionError('candidate assessment task identities differ')
+    contracts = {row['task_id']: task_context_contract_from_record(row) for row in read_json(bundle / 'contracts.json')}
+    tasks = {row['task_id']: row for row in read_json(bundle / 'tasks.json')}
+    result = []
+    for graph in graphs:
+        contract = contracts[graph.task_id]
+        prompt = tasks[graph.task_id]['prompt']
+        if compile_task_context_contract(contract, prompt=prompt) != graph:
+            raise PromptContractExtractionError('saved source graph differs from its contract')
+        result.append(assessed_graph(contract, assessments.get(graph.task_id), prompt=prompt))
     return result

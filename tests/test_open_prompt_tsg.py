@@ -20,7 +20,9 @@ from prompt_mechanism_study.tsg.source_codec import (
     contract_decision_request,
 )
 from prompt_mechanism_study.tsg.scope_assessment import (
-    apply_fixed_scope_response,
+    assess_fixed_scope_response,
+    load_assessed_graphs,
+    assessed_graph,
     fixed_scope_request,
 )
 from prompt_mechanism_study.tsg.prompt_contract_extract import extract_contract_task_file
@@ -37,6 +39,7 @@ from prompt_mechanism_study.tsg.prompt_contract_qualification import (
     evaluate_open_semantic_case,
     open_graph_assertions,
     qualify_prompt_contract_extractor,
+    prepare_source_reference,
     representation_implementation_identity,
     PromptContractQualificationError,
 )
@@ -129,7 +132,7 @@ def _semantic_qualification_fixture(tmp_path, failure=None):
                 return b'{"nodes": "invalid"}'
             if failure == "binding" and request["request_kind"] == "source_only_record_review":
                 raise RuntimeError("Deliberate offline binding failure")
-            return json.dumps(record_annotation(request, dict(concepts=[], concept_states=[], feature_states=[], unresolved_notes=[],
+            return json.dumps(record_annotation(request, dict(concepts=[], concept_states=[], unresolved_notes=[],
                 nodes=[dict(local_id=f["local_id"], concept_id=f["semantic_id"], evidence_text=f["evidence_text"],
                             occurrence=f["occurrence"]) for f in source.facts],
                 edges=[dict(source_node_local_id=e["source"], target_node_local_id=e["target"],
@@ -146,12 +149,14 @@ def _semantic_qualification_fixture(tmp_path, failure=None):
 def _extract_semantic_fixture(paths, provider, output):
     return extract_contract_task_file(paths["tasks"], paths["catalog"], paths["evaluator"], paths["prompt"],
         paths["selection"], output, provider=provider, review_status="development_exposed",
-        qualification_reference_path=paths["reference"])
+        reference_context=prepare_source_reference(reference_path=paths["reference"], tasks_path=paths["tasks"],
+            selection_path=paths["selection"], catalog_path=paths["catalog"], evaluator_path=paths["evaluator"],
+            annotator_prompt_path=paths["prompt"]))
 
 
 def _source_review_fixture(output, paths, case, write):
     from prompt_mechanism_study.artifact_io import bundle_digest
-    rows = read_json(output / "graphs.json")
+    rows = [prompt_tsg_record(g) for g in load_assessed_graphs(output)]
     graph = rows[0] if rows else None
     contracts = read_json(output / "contracts.json")
     contract = contracts[0] if contracts else None
@@ -168,7 +173,7 @@ def _source_review_fixture(output, paths, case, write):
 def test_independent_source_qualification_replays_three_steps_and_keeps_failed_tasks(tmp_path, failure):
     paths, case, provider, calls, write = _semantic_qualification_fixture(tmp_path, failure)
     output = tmp_path / "extract"
-    if failure:
+    if failure in {"graph", "binding"}:
         with pytest.raises(PromptContractExtractionError, match="closed bundle"):
             _extract_semantic_fixture(paths, provider, output)
     else:
@@ -177,8 +182,13 @@ def test_independent_source_qualification_replays_three_steps_and_keeps_failed_t
     result = qualify_prompt_contract_extractor(paths["tasks"], output, paths["catalog"],
         paths["reference"], paths["evaluator"], paths["prompt"],
         tmp_path / "qualification", assertion_review_path=audit)
+    report = read_json(output / "report.json")
+    assert len(report["candidate_assessment_failed_task_ids"]) == int(failure == "scope")
+    if failure not in {"graph", "binding"}:
+        assert "feature_states" not in read_json(output / "contracts.json")[0]
+        assert not read_json(output / "graphs.json")[0].get("scoped_feature_assessments")
     assert result["task_units"] == 1
-    assert result["failed_extraction_task_units"] == int(failure is not None)
+    assert result["failed_extraction_task_units"] == int(failure in {"graph", "binding"})
     assert result["complete_task_units"] == int(failure is None)
     assert result["status"] == ("QUALIFICATION_FAILED" if failure else "SYNTHETIC_REFERENCE_CHECK_PASSED")
     assert result["scientific_claim_allowed"] is False
@@ -327,7 +337,7 @@ def test_typed_role_error_cannot_hide_behind_identical_graph_assertions(tmp_path
     changed.pop("contract_id")
     changed_contract = task_context_contract_from_record(changed)
     changed = task_context_contract_record(changed_contract)
-    rebuilt = compile_task_context_contract(changed_contract,
+    rebuilt = compile_task_context_contract(changed_contract, feature_states=read_json(output / "factor-states.json")[0]["states"],
                                             prompt=prompt, catalog=read_json(paths["catalog"]))
     changed_graph = prompt_tsg_record(rebuilt)
     assert open_graph_assertions(changed_graph) == open_graph_assertions(graph)
@@ -362,9 +372,7 @@ def _contract():
                              evidence_text="Read external x in query A", occurrence=1),
                         dict(source="p", target="b", edge_type="constrains",
                              evidence_text="Parameterize query B", occurrence=1)],
-                 concept_states=[], feature_states=[
-                     dict(target="a", concept_id="parameter_binding", state="absent", rationale="Only B is constrained."),
-                     dict(target="b", concept_id="parameter_binding", state="present", rationale="The explicit B requirement.")],
+                 concept_states=[],
                  unresolved_notes=[])
     value['concepts'] = list({n['concept_id']: {k:n[k] for k in ('concept_id','node_type','definition')} for n in value['nodes']}.values())
     value['nodes'] = [{k:v for k,v in n.items() if k not in {'node_type','definition'}} for n in value['nodes']]
@@ -775,8 +783,7 @@ def test_fixed_scope_assessment_cannot_create_coordinates_or_default_missing_sta
         required_semantics=["sql_query"], actionable_feature_id="parameter_binding",
         forbidden_semantics=[], required_relations=[], realization_id="bind",
         cwe_id="source_semantics", task_family="source_semantics")])
-    contract = replace(contract, catalog=catalog, input_catalog_sha256=catalog_sha256(catalog),
-                       feature_states=())
+    contract = replace(contract, catalog=catalog, input_catalog_sha256=catalog_sha256(catalog))
     request = fixed_scope_request(contract, prompt=PROMPT, catalog=catalog)
     assert len(request["scopes"]) == 3
     assert all(row['definition'] == catalog['semantic_guidance'].get(row['concept_id'], '') for row in request['facts'])
@@ -785,30 +792,36 @@ def test_fixed_scope_assessment_cannot_create_coordinates_or_default_missing_sta
                         requirements=["p"] if scope["target"] == "b" else [])
               for key, scope in request["scopes"].items()}
     def apply(values, frozen_request=request):
-        return apply_fixed_scope_response(json.dumps(dict(states=values, unresolved_notes=[])).encode(),
+        return assess_fixed_scope_response(json.dumps(dict(states=values, unresolved_notes=[])).encode(),
             request=frozen_request, contract=contract, prompt=PROMPT, catalog=catalog)
+    source_before = task_context_contract_record(contract)
     result = apply(states)
-    assert {row["state"] for row in result.feature_states} == {"present", "absent"}
-    assert result.facts == contract.facts and result.relations == contract.relations
+    assert {row["state"] for row in result["states"]} == {"present", "absent"}
+    assert result["source_contract_id"] == contract.contract_id
+    assert task_context_contract_record(contract) == source_before
+    assert not compile_task_context_contract(contract, prompt=PROMPT).scoped_feature_assessments
+    assert assessed_graph(contract, result, prompt=PROMPT).scoped_feature_assessments
+    with pytest.raises(PromptContractExtractionError, match="another source contract"):
+        assessed_graph(contract, dict(result, source_contract_id="wrong"), prompt=PROMPT)
     input_key = next(key for key, scope in request["scopes"].items() if scope["subjects"])
     # Old ambiguous annotation labels are not an alternate active response path.
     old_wire = apply({**states, input_key: dict(state="absent", requirements=[], rationale="Legacy label.")})
-    assert next(row for row in old_wire.feature_states if row["subjects"])["state"] == "unresolved"
+    assert next(row for row in old_wire["states"] if row["subjects"])["state"] == "unresolved"
     missing = apply({key: row for key, row in states.items() if key != input_key})
-    assert next(row for row in missing.feature_states if row["subjects"])["state"] == "unresolved"
+    assert next(row for row in missing["states"] if row["subjects"])["state"] == "unresolved"
     # Unmentioned security wording cannot settle an ambiguous input role.
     ambiguous = apply({**states, input_key: scope_answer(request["scopes"][input_key], applicability="unresolved")})
-    assert next(row for row in ambiguous.feature_states if row["subjects"])["state"] == "unresolved"
+    assert next(row for row in ambiguous["states"] if row["subjects"])["state"] == "unresolved"
     inapplicable = apply({**states, input_key: scope_answer(request["scopes"][input_key], applicability="not_applicable")})
-    assert next(row for row in inapplicable.feature_states if row["subjects"])["state"] == "not_applicable"
+    assert next(row for row in inapplicable["states"] if row["subjects"])["state"] == "not_applicable"
     unsupported = apply({**states, input_key: {**states[input_key], "applicability_evidence": []}})
-    assert next(row for row in unsupported.feature_states if row["subjects"])["state"] == "unresolved"
+    assert next(row for row in unsupported["states"] if row["subjects"])["state"] == "unresolved"
     b_key = next(key for key, scope in request["scopes"].items() if scope["target"] == "b")
     contradictory = apply({**states, b_key: scope_answer(request["scopes"][b_key])})
-    assert next(row for row in contradictory.feature_states if row["target"] == "b")["state"] == "unresolved"
-    assert any("negative contradicts" in note for note in contradictory.unresolved_notes)
+    assert next(row for row in contradictory["states"] if row["target"] == "b")["state"] == "unresolved"
+    assert any("negative contradicts" in note for note in contradictory["unresolved_notes"])
     contradiction = apply({**states, b_key: {**states[b_key], "applicability": "not_applicable"}})
-    assert next(row for row in contradiction.feature_states if row["target"] == "b")["state"] == "unresolved"
+    assert next(row for row in contradiction["states"] if row["target"] == "b")["state"] == "unresolved"
     with pytest.raises(PromptContractExtractionError, match="fields"):
         apply({**states, "invented_scope": states[b_key]})
     changed = deepcopy(request)
@@ -830,7 +843,7 @@ def test_only_condition_predicates_can_change_scopes_and_rejected_conditions_do_
     def e(a, kind, b, quote):
         return dict(source_node_local_id=a, edge_type=kind, target_node_local_id=b,
                     evidence_text=quote, occurrence=1)
-    raw = dict(concepts=[], concept_states=[], feature_states=[], unresolved_notes=[],
+    raw = dict(concepts=[], concept_states=[], unresolved_notes=[],
         nodes=[n("a", "query", "Query A"), n("x", "arg", "input x"), n("lang", "language", "Use Python"),
                n("c", "remote", "If remote"), n("p", "binding", "parameterize x in A")],
         edges=[e("x", "used_by", "a", "Query A uses input x"), e("lang", "constrains", "a", "Use Python"),
@@ -870,7 +883,7 @@ def test_indexed_operation_incidence_preserves_shared_intermediates_and_exact_re
     def edge(source, kind, target, quote):
         return dict(source_node_local_id=source, target_node_local_id=target, edge_type=kind,
                     evidence_text=quote, occurrence=1)
-    raw_graph = dict(concepts=[], concept_states=[], feature_states=[], unresolved_notes=[], nodes=[
+    raw_graph = dict(concepts=[], concept_states=[], unresolved_notes=[], nodes=[
         node("extract", "extract", "Extract x and y from the request"),
         node("a", "query", "query A"), node("b", "query", "query B"),
         node("x", "argument", "x", task["prompt"][:task["prompt"].index("f(x,y)") + 2].count("x") + 1),

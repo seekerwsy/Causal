@@ -12,7 +12,9 @@ actual system/user input and language
   -> structural checks and direct preview compilation
   -> one source review
   -> at most one complete-record revision, followed by direct compilation
+  -> save source contract + graph
   -> separate candidate applicability/expression assessment
+  -> save candidate-state table, project a read-only assessed graph
 ```
 
 `source_records.attempt_graph` is the extraction entry point. On a malformed
@@ -40,7 +42,11 @@ is claimed by this refactor.
 ## Shared candidate and visualization projection
 
 The saved source contract owns facts, bindings, conditions and scope. Graphs are
-its deterministic projections. `prompt_tsg.source_nodes` supplies the same local-ID
+its deterministic projections. Source-contract schema 4 has no `feature_states`
+field. `factor-states.json` stores each task's `source_contract_id`, assessed
+`states` and unresolved notes; `assessed_graph` checks the source identity and
+compiles the same graph with those states for downstream use. No second source
+contract is created. `prompt_tsg.source_nodes` supplies the same local-ID
 to graph-node transformation to construction, scope assessment, candidates and the
 viewer; none of these readers rematches nodes by concept text or evidence span.
 Graph validation retains schema, identity, endpoint and composition checks in one
@@ -52,6 +58,15 @@ is reported rather than displayed as a different interpretation. Graph-only
 artifacts remain inspectable after source/catalog validation, without invented
 relation citations. Node/edge evidence, generation-layer display, graph comparison,
 SVG export, prompt comparison and saved-result inspection remain available.
+The viewer overlays the separately saved states after checking the source graph.
+
+`extract_task_contract` only constructs source semantics. The batch extraction
+command subsequently calls `assess_candidate_scopes`; this function can also
+consume an existing source attempt with its matching frozen catalog. A failed
+assessment is recorded separately and does not mark successful source extraction
+as failed. Missing judgments remain unknown. Independent qualification replays
+both outputs and still checks semantic completeness. It is never invoked by
+the extraction module; the CLI prepares a prospective reference before calls.
 
 ## Preserved meaning
 

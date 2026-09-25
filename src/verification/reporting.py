@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from difflib import SequenceMatcher
 import hashlib
 from pathlib import Path
+from typing import Any
 import ast
 import itertools
 import json
@@ -48,6 +49,7 @@ from prompt_mechanism_study.experiment.randomization import (
     TargetTaskBundle,
 )
 from prompt_mechanism_study.records import content_hash, content_id
+from prompt_mechanism_study.experiment.study_planning import FreezeArtifactReference
 
 
 def _exact_task_randomization_probability(differences, seed_count):
@@ -1496,3 +1498,108 @@ __all__ = [
     "verify_formal_report_authorization",
     "verify_target_rq_tables",
 ]
+
+
+def authorize_target_report(
+    *,
+    manifest: DataRoleManifest,
+    budget: RQ1BudgetQualification,
+    discovery: DiscoveryDesignFreeze,
+    ledger: FixedSlotLedger,
+    union: SharedConfirmationUnion,
+    dispatch: ConfirmationDispatchManifest,
+    randomization_plan: Any,
+    task_bundles: Sequence[Any],
+    assignments: Sequence[Any],
+    preflight: FormalBudgetPreflight,
+    confirmation: ConfirmationFreeze,
+    index: StudyFreezeIndex,
+    evidence: Any,
+    yields: Any,
+    execution_environment: FreezeArtifactReference,
+    execution_command: FreezeArtifactReference,
+    provider_call_ledger: FreezeArtifactReference,
+    execution_artifacts: Mapping[str, object] | None = None,
+) -> FormalReportAuthorization:
+    """Authorize claim-bearing tables only after the exact formal chain verifies."""
+    from prompt_mechanism_study.verification.design import verify_target_study_freezes
+    from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
+    from prompt_mechanism_study.experiment.study_planning import StudyDesignError
+    from prompt_mechanism_study.tsg.representation import DataRole
+
+    if type(evidence) is not SharedEvidenceRecord:
+        raise TypeError("formal report authorization requires shared target evidence")
+    if type(yields) is not TargetSelectorYieldResult:
+        raise TypeError("formal report authorization requires target selector yields")
+    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
+        raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
+    if preflight.actual_power_results is None:
+        raise StudyDesignError("formal claims require the actual task-support power check")
+    verify_target_execution_artifacts(
+        discovery=discovery, confirmation=confirmation, evidence=evidence,
+        environment_reference=execution_environment, command_reference=execution_command,
+        provider_ledger_reference=provider_call_ledger, execution_artifacts=execution_artifacts,
+    )
+    frozen_assignments = tuple(
+        sorted(assignments, key=lambda item: item.assignment_id)
+    )
+    if (
+        evidence.ledger.dispatch != dispatch
+        or evidence.ledger.assignments != frozen_assignments
+        or evidence.plan != budget.power_and_margin_memo.target_itt_plan()
+    ):
+        raise StudyDesignError("report evidence drifted from the formal confirmation freeze")
+    confirmation_task_units = {
+        task.task_unit_id
+        for binding in manifest.bindings
+        if binding.role is DataRole.CONFIRMATION
+        for task in binding.task_units
+    }
+    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
+    if not assigned_task_units <= confirmation_task_units:
+        raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
+    freeze_verification = verify_target_study_freezes(
+        manifest=manifest,
+        budget=budget,
+        discovery=discovery,
+        ledger=ledger,
+        union=union,
+        dispatch=dispatch,
+        randomization_plan=randomization_plan,
+        task_bundles=task_bundles,
+        assignments=frozen_assignments,
+        preflight=preflight,
+        confirmation=confirmation,
+        index=index,
+    )
+    evidence_verification = verify_target_shared_evidence(evidence, yields)
+    if (
+        freeze_verification.get("status") != "TARGET_STUDY_FREEZE_VERIFIED"
+        or evidence_verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED"
+    ):
+        raise StudyDesignError("formal report inputs did not independently verify")
+    return FormalReportAuthorization(
+        manifest.protocol_id,
+        FreezeArtifactReference(
+            index.study_freeze_index_id,
+            content_hash(index),
+        ),
+        FreezeArtifactReference(
+            evidence.shared_evidence_record_id,
+            content_hash(evidence),
+        ),
+        FreezeArtifactReference(
+            yields.target_selector_yield_result_id,
+            content_hash(yields),
+        ),
+        FreezeArtifactReference(
+            evidence.ledger.evidence_ledger_id,
+            content_hash(evidence.ledger),
+        ),
+        execution_environment,
+        execution_command,
+        provider_call_ledger,
+        content_hash(freeze_verification),
+        content_hash(evidence_verification),
+        evidence.evidence_level.value,
+    )

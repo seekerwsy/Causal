@@ -362,7 +362,7 @@ def test_shared_itt_reporting_and_independent_replay() -> None:
     assert verification["status"] == "TARGET_SHARED_EVIDENCE_VERIFIED"
 
     # Report the same frozen estimate; keep fixed slots and claim limits.
-    report = build_target_rq_tables(result, yields)
+    report = build_target_rq_tables(result, yields, verification=verify_target_shared_evidence(result, yields))
     verification = verify_target_rq_tables(result, yields, report)
     assert report["report_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert report["scientific_claim_allowed"] is False
@@ -542,7 +542,7 @@ def test_policy_limits_stay_local_and_unknown_is_a_warning():
     yields = build_target_selector_yields(result)
     assert all(y.top_k == 4 for y in yields.selectors)
     verify_target_shared_evidence(result, yields)
-    report = build_target_rq_tables(result, yields)
+    report = build_target_rq_tables(result, yields, verification=verify_target_shared_evidence(result, yields))
     verify_target_rq_tables(result, yields, report)
 
 

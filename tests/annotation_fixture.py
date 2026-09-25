@@ -183,8 +183,8 @@ def authored_contract(value, *, task, catalog, annotator_id, review_status, sour
         evidence_text=row['evidence_text'], occurrence=row['occurrence']) for row in value['nodes'])
     edges = tuple(dict(source=row['source_node_local_id'], target=row['target_node_local_id'],
         **{key:row[key] for key in ('edge_type','evidence_text','occurrence')}) for row in value['edges'])
-    contract = OpenTaskContract('3.0', task['task_id'], content_hash(task['prompt']), catalog_sha256(catalog),
+    contract = OpenTaskContract('4.0', task['task_id'], content_hash(task['prompt']), catalog_sha256(catalog),
         annotator_id, review_status, False, derived, facts, edges, tuple(value.get('concept_states', [])),
-        tuple(value.get('feature_states', [])), tuple(value['unresolved_notes']), source_inventory)
+        tuple(value['unresolved_notes']), source_inventory)
     compile_task_context_contract(contract, prompt=task['prompt'], catalog=catalog)
     return contract

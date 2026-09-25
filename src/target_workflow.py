@@ -12,6 +12,7 @@ measurement and outcome functions, with its separate frozen descriptive analysis
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping, Sequence
 from dataclasses import asdict
 from collections import Counter
 from contextlib import redirect_stdout
@@ -32,17 +33,24 @@ from prompt_mechanism_study.measurement.evaluate import (
 )
 from prompt_mechanism_study.experiment.inference import (
     EvidenceLevel,
+    SharedEvidenceRecord,
+    TargetSelectorYieldResult,
     build_target_selector_yields,
     estimate_target_itt,
     freeze_assigned_arm_evidence,
 )
 from prompt_mechanism_study.experiment.randomization import (
     TargetRandomizationPlan,
+    TargetTaskBundle,
+    AssignedArmITTRecord,
     randomize_target_confirmation,
 )
 from prompt_mechanism_study.experiment.outcomes import derive_outcomes
 from prompt_mechanism_study.discovery.prioritization import (
     FixedSlotSource,
+    FixedSlotLedger,
+    SharedConfirmationUnion,
+    ConfirmationDispatchManifest,
     PolicyTrack,
     atomic_preoutcome_observations,
     freeze_atomic_candidate_folds,
@@ -53,16 +61,21 @@ from prompt_mechanism_study.discovery.prioritization import (
     run_atomic_fci_bootstrap,
 )
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.tsg.representation import DataRole, validate_data_role_firewall
-from prompt_mechanism_study.experiment.reporting import write_target_result_bundle
+from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest, validate_data_role_firewall
+from prompt_mechanism_study.experiment.reporting import build_target_rq_tables
 from prompt_mechanism_study.verification import verify_target_study_freezes
 from prompt_mechanism_study.experiment.study_design import (
+    DiscoveryDesignFreeze,
+    FormalBudgetPreflight,
+    ConfirmationFreeze,
+    StudyFreezeIndex,
+    FormalReportAuthorization,
     freeze_target_confirmation_design,
     freeze_target_discovery_design,
     freeze_target_study_index,
     validate_formal_budget_preflight,
 )
-from prompt_mechanism_study.experiment.study_planning import FreezeArtifactReference
+from prompt_mechanism_study.experiment.study_planning import FreezeArtifactReference, RQ1BudgetQualification
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_input_for_prompt
 
 PROTOCOL_ID = "phase-context-policy-v3"
@@ -749,4 +762,78 @@ def _artifact_reference(prefix: str, value: object) -> FreezeArtifactReference:
     return FreezeArtifactReference(content_id(prefix, value), content_hash(value))
 
 
-__all__ = ["SMOKE_STAGES", "run_target_reviewer_smoke"]
+def write_target_result_bundle(
+    output: Path,
+    *,
+    manifest: DataRoleManifest,
+    budget: RQ1BudgetQualification,
+    discovery: DiscoveryDesignFreeze,
+    ledger: FixedSlotLedger,
+    union: SharedConfirmationUnion,
+    dispatch: ConfirmationDispatchManifest,
+    randomization_plan: TargetRandomizationPlan,
+    task_bundles: Sequence[TargetTaskBundle],
+    assignments: Sequence[AssignedArmITTRecord],
+    preflight: FormalBudgetPreflight,
+    confirmation: ConfirmationFreeze,
+    index: StudyFreezeIndex,
+    evidence: SharedEvidenceRecord,
+    yields: TargetSelectorYieldResult,
+    authorization: FormalReportAuthorization | None = None,
+    execution_artifacts: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Write the one exact target-v3 reviewer package and verify its stored bytes."""
+
+    from prompt_mechanism_study.verification import (
+        verify_target_shared_evidence, verify_target_result_components,
+        target_result_package_index, load_and_verify_target_result_bundle,
+    )
+    frozen_assignments = tuple(
+        sorted(assignments, key=lambda item: item.assignment_id)
+    )
+    frozen_task_bundles = tuple(
+        sorted(
+            task_bundles,
+            key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
+        )
+    )
+    evidence_verification = verify_target_shared_evidence(evidence, yields)
+    report = build_target_rq_tables(evidence, yields, authorization, verification=evidence_verification)
+    components = dict(
+        manifest=manifest, budget=budget, discovery=discovery, ledger=ledger,
+        union=union, dispatch=dispatch, randomization_plan=randomization_plan,
+        task_bundles=frozen_task_bundles, assignments=frozen_assignments,
+        preflight=preflight, confirmation=confirmation, index=index,
+        evidence=evidence, yields=yields, report=report,
+        authorization=authorization, execution_artifacts=execution_artifacts,
+    )
+    verification = verify_target_result_components(**components)
+    package_index = target_result_package_index(**components, verification=verification)
+    write_bundle(
+        output,
+        {
+            "package_index.json": package_index,
+            "data_role_manifest.json": manifest,
+            "rq1_budget_qualification.json": budget,
+            "discovery_design_freeze.json": discovery,
+            "fixed_slot_ledger.json": ledger,
+            "shared_confirmation_union.json": union,
+            "confirmation_dispatch_manifest.json": dispatch,
+            "target_randomization_plan.json": randomization_plan,
+            "confirmation_task_bundles.json": frozen_task_bundles,
+            "assignments.json": frozen_assignments,
+            "formal_budget_preflight.json": preflight,
+            "confirmation_freeze.json": confirmation,
+            "study_freeze_index.json": index,
+            "shared_evidence_record.json": evidence,
+            "target_selector_yield_result.json": yields,
+            "formal_report_authorization.json": authorization,
+            "execution_artifacts.json": execution_artifacts,
+            "rq_tables.json": report,
+            "verification.json": verification,
+        },
+    )
+    return load_and_verify_target_result_bundle(output)
+
+
+__all__ = ["SMOKE_STAGES", "run_target_reviewer_smoke", "write_target_result_bundle"]

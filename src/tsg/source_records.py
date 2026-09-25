@@ -482,9 +482,9 @@ def compile_records(value, *, request, task, catalog, annotator_id, review_statu
                      layers=layers, operation_roles=[])
     template_edges = [dict(source=row['source_node_local_id'], target=row['target_node_local_id'],
         **{key:row[key] for key in ('edge_type','evidence_text','occurrence')}) for row in template['edges']]
-    contract = OpenTaskContract('3.0', task['task_id'], content_hash(task['prompt']),
+    contract = OpenTaskContract('4.0', task['task_id'], content_hash(task['prompt']),
         catalog_sha256(catalog), annotator_id, review_status, False, derived,
-        tuple(facts), tuple(template_edges), (), (), tuple(value['unresolved_notes']), inventory)
+        tuple(facts), tuple(template_edges), (), tuple(value['unresolved_notes']), inventory)
     relations_by_source, roles, impacts = {}, [], {}
     def citation(row):
         return _source_citation(row, request, "relation")

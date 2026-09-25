@@ -105,30 +105,30 @@ def test_minimal_graph_validation_does_not_certify_source_meaning():
 def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
     from copy import deepcopy
     from prompt_mechanism_study.tsg.scope_assessment import (
-        apply_fixed_scope_response,
+        assess_fixed_scope_response,
     )
     task, catalog, bound, request, response, ids = _conditional_scope_fixture()
     key, scope = next((k,s) for k,s in request['scopes'].items()
                      if s['concept_id']=='length' and not s['subjects'] and not s['conditions'])
     bad = deepcopy(response)
     bad['states'][key].update(expression='explicitly_required', requirements=[ids['length']])
-    result = apply_fixed_scope_response(json.dumps(bad).encode(), request=request,
+    result = assess_fixed_scope_response(json.dumps(bad).encode(), request=request,
         contract=bound, prompt=task['prompt'], catalog=catalog)
-    row = next(s for s in result.feature_states if s['concept_id']=='length' and not s['subjects'] and not s['conditions'])
+    row = next(s for s in result["states"] if s['concept_id']=='length' and not s['subjects'] and not s['conditions'])
     assert row['state']=='unresolved' and row['rationale']=='No valid source-bound assessment.'
-    assert any('positive expression lacks exact requirement-to-scope evidence' in n for n in result.unresolved_notes)
+    assert any('positive expression lacks exact requirement-to-scope evidence' in n for n in result["unresolved_notes"])
     # A model's unresolved judgment stays unresolved; roles/types cannot fill it in.
     bad = deepcopy(response)
     key = next(k for k,scope in request['scopes'].items()
                if scope['concept_id']=='length' and scope['subjects']==[ids['sql.input']]
                and not scope['conditions'])
     bad['states'][key].update(applicability='unresolved')
-    result = apply_fixed_scope_response(json.dumps(bad).encode(), request=request,
+    result = assess_fixed_scope_response(json.dumps(bad).encode(), request=request,
         contract=bound, prompt=task['prompt'], catalog=catalog)
-    row = next(r for r in result.feature_states if r['concept_id']=='length'
+    row = next(r for r in result["states"] if r['concept_id']=='length'
                and r['subjects']==[ids['sql.input']] and not r['conditions'])
     assert row['state']=='unresolved'
-    assert result.facts == bound.facts and result.relations == bound.relations
+    assert result["source_contract_id"] == bound.contract_id
 
 
 @pytest.mark.parametrize('role,expected', [
@@ -138,7 +138,7 @@ def test_positive_evidence_cannot_leak_to_unknown_or_conditional_scopes():
 ])
 def test_model_judges_applicability_without_role_domain_rules(role, expected):
     from prompt_mechanism_study.tsg.scope_assessment import (
-        apply_fixed_scope_response,
+        assess_fixed_scope_response,
     )
     from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record
     task, catalog, canonical, _ = _source_fixture()
@@ -152,30 +152,30 @@ def test_model_judges_applicability_without_role_domain_rules(role, expected):
         applicability=expected, applicability_rationale='Source establishes the SQL operation and this role.')
         for k in request['scopes']}
     def apply(rows):
-        return apply_fixed_scope_response(json.dumps(dict(states=rows, unresolved_notes=[])).encode(),
+        return assess_fixed_scope_response(json.dumps(dict(states=rows, unresolved_notes=[])).encode(),
             request=request, contract=bound, prompt=task['prompt'], catalog=catalog)
     result = apply(answers)
-    actual = next(r for r in result.feature_states if r['subjects'] == [input_id])['state']
+    actual = next(r for r in result["states"] if r['subjects'] == [input_id])['state']
     assert actual == ('absent' if expected == 'applicable' else expected)
     # Even a definite value-input role cannot certify an unstated SQL context
     # or a required caller origin. Concept membership cannot override this.
     answers[key]['applicability'] = 'unresolved'
     answers[key]['applicability_rationale'] = 'The source leaves the required operation context or caller origin unspecified.'
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
+    assert next(r for r in apply(answers)["states"] if r['subjects'] == [input_id])['state'] == 'unresolved'
     answers[key]['applicability'] = expected
     answers[key]['expression'] = 'unresolved'
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
+    assert next(r for r in apply(answers)["states"] if r['subjects'] == [input_id])['state'] == 'unresolved'
     answers[key]['expression'] = 'not_expressed'
     # The parser deliberately does not decide whether a resource is a valid operand.
     answers[key]['applicability'] = 'applicable'
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'absent'
+    assert next(r for r in apply(answers)["states"] if r['subjects'] == [input_id])['state'] == 'absent'
     answers[key]['applicability'] = 'invalid'
     contradiction = apply(answers)
-    assert next(r for r in contradiction.feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
-    assert any('unresolved_fixed_scope' in note for note in contradiction.unresolved_notes)
+    assert next(r for r in contradiction["states"] if r['subjects'] == [input_id])['state'] == 'unresolved'
+    assert any('unresolved_fixed_scope' in note for note in contradiction["unresolved_notes"])
     answers.pop(key)
-    assert next(r for r in apply(answers).feature_states if r['subjects'] == [input_id])['state'] == 'unresolved'
-    assert result.facts == bound.facts and result.relations == bound.relations
+    assert next(r for r in apply(answers)["states"] if r['subjects'] == [input_id])['state'] == 'unresolved'
+    assert result["source_contract_id"] == bound.contract_id
 
 
 def _bound_records(task, catalog, canonical, *, roles):
@@ -599,7 +599,7 @@ def test_actual_attempt_passes_inventory_uncertainty_to_scope_model():
     assert calls == ["source_only_atomic_records", "source_only_record_review", "source_only_fixed_scope_states"]
     assert attempt.provider_calls == 3 and attempt.error_type is None
     assert attempt.contract is not None and attempt.graph is not None
-    assert attempt.contract.feature_states and all(r['state']=='unresolved' for r in attempt.contract.feature_states)
+    assert attempt.scope_assessment["assessment"]["states"] and all(r['state']=='unresolved' for r in attempt.scope_assessment["assessment"]["states"])
     assert attempt.scope_assessment["provider_calls"] == 1
     assert attempt.scope_assessment["response_text"] is not None
     assert not attempt.scope_assessment["request"]["withheld_scopes"]

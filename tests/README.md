@@ -45,23 +45,23 @@ both versions; dangling references and explicit unknown coverage remain checked.
 Authored graph fixtures use a strict test-only constructor, not the removed
 production graph-response recovery adapter.
 
-The citation cleanup removes the fixture's token-index adapter, prompt/schema
-mirror assertions and candidate checks duplicated in the extraction test. The
-former combined extraction/revision/composition test is split into focused,
-parameterized behaviors using one shared fixture. This increases pytest's reported
-case count by six without adding six research scenarios; Python test code falls
-from 6,661 to 6,466 lines. Conditions, frozen meanings, whole/universal scope,
-assumptions, alternative/negated requirements and bounded revision remain checked.
+Source contracts and candidate assessments are tested separately. Failed scope
+calls retain successful source extraction, absent assessments remain unknown,
+and a state table cannot attach to a different source contract. Independent
+qualification replays the saved source and assessment outputs; these changes
+reuse the existing scientific scenarios without increasing the test case count.
+Python test code totals 6,484 lines.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the
-independent verifier once. The 2026-09-25 isolated run passed in 30.35 seconds;
-its slowest checks were power replay (13.14 s), budget/dispatch replay (5.55 s),
-and the seven-stage smoke (4.07 s). These protect statistical replay, planned
+independent verifier once. The 2026-09-25 isolated run passed in 30.52 seconds;
+its slowest checks were power replay (13.18 s), budget/dispatch replay (5.61 s),
+and the seven-stage smoke (4.16 s). These protect statistical replay, planned
 assignment accounting and independent result reconstruction. They need not run
-after each local TSG edit. The focused TSG/input/candidate checks took 4.04 seconds.
+after each local TSG edit. The focused TSG/input/candidate checks took 4.14 seconds.
 All 20 smoke output files matched the preceding run byte for byte.
 
 Earlier suite reductions and frozen result replays remain on
 `codex/pre-artifact-scope-20260923` at `f1cd0011`. The implementation and tests
-before this cleanup are on `codex/pre-tsg-citation-test-trim-20260925` at `88acb4d33`.
+before the module-boundary refactor are on
+`codex/pre-module-boundaries-20260925` at `570219573`.

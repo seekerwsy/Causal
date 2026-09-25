@@ -52,8 +52,10 @@ def _prepared_synthetic_plan(subject_bound=False):
         record.pop('contract_id')  # This is a new synthetic fixture, not the frozen contract.
         record['prompt_sha256'] = task['prompt_sha256']
         record['annotator_id'] = 'offline-synthetic-fixture-not-an-annotation-run'
+        record['schema_version'] = '4.0'
+        factor_states = record.pop('feature_states')
         contract = task_context_contract_from_record(record)
-        graph = compile_task_context_contract(contract, prompt=task['prompt'], catalog=plan['catalog'])
+        graph = compile_task_context_contract(contract, feature_states=factor_states, prompt=task['prompt'], catalog=plan['catalog'])
         old_op = next(n for n in source['graph']['nodes'] if n['node_id'] == source['target_operation_node_id'])
         quote = source['prompt'][old_op['evidence_start']:old_op['evidence_end']]
         operation = next(n for n in graph.nodes if n.semantic_id == old_op['semantic_id']
