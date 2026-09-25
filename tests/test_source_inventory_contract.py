@@ -81,12 +81,10 @@ def test_local_input_and_result_can_be_the_same_source_object_and_metadata_round
     # Candidates and the HTML viewer use the same record-derived nodes and graph.
     from prompt_mechanism_study.tsg.candidate_construction import candidate_request
     from prompt_mechanism_study.tsg.tsg_visualization import _source_graph_view, build_tsg_viewer
-    from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_record, validate_prompt_tsg
     from prompt_mechanism_study.artifact_io import write_bundle
     import json
     task = dict(task_id=contract.task_id, prompt=SOURCE, language='python')
-    raw_graph = prompt_tsg_record(graph)
-    view = _source_graph_view(raw_graph, record, SOURCE, contract.catalog)
+    view = _source_graph_view(record, SOURCE)
     candidate = candidate_request([task], [contract], input_catalog=catalog)['sources'][0]
     assert {row['node_id'] for row in candidate['nodes']} == {node.node_id for node in graph.nodes}
     assert candidate['edges'] == view['graph']['edges']
@@ -95,13 +93,9 @@ def test_local_input_and_result_can_be_the_same_source_object_and_metadata_round
     conditional = next(edge for edge in graph.edges if edge.edge_type == 'conditions')
     quote = view['edge_evidence'][conditional.edge_id]
     assert SOURCE[quote['start']:quote['end']] == 'If remote, validate buffer'
-    changed = replace(graph, edges=tuple(edge for edge in graph.edges if edge != conditional))
-    validate_prompt_tsg(changed, prompt=SOURCE, catalog=contract.catalog)
-    with pytest.raises(ValueError, match='differs from its source records'):
-        _source_graph_view(prompt_tsg_record(changed), record, SOURCE, contract.catalog)
     bundle = tmp_path / 'extraction'
     write_bundle(bundle, {'report.json': {'status': 'NON_CLAIM_TEST_ARTIFACT'},
-        'graphs.json': [raw_graph], 'contracts.json': [record],
+        'contracts.json': [record], 'tasks.json': [task],
         'responses.json': [dict(task_id=contract.task_id, status='success')]})
     tasks = tmp_path / 'tasks.json'
     tasks.write_text(json.dumps([task]), encoding='utf-8')

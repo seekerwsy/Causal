@@ -8,10 +8,8 @@ it never invents a source requirement or activates the formal protocol.
 """
 
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Mapping, Sequence
-
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
     file_sha256,
@@ -28,18 +26,7 @@ from prompt_mechanism_study.tsg.prompt_contract import (
     task_context_contract_from_record,
     task_context_contract_record,
 )
-from prompt_mechanism_study.tsg.prompt_tsg import (
-    catalog_from_record,
-    catalog_sha256,
-    feature_scope_from_record,
-    prompt_tsg_from_record,
-    requirement_binding,
-    select_feature_scope as choose_candidate_scope,
-    validate_feature_scope,
-    validate_prompt_tsg,
-    _occurrence_span,
-    source_nodes,
-)
+from prompt_mechanism_study.tsg.prompt_tsg import catalog_from_record, catalog_sha256, feature_scope_from_record, requirement_binding, select_feature_scope as choose_candidate_scope, validate_feature_scope, validate_prompt_tsg, _occurrence_span, source_nodes
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 from prompt_mechanism_study.tsg.source_records import (
     candidate_record_dependencies,
@@ -1005,9 +992,6 @@ def prepare_candidate_request(tasks_path: Path, extraction_bundle: Path, output:
         raise ValueError("candidate request must bind the complete prepared extraction task set")
     input_catalog = _source_input_catalog(contracts, read_json_exact(input_catalog_path) if input_catalog_path else None)
     request = candidate_request(tasks, contracts, input_catalog=input_catalog)
-    extracted_graphs = {g["task_id"]: prompt_tsg_from_record(g).tsg_id for g in read_json_exact(extraction_bundle / "graphs.json")}
-    if extracted_graphs != {source["task_id"]: source["prompt_tsg_id"] for source in request["sources"]}:
-        raise ValueError("candidate source graphs do not replay their contracts")
     report = dict(status="CANDIDATE_REQUEST_READY", source_tasks_sha256=file_sha256(tasks_path),
         extraction_bundle_sha256=bundle_digest(extraction_bundle), request_sha256=content_hash(request),
         source_tasks=len(tasks), source_graphs=len(contracts), provider_calls=0,

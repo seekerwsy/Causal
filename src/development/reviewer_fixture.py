@@ -5,10 +5,8 @@ The workflow sends its responses through the normal measurement functions.
 """
 
 from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
-
 from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.discovery.prioritization import (
     AtomicCandidateUniverseManifest,
@@ -26,14 +24,16 @@ from prompt_mechanism_study.experiment.randomization import (
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.tsg.representation import AtomicPolicyKey, DataRoleManifest
-from prompt_mechanism_study.experiment.study_planning import RQ1BudgetQualification
+from prompt_mechanism_study.experiment.inference import TargetITTPlan
 from prompt_mechanism_study.verification.integrity import _decode_target_value
 
 
 @dataclass(frozen=True, slots=True)
 class ReviewerSmokeFixture:
     manifest: DataRoleManifest
-    budget: RQ1BudgetQualification
+    inference_plan: TargetITTPlan
+    atomic_total_block_slots: int
+    generation_call_limit: int
     population_lineage: DiscoveryPopulationLineage
     atomic_policy: AtomicPolicyKey
     atomic_universe: AtomicCandidateUniverseManifest

@@ -1,370 +1,74 @@
-"""Single orchestrator for independently verifying a schema-3 result package."""
-
-from __future__ import annotations
-
-from collections.abc import Mapping, Sequence
+"""Replay direct experiment inputs, raw measurements, assignment and statistical results."""
 from pathlib import Path
-
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json_exact, verify_bundle
-from prompt_mechanism_study.experiment.inference import (
-    EvidenceLevel,
-    SharedEvidenceRecord,
-    TargetSelectorYieldResult,
-)
-from prompt_mechanism_study.discovery.prioritization import (
-    ConfirmationDispatchManifest,
-    FixedSlotLedger,
-    SharedConfirmationUnion,
-)
-from prompt_mechanism_study.experiment.randomization import (
-    AssignedArmITTRecord,
-    TargetRandomizationPlan,
-    TargetTaskBundle,
-)
-from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest
-from prompt_mechanism_study.experiment.study_design import (
-    ConfirmationFreeze,
-    DiscoveryDesignFreeze,
-    FormalBudgetPreflight,
-    FormalReportAuthorization,
-    StudyFreezeIndex,
-)
-from prompt_mechanism_study.experiment.study_planning import RQ1BudgetQualification
-
-from prompt_mechanism_study.verification.design import _check_target_study_freezes
+from prompt_mechanism_study.experiment.inference import EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult
+from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.experiment.study_design import StudyConfig, ConfirmationInputs
+from prompt_mechanism_study.tsg.representation import DataRole, validate_data_role_firewall
+from prompt_mechanism_study.verification.design import verify_target_randomization, _verify_discovery_population
 from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
-from prompt_mechanism_study.verification.integrity import (
-    TARGET_RESULT_PACKAGE_FILES,
-    _decode_target_file,
-    _decode_target_value,
-    target_result_package_index,
-)
-from prompt_mechanism_study.verification.qualification import (
-    _check_formal_budget_preflight,
-    verify_rq1_budget_qualification,
-)
-from prompt_mechanism_study.verification.reporting import (
-    _check_formal_authorization,
-    _check_target_rq_tables,
-    verify_target_execution_artifacts,
-)
+from prompt_mechanism_study.verification.integrity import _decode_target_file
+from prompt_mechanism_study.verification.reporting import _check_target_rq_tables, _replay_execution_measurements
 
-def verify_target_result_components(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    report: Mapping[str, object],
-    authorization: FormalReportAuthorization | None = None,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Independently verify every component, including shared statistical evidence."""
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    return _check_target_result_components(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        authorization=authorization,
-        execution_artifacts=execution_artifacts,
-        evidence_verification=evidence_verification,
-    )
+TARGET_RESULT_PACKAGE_FILES = frozenset({
+    "study_config.json", "confirmation_inputs.json", "measurement_records.json",
+    "shared_evidence_record.json", "target_selector_yield_result.json", "rq_tables.json",
+})
 
 
-def _check_target_result_components(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    report: Mapping[str, object],
-    evidence_verification: Mapping[str, object],
-    authorization: FormalReportAuthorization | None = None,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Independently close every scientific boundary in one target result package."""
+def verify_confirmation_inputs(study, confirmation, assignments):
+    """Check prospective membership and independently replay assignment before measurement."""
+    manifest = study.manifest
+    validate_data_role_firewall(manifest, {b.data_id: b.role for b in manifest.bindings})
+    if study.protocol_status != "SPECIFIED_DRAFT":
+        raise ValueError("formal execution is unavailable under SPECIFIED_DRAFT")
+    if confirmation.study_id != study.study_id or not _verify_discovery_population(study.population_lineage, manifest):
+        raise ValueError("study input/population binding differs")
+    dispatch = confirmation.dispatch
+    ledger = dispatch.union.ledger
+    expected = {(model, selector) for model in study.model_ids for selector in study.selector_ids}
+    universe = study.discovery_inputs["universe"]
+    if (universe["discovery_population_sha256"] != manifest.discovery_population_sha256
+        or universe["top_k"] != study.top_k
+        or any(source.universe_id != content_id("atomic_candidate_universe_", universe) for source in ledger.sources)):
+        raise ValueError("candidate universe differs from the frozen source population")
+    if (ledger.protocol_id != manifest.protocol_id
+        or {(s.model_id, s.selector_id) for s in ledger.sources} != expected
+        or any(k != study.top_k for _, k in ledger.top_k_by_track)
+        or confirmation.randomization_plan.atomic_total_block_slots != study.atomic_total_block_slots):
+        raise ValueError("selection differs from the prospective study configuration")
+    if len(assignments) > study.generation_call_limit:
+        raise ValueError("actual assignments exceed generation call limit")
+    permitted = {t.task_unit_id for b in manifest.bindings if b.role is DataRole.CONFIRMATION for t in b.task_units}
+    if any(b.task_unit_id not in permitted for b in confirmation.task_bundles):
+        raise ValueError("task is outside the confirmation population")
+    return verify_target_randomization(dispatch, confirmation.randomization_plan, confirmation.task_bundles, assignments)
 
-    roots = (
-        (manifest, DataRoleManifest, "data-role manifest"),
-        (budget, RQ1BudgetQualification, "RQ1 budget"),
-        (discovery, DiscoveryDesignFreeze, "discovery freeze"),
-        (ledger, FixedSlotLedger, "fixed-slot ledger"),
-        (union, SharedConfirmationUnion, "shared union"),
-        (dispatch, ConfirmationDispatchManifest, "confirmation dispatch"),
-        (randomization_plan, TargetRandomizationPlan, "randomization plan"),
-        (preflight, FormalBudgetPreflight, "formal budget preflight"),
-        (confirmation, ConfirmationFreeze, "confirmation freeze"),
-        (index, StudyFreezeIndex, "study-freeze index"),
-        (evidence, SharedEvidenceRecord, "shared evidence"),
-        (yields, TargetSelectorYieldResult, "selector yields"),
-    )
-    for value, expected_type, label in roots:
-        if type(value) is not expected_type:
-            raise TypeError(f"target result package requires a typed {label}")
-    if authorization is not None and type(authorization) is not FormalReportAuthorization:
-        raise TypeError("target result package authorization must be typed or null")
-    if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED} and authorization is None:
-        raise ValueError("executed result packages require verified execution evidence and authorization")
-    if authorization is None and execution_artifacts is not None:
-        raise ValueError("test result packages cannot attach formal execution artifacts")
-
-    frozen_assignments = tuple(assignments)
-    if any(type(item) is not AssignedArmITTRecord for item in frozen_assignments):
-        raise TypeError("target result package assignments must be assigned-arm records")
-    canonical_assignments = tuple(
-        sorted(frozen_assignments, key=lambda item: item.assignment_id)
-    )
-    if frozen_assignments != canonical_assignments:
-        raise ValueError("target result package assignments must use canonical order")
-
-    budget_verification = verify_rq1_budget_qualification(budget)
-    preflight_verification = _check_formal_budget_preflight(
-        budget,
-        dispatch,
-        canonical_assignments,
-        preflight,
-    )
-    freeze_verification = _check_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=canonical_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    expected_plan = budget.power_and_margin_memo.target_itt_plan()
-    confirmation_task_units = {
-        item.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for item in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in canonical_assignments}
-    if (
-        evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != canonical_assignments
-        or evidence.plan != expected_plan
-        or not assigned_task_units <= confirmation_task_units
-    ):
-        raise ValueError("target result evidence is outside the frozen confirmation boundary")
-    authorization_verification = None
-    if authorization is not None:
-        if preflight.actual_power_results is None:
-            raise ValueError("formal claims require independently verified actual task-support power")
-        verify_target_execution_artifacts(
-            discovery=discovery, confirmation=confirmation, evidence=evidence,
-            environment_reference=authorization.execution_environment,
-            command_reference=authorization.execution_command,
-            provider_ledger_reference=authorization.provider_call_ledger,
-            execution_artifacts=execution_artifacts,
-        )
-        authorization_verification = _check_formal_authorization(
-            index, evidence, yields, authorization, freeze_verification, evidence_verification,
-        )
-    table_verification = _check_target_rq_tables(
-        evidence, yields, report, authorization, evidence_verification,
-    )
-    return {
-        "status": "TARGET_RESULT_COMPONENTS_VERIFIED",
-        "protocol_id": manifest.protocol_id,
-        "evidence_level": evidence.evidence_level.value,
-        "scientific_claim_allowed": authorization is not None,
-        "data_role_manifest_id": manifest.data_role_manifest_id,
-        "rq1_budget_qualification_id": budget.rq1_budget_qualification_id,
-        "study_freeze_index_id": index.study_freeze_index_id,
-        "shared_evidence_record_id": evidence.shared_evidence_record_id,
-        "target_selector_yield_result_id": yields.target_selector_yield_result_id,
-        "target_rq_tables_id": table_verification["target_rq_tables_id"],
-        "assignment_count": len(canonical_assignments),
-        "task_unit_count": len(assigned_task_units),
-        "budget_verification_status": budget_verification["status"],
-        "preflight_verification_status": preflight_verification["status"],
-        "freeze_verification_status": freeze_verification["status"],
-        "evidence_verification_status": evidence_verification["status"],
-        "authorization_verification_status": (
-            None
-            if authorization_verification is None
-            else authorization_verification["status"]
-        ),
-        "table_verification_status": table_verification["status"],
-    }
 
 def load_and_verify_target_result_bundle(root: Path) -> dict[str, object]:
-    """Read an exact schema-3.0 package and independently replay all target results."""
-
-    root = Path(root).resolve()
-    stored_manifest = verify_bundle(root)
-    if set(stored_manifest.get("files", {})) != TARGET_RESULT_PACKAGE_FILES:
-        raise ValueError("target result package file set is not exact")
-
-    manifest = _decode_target_file(
-        root / "data_role_manifest.json",
-        DataRoleManifest,
-    )
-    budget = _decode_target_file(
-        root / "rq1_budget_qualification.json",
-        RQ1BudgetQualification,
-    )
-    discovery = _decode_target_file(
-        root / "discovery_design_freeze.json",
-        DiscoveryDesignFreeze,
-    )
-    ledger = _decode_target_file(root / "fixed_slot_ledger.json", FixedSlotLedger)
-    union = _decode_target_file(
-        root / "shared_confirmation_union.json",
-        SharedConfirmationUnion,
-    )
-    dispatch = _decode_target_file(
-        root / "confirmation_dispatch_manifest.json",
-        ConfirmationDispatchManifest,
-    )
-    randomization_plan = _decode_target_file(
-        root / "target_randomization_plan.json",
-        TargetRandomizationPlan,
-    )
-    task_bundles = _decode_target_value(
-        read_json_exact(root / "confirmation_task_bundles.json"),
-        tuple[TargetTaskBundle, ...],
-        "confirmation_task_bundles.json",
-    )
-    assignments = _decode_target_value(
-        read_json_exact(root / "assignments.json"),
-        tuple[AssignedArmITTRecord, ...],
-        "assignments.json",
-    )
-    preflight = _decode_target_file(
-        root / "formal_budget_preflight.json",
-        FormalBudgetPreflight,
-    )
-    confirmation = _decode_target_file(
-        root / "confirmation_freeze.json",
-        ConfirmationFreeze,
-    )
-    index = _decode_target_file(root / "study_freeze_index.json", StudyFreezeIndex)
-    evidence = _decode_target_file(
-        root / "shared_evidence_record.json",
-        SharedEvidenceRecord,
-    )
-    yields = _decode_target_file(
-        root / "target_selector_yield_result.json",
-        TargetSelectorYieldResult,
-    )
-    raw_authorization = read_json_exact(root / "formal_report_authorization.json")
-    execution_artifacts = read_json_exact(root / "execution_artifacts.json")
-    authorization = (
-        None
-        if raw_authorization is None
-        else _decode_target_value(
-            raw_authorization,
-            FormalReportAuthorization,
-            "formal_report_authorization.json",
-        )
-    )
+    """Verify stored bytes, replay raw measurements, and independently rebuild every RQ row."""
+    root = Path(root)
+    stored = verify_bundle(root)
+    if set(stored.get("files", {})) != TARGET_RESULT_PACKAGE_FILES:
+        raise ValueError("result package file set differs")
+    study = _decode_target_file(root / "study_config.json", StudyConfig)
+    confirmation = _decode_target_file(root / "confirmation_inputs.json", ConfirmationInputs)
+    evidence = _decode_target_file(root / "shared_evidence_record.json", SharedEvidenceRecord)
+    yields = _decode_target_file(root / "target_selector_yield_result.json", TargetSelectorYieldResult)
     report = read_json_exact(root / "rq_tables.json")
-    stored_verification = read_json_exact(root / "verification.json")
-    stored_index = read_json_exact(root / "package_index.json")
-    for value, label in (
-        (report, "rq_tables.json"),
-        (stored_verification, "verification.json"),
-        (stored_index, "package_index.json"),
-    ):
-        if not isinstance(value, dict):
-            raise ValueError(f"{label} must contain a JSON object")
-
-    verification = verify_target_result_components(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        authorization=authorization,
-        execution_artifacts=execution_artifacts,
-    )
-    if stored_verification != verification:
-        raise ValueError("target result verification receipt failed independent replay")
-    expected_index = target_result_package_index(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        verification=verification,
-        authorization=authorization,
-        execution_artifacts=execution_artifacts,
-    )
-    if stored_index != expected_index:
-        raise ValueError("target result package index failed independent replay")
-    return {
-        "status": "TARGET_RESULT_BUNDLE_VERIFIED",
-        "target_result_package_id": expected_index["target_result_package_id"],
-        "bundle_sha256": bundle_digest(root),
-        "protocol_id": expected_index["protocol_id"],
-        "evidence_level": expected_index["evidence_level"],
-        "package_status": expected_index["package_status"],
-        "scientific_claim_allowed": expected_index["scientific_claim_allowed"],
-        "assignment_count": verification["assignment_count"],
-        "task_unit_count": verification["task_unit_count"],
-    }
-
-__all__ = [
-    "load_and_verify_target_result_bundle",
-    "verify_target_result_components",
-]
+    raw = read_json_exact(root / "measurement_records.json")
+    if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
+        raise ValueError("formal execution is unavailable under SPECIFIED_DRAFT")
+    if evidence.ledger.dispatch != confirmation.dispatch or evidence.plan != study.inference_plan:
+        raise ValueError("evidence differs from prospective inputs")
+    verify_confirmation_inputs(study, confirmation, evidence.ledger.assignments)
+    measurement = _replay_execution_measurements(evidence, confirmation.measurement_contract, raw)
+    verification = verify_target_shared_evidence(evidence, yields)
+    tables = _check_target_rq_tables(evidence, yields, report, verification)
+    return dict(status="TARGET_RESULT_BUNDLE_VERIFIED", package_status=report["report_status"],
+        scientific_claim_allowed=False, evidence_level=evidence.evidence_level.value,
+        assignment_count=len(evidence.ledger.assignments),
+        task_unit_count=len({a.task_unit_id for a in evidence.ledger.assignments}),
+        study_id=study.study_id, target_rq_tables_id=tables["target_rq_tables_id"],
+        measurement_verification_status=measurement["status"],
+        result_bundle_sha256=bundle_digest(root))

@@ -34,7 +34,7 @@ task units and offline code/review responses in `src/fixtures/reviewer_smoke.jso
 It performs a real FCI fit on fixture observations, freezes policies, creates
 all four assigned arms, measures saved code, accounts for failures/unknowns and
 computes task-unit results. The verifier independently replays the saved
-downstream freezes and arithmetic; it does not certify the FCI output or model
+prospective inputs, assignment, raw measurements and arithmetic; it does not certify the FCI output or model
 quality. The result is marked `NON_CLAIM_TEST_ARTIFACT`.
 
 | Stage | Input | Saved output |
@@ -74,7 +74,7 @@ comparison is explicitly a development diagnostic on the archived branch.
 3. [Source representation](../src/tsg/prompt_contract.py): bound requirements.
 4. [Candidate construction](../src/tsg/candidate_construction.py): Atomic scope.
 5. [Prioritization](../src/discovery/prioritization.py): FCI and RD-only slots.
-6. [Study design](../src/experiment/study_design.py): frozen study identities.
+6. [Study design](../src/experiment/study_design.py): prospective configuration and confirmation inputs.
 7. [Assignment](../src/experiment/randomization.py): task/arm/seed replay.
 8. [Measurement](../src/measurement/evaluate.py): independent outcomes.
 9. [Inference](../src/experiment/inference.py): task-unit ITT.
@@ -89,21 +89,44 @@ are not prerequisites to reproduce the smoke.
 The workflow calls stage functions and saves their outputs. Stage modules do not
 call back into the workflow. `experiment/reporting.py` only builds result tables;
 `target_workflow.write_target_result_bundle` calls the public independent verifier
-and writes the reviewer package. Formal report authorization belongs to
-`verification/reporting.py`; the formal execution path remains inactive.
+and writes the reviewer package. The saved package has six business files plus
+`manifest.json` for byte integrity:
 
-The representation path saves two different outputs:
+| File | Contents |
+| --- | --- |
+| `study_config.json` | Original role manifest, population lineage, selection inputs/configuration, models, K, call limit and inference plan; constructed before selection. |
+| `confirmation_inputs.json` | Selected-policy dispatch, task variants, randomization plan and task-bound measurement contract; constructed and checked before measurement. |
+| `measurement_records.json` | Every assignment's exact generation request, raw response/code, measured labels and functional review evidence. |
+| `shared_evidence_record.json` | All assignments/outcomes and task-unit inference, including unknown and failure accounting. |
+| `target_selector_yield_result.json` | Fixed-slot yield, retaining empty or failed slots. |
+| `rq_tables.json` | Result rows rebuilt independently by the verifier. |
+
+No budget-qualification receipt, repeated hash index or report-authorization
+receipt is required. The verifier independently reconstructs task/arm/seed
+allocation, raw-record outcome mapping, statistical estimates and result rows.
+It does not call the production randomizer or estimator. Security-profile replay
+uses the declared measurement implementation; it does not prove Oracle accuracy.
+The package's role and population records preserve the prospective data boundaries.
+
+The active protocol is still `SPECIFIED_DRAFT`. Formal evidence levels are rejected;
+changing a saved flag cannot authorize a claim. The retired administration classes
+are not replaced by permissive qualification defaults. Formal execution still
+requires an authorized protocol and its empirical qualifications. Numerical
+power planning and independent power replay remain in the existing modules;
+endpoint-specific Oracle and representation qualifications remain available.
+
+The representation path separates source records from candidate judgments:
 
 | Artifact | Meaning and consumers |
 | --- | --- |
-| `contracts.json`, `graphs.json` | Source facts and their canonical graph, including conditions, scope and source uncertainty; candidate proposal reads these without outcome data. |
+| `contracts.json` | The sole authoritative source representation, including facts, relations, conditions, scope, source uncertainty and its catalog. Graphs are compiled on demand for candidates, assessment and visualization. |
 | `factor-states.json` | Candidate applicability/expression judgments tied to the exact source contract; scope binding and discovery consume an assessed graph projection. |
 | `responses.json` | Raw extraction/review/assessment requests and responses, including separate failures; independent qualification replays each output. |
 
 A failed candidate assessment does not mark successful source extraction as
 failed. Missing judgments remain unknown and still reduce candidate coverage.
-The viewer checks the source projection, then displays the separate assessments
-on that graph. It does not maintain another interpretation of source semantics.
+The viewer compiles the source projection and displays the separate assessments
+on that graph. `graphs.json` and the duplicate catalog collection are no longer saved. It does not maintain another interpretation of source semantics.
 Source-contract schema 4 replaces the combined schema 3; graph schema 3 and
 concept-catalog schema 2 are unchanged. Replay old frozen contracts with their
 captured Git version, rather than converting them in the active method.
@@ -114,22 +137,10 @@ model calls. Response schemas belong to `source_records.py`; the low-level codec
 does not dispatch back to that producer. No new module, generic stage framework,
 semantic rule engine or compatibility path was added.
 
-The pre-refactor checkout is preserved on
-`codex/pre-module-boundaries-20260925` at `570219573`. Historical changes and run
-records remain in Git and the explicitly archival experiment documents. This
-refactor changes ownership and storage, not FCI/RD selection, Atomic four-arm
-assignment, security endpoints, task-unit ITT or independent result arithmetic.
-See [the test guide](../tests/README.md) for current validation.
+The preceding complete checkout is preserved on
+`codex/pre-framework-contraction-20260925` at `8e9241d2d`. Replay historical
+packages with their captured code; do not rewrite frozen evidence. This change
+removes storage and administration layers, without changing FCI/RD selection,
+Atomic four-arm assignment, endpoints, task-unit ITT or independent result arithmetic.
 
-The subsequent source trim removes the four-field candidate-response replay
-branch, unused external response-schema loading and the redundant extraction
-wrapper. Atomic binding and source-support counting now operate on one factor
-directly, keeping the saved artifact shapes and independent task accounting.
-The checkpoint is `codex/pre-source-trim-20260925` at `4717e176a`.
-
-Validation on 2026-09-25 used the isolated Python 3.12 reviewer installation and
-fresh output paths: 108 tests passed in 32.31 seconds; all 20 smoke files matched
-the preceding reference byte for byte. Python source remains 54 files and 28,145
-physical lines (173 fewer in this trim). Visualization and independent arithmetic
-remain supported. No model call, protected task, formal experiment or paper
-modification was involved.
+Validation details are recorded in the [test guide](../tests/README.md).

@@ -1,7 +1,6 @@
 """Human-facing entry point for the prospective research-artifact stages."""
 
 from __future__ import annotations
-
 import argparse
 import json
 from collections.abc import Callable, Sequence
@@ -235,17 +234,6 @@ def _add_qualification_group(groups: Any) -> None:
     positivity.add_argument("--prompt-tsg-bundle", type=Path, action="append", required=True)
     positivity.add_argument("--scope-bindings", type=Path, required=True,
                             help="frozen global factor definitions, task scopes and shared support rules for open graphs")
-    positivity.add_argument(
-        "--graph-artifact",
-        default="graphs.json",
-        choices=(
-            "graphs.json",
-            "discovery-graphs.json",
-            "pilot-graphs.json",
-            "confirm-graphs.json",
-        ),
-        help="graph collection inside each verified bundle",
-    )
 
 
 def _add_artifact_group(groups: Any) -> None:
@@ -457,7 +445,6 @@ def _run_positivity(args: argparse.Namespace, _: argparse.ArgumentParser) -> int
         tuple(args.prompt_tsg_bundle),
         args.catalog,
         args.output,
-        graph_artifact=args.graph_artifact,
         scope_bindings_path=args.scope_bindings,
     )
     return _emit_json(report)

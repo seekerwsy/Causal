@@ -1,6 +1,5 @@
 """Pure result-table assembly; execution and independent verification live outside."""
 from __future__ import annotations
-
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -8,14 +7,12 @@ from prompt_mechanism_study.experiment.inference import (
     ConfirmatoryEffectStatus, EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult,
 )
 from prompt_mechanism_study.discovery.prioritization import PolicyTrack, SlotStatus
-from prompt_mechanism_study.experiment.study_design import FormalReportAuthorization
-from prompt_mechanism_study.records import content_hash, content_id
+from prompt_mechanism_study.records import content_id
 
 
 def build_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization | None = None,
     *, verification: Mapping[str, object],
 ) -> dict[str, Any]:
     """Assemble tables from evidence and the caller's independent verification result."""
@@ -154,33 +151,10 @@ def build_target_rq_tables(
                     ],
                 }
             )
-    claim_allowed = authorization is not None
-    if authorization is not None:
-        if type(authorization) is not FormalReportAuthorization:
-            raise TypeError("target RQ authorization must be a formal receipt")
-        if (
-            authorization.protocol_id != evidence.ledger.dispatch.union.ledger.protocol_id
-            or authorization.shared_evidence_record.artifact_id
-            != evidence.shared_evidence_record_id
-            or authorization.shared_evidence_record.sha256 != content_hash(evidence)
-            or (
-                authorization.target_selector_yield_result.artifact_id
-                != yields.target_selector_yield_result_id
-            )
-            or (authorization.target_selector_yield_result.sha256 != content_hash(yields))
-            or (authorization.evidence_ledger.artifact_id != evidence.ledger.evidence_ledger_id)
-            or (authorization.evidence_ledger.sha256 != content_hash(evidence.ledger))
-            or (authorization.evidence_level != evidence.evidence_level.value)
-            or (authorization.scientific_claim_allowed is not True)
-        ):
-            raise ValueError("formal report authorization drifted from target evidence")
-        report_status = "FORMAL_REPORT_AUTHORIZED"
-    else:
-        report_status = (
-            "EXECUTED_EVIDENCE_AWAITING_FORMAL_REPORT_AUTHORIZATION"
-            if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
-            else "NON_CLAIM_TEST_ARTIFACT"
-        )
+    if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
+        raise ValueError("formal execution is unavailable under SPECIFIED_DRAFT")
+    claim_allowed = False
+    report_status = "NON_CLAIM_TEST_ARTIFACT"
     report: dict[str, Any] = {
         "schema_version": "3.0",
         "protocol_id": evidence.ledger.dispatch.union.ledger.protocol_id,
@@ -189,9 +163,6 @@ def build_target_rq_tables(
         "evidence_level": evidence.evidence_level.value,
         "report_status": report_status,
         "scientific_claim_allowed": claim_allowed,
-        "formal_report_authorization_id": (
-            None if authorization is None else authorization.formal_report_authorization_id
-        ),
         "endpoint_order": [item.value for item in evidence.plan.metrics],
         "inference_method": evidence.plan.inference_method,
         "context_analysis_status": evidence.plan.context_analysis.status.value,

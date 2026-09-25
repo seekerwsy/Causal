@@ -10,9 +10,7 @@ measurement and outcome functions, with its separate frozen descriptive analysis
 """
 
 from __future__ import annotations
-
 from pathlib import Path
-from typing import Mapping, Sequence
 from dataclasses import asdict
 from collections import Counter
 from contextlib import redirect_stdout
@@ -21,7 +19,6 @@ from io import StringIO
 import json
 import random
 import sys
-
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.development.reviewer_fixture import (
     ReviewerSmokeFixture,
@@ -31,51 +28,16 @@ from prompt_mechanism_study.measurement.evaluate import (
     close_target_measurements,
     measure_generated_code,
 )
-from prompt_mechanism_study.experiment.inference import (
-    EvidenceLevel,
-    SharedEvidenceRecord,
-    TargetSelectorYieldResult,
-    build_target_selector_yields,
-    estimate_target_itt,
-    freeze_assigned_arm_evidence,
-)
-from prompt_mechanism_study.experiment.randomization import (
-    TargetRandomizationPlan,
-    TargetTaskBundle,
-    AssignedArmITTRecord,
-    randomize_target_confirmation,
-)
+from prompt_mechanism_study.experiment.inference import EvidenceLevel, build_target_selector_yields, estimate_target_itt, freeze_assigned_arm_evidence
+from prompt_mechanism_study.experiment.randomization import TargetRandomizationPlan, randomize_target_confirmation
 from prompt_mechanism_study.experiment.outcomes import derive_outcomes
-from prompt_mechanism_study.discovery.prioritization import (
-    FixedSlotSource,
-    FixedSlotLedger,
-    SharedConfirmationUnion,
-    ConfirmationDispatchManifest,
-    PolicyTrack,
-    atomic_preoutcome_observations,
-    freeze_atomic_candidate_folds,
-    freeze_confirmation_dispatch,
-    freeze_fixed_slot_ledger,
-    freeze_shared_confirmation_union,
-    run_atomic_shadow_qualification,
-    run_atomic_fci_bootstrap,
-)
+from prompt_mechanism_study.discovery.prioritization import FixedSlotSource, PolicyTrack, atomic_preoutcome_observations, freeze_atomic_candidate_folds, freeze_confirmation_dispatch, freeze_fixed_slot_ledger, freeze_shared_confirmation_union, run_atomic_shadow_qualification, run_atomic_fci_bootstrap
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest, validate_data_role_firewall
+from prompt_mechanism_study.tsg.representation import DataRole, validate_data_role_firewall
 from prompt_mechanism_study.experiment.reporting import build_target_rq_tables
-from prompt_mechanism_study.verification import verify_target_study_freezes
-from prompt_mechanism_study.experiment.study_design import (
-    DiscoveryDesignFreeze,
-    FormalBudgetPreflight,
-    ConfirmationFreeze,
-    StudyFreezeIndex,
-    FormalReportAuthorization,
-    freeze_target_confirmation_design,
-    freeze_target_discovery_design,
-    freeze_target_study_index,
-    validate_formal_budget_preflight,
-)
-from prompt_mechanism_study.experiment.study_planning import FreezeArtifactReference, RQ1BudgetQualification
+from prompt_mechanism_study.verification import verify_confirmation_inputs
+from prompt_mechanism_study.experiment.study_design import StudyConfig, ConfirmationInputs
+from prompt_mechanism_study.measurement.security_profiles import security_profile_producer_sha256
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_input_for_prompt
 
 PROTOCOL_ID = "phase-context-policy-v3"
@@ -526,7 +488,6 @@ def run_target_reviewer_smoke(
         manifest,
         {"DISCOVERY-SMOKE": DataRole.DISCOVERY, "CONFIRMATION-SMOKE": DataRole.CONFIRMATION},
     )
-    budget = inputs.budget
     population_lineage = inputs.population_lineage
     atomic_folds = freeze_atomic_candidate_folds(
         inputs.atomic_universe,
@@ -536,34 +497,12 @@ def run_target_reviewer_smoke(
     fci_parameters = dict(bootstrap_draws=10, bootstrap_seed=2026091801,
                           alpha=0.05, depth=-1, max_path_length=-1,
                           categorical_covariates=inputs.atomic_plan.covariate_names)
-    discovery = freeze_target_discovery_design(
-        schema_version=SCHEMA_VERSION,
-        manifest=manifest,
-        qualification_bundle=budget.qualification_bundle,
-        budget=budget,
-        population_lineage=population_lineage,
-        atomic_discovery_population_sha256=inputs.atomic_universe.discovery_population_sha256,
-        identity_and_scope_decision=_artifact_reference(
-            "reviewer_smoke_identity_scope_", (inputs.atomic_policy,)
-        ),
-        candidate_universe_contract=_artifact_reference(
-            "reviewer_smoke_candidate_universes_", (inputs.atomic_universe,)
-        ),
-        support_gate_contract=_artifact_reference(
-            "reviewer_smoke_support_gates_", (inputs.atomic_universe.supported_policy_keys,)
-        ),
-        discoverability_contract=_artifact_reference(
-            "reviewer_smoke_discoverability_", (atomic_folds.discoverability,)
-        ),
-        candidate_fold_manifests=_artifact_reference(
-            "reviewer_smoke_candidate_folds_", (atomic_folds,)
-        ),
-        selector_contract=_artifact_reference(
-            "reviewer_smoke_selector_contracts_", (inputs.atomic_plan, fci_parameters)
-        ),
-        discovery_outcome_contract=_artifact_reference(
-            "reviewer_smoke_discovery_outcome_", "oracle_evaluable_secure_code_yield"
-        ),
+    study = StudyConfig(
+        manifest, population_lineage, inputs.inference_plan, (inputs.atomic_plan.model_id,),
+        ("atomic_full", "atomic_rd_only"), inputs.atomic_universe.top_k,
+        inputs.atomic_total_block_slots, inputs.generation_call_limit,
+        dict(universe=asdict(inputs.atomic_universe), selection_plan=asdict(inputs.atomic_plan),
+             folds=asdict(atomic_folds), fci_parameters=fci_parameters),
     )
     # The backend writes informational text even with verbose=False; keep CLI JSON valid.
     with redirect_stdout(StringIO()):
@@ -610,7 +549,7 @@ def run_target_reviewer_smoke(
         SCHEMA_VERSION,
         2026083107,
         2026083108,
-        budget.dimensions.atomic_total_block_slots,
+        inputs.atomic_total_block_slots,
         tuple(
             sorted(
                 (
@@ -635,38 +574,18 @@ def run_target_reviewer_smoke(
     )
     task_bundles = inputs.task_bundles(dispatch, randomization_plan)
     assignments = randomize_target_confirmation(dispatch, randomization_plan, task_bundles)
-    preflight = validate_formal_budget_preflight(budget, dispatch, assignments)
-    confirmation = freeze_target_confirmation_design(
-        discovery=discovery,
-        budget=budget,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        outcome_contract=_artifact_reference(
-            "reviewer_smoke_confirmation_outcome_", "assigned_arm_task_unit_itt_v1"
-        ),
-    )
-    index = freeze_target_study_index(discovery, confirmation)
-    freeze_verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    measurements = []
     evaluator = {"model_id": inputs.atomic_plan.model_id}
+    task_contract = dict(
+        source_task_prompt=inputs.source_task_prompt,
+        functional_contract={"requirements": [{"requirement_id": "fetch", "criterion": inputs.functional_requirement}],
+                             "environment_dependencies": [], "language": "python"},
+        functional_evaluator=evaluator, security_profile_id=inputs.security_profile_id,
+        security_producer_sha256=security_profile_producer_sha256(),
+    )
+    confirmation = ConfirmationInputs(study.study_id, dispatch, randomization_plan, tuple(task_bundles),
+        {"task_contracts": {b.task_instance_id: task_contract for b in task_bundles}})
+    verify_confirmation_inputs(study, confirmation, assignments)
+    measurements, measurement_records = [], []
     for assignment in assignments:
         prompt = inputs.variant_prompt(
             assignment.policy_key, assignment.task_unit_id, assignment.arm.value
@@ -681,29 +600,25 @@ def run_target_reviewer_smoke(
             "provider_seed": assignment.provider_seed,
             "prompt": prompt,
         }
-        measured, _ = measure_generated_code(
+        measured, raw = measure_generated_code(
             assignment_id=assignment.assignment_id,
             generation_request=request,
             generation_evaluator=evaluator,
             generation_prompt=prompt,
             source_task_prompt=inputs.source_task_prompt,
-            functional_contract={
-                "requirements": [
-                    {"requirement_id": "fetch", "criterion": inputs.functional_requirement}
-                ],
-                "environment_dependencies": [],
-                "language": "python",
-            },
+            functional_contract=task_contract["functional_contract"],
             functional_evaluator=evaluator,
             functional_prompt="Blinded functional review.",
             security_profile_id=inputs.security_profile_id,
             complete=inputs.complete,
         )
         measurements.append(measured)
+        raw.update(assignment_id=assignment.assignment_id, measurement=asdict(measured), functional_evaluator=evaluator)
+        measurement_records.append(raw)
     measurement_ledger = close_target_measurements(
         assignments,
         measurements,
-        study_id=content_id("target_reviewer_smoke_study_", index),
+        study_id=study.study_id,
         randomization_id=randomization_plan.target_randomization_plan_id,
         adapter_bundle_id=content_id("target_reviewer_smoke_adapters_", "local"),
     )
@@ -711,27 +626,12 @@ def run_target_reviewer_smoke(
     evidence_ledger = freeze_assigned_arm_evidence(dispatch, assignments, outcomes)
     evidence = estimate_target_itt(
         evidence_ledger,
-        budget.power_and_margin_memo.target_itt_plan(),
+        inputs.inference_plan,
         evidence_level=EvidenceLevel.TESTED,
     )
     yields = build_target_selector_yields(evidence)
-    written = write_target_result_bundle(
-        output,
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-    )
+    written = write_target_result_bundle(output, study=study, confirmation=confirmation,
+        evidence=evidence, yields=yields, measurement_records=measurement_records)
     return {
         "status": "TARGET_REVIEWER_SMOKE_VERIFIED",
         "protocol_status": "SPECIFIED_DRAFT",
@@ -743,10 +643,7 @@ def run_target_reviewer_smoke(
         "fci_evidence": asdict(atomic_fci_evidence),
         "fci_gates": [asdict(gate) for gate in atomic.fci_gates],
         "data_role_firewall_validation_id": firewall["firewall_validation_id"],
-        "discovery_design_freeze_id": discovery.discovery_design_freeze_id,
-        "confirmation_freeze_id": confirmation.confirmation_freeze_id,
-        "study_freeze_index_id": index.study_freeze_index_id,
-        "freeze_verification_status": freeze_verification["status"],
+        "study_id": study.study_id,
         "assignment_count": len(assignments),
         "measurement_count": len(measurement_ledger.measurements),
         "outcome_count": len(outcomes),
@@ -758,82 +655,17 @@ def run_target_reviewer_smoke(
     }
 
 
-def _artifact_reference(prefix: str, value: object) -> FreezeArtifactReference:
-    return FreezeArtifactReference(content_id(prefix, value), content_hash(value))
-
-
-def write_target_result_bundle(
-    output: Path,
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization | None = None,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Write the one exact target-v3 reviewer package and verify its stored bytes."""
-
-    from prompt_mechanism_study.verification import (
-        verify_target_shared_evidence, verify_target_result_components,
-        target_result_package_index, load_and_verify_target_result_bundle,
-    )
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    frozen_task_bundles = tuple(
-        sorted(
-            task_bundles,
-            key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
-        )
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    report = build_target_rq_tables(evidence, yields, authorization, verification=evidence_verification)
-    components = dict(
-        manifest=manifest, budget=budget, discovery=discovery, ledger=ledger,
-        union=union, dispatch=dispatch, randomization_plan=randomization_plan,
-        task_bundles=frozen_task_bundles, assignments=frozen_assignments,
-        preflight=preflight, confirmation=confirmation, index=index,
-        evidence=evidence, yields=yields, report=report,
-        authorization=authorization, execution_artifacts=execution_artifacts,
-    )
-    verification = verify_target_result_components(**components)
-    package_index = target_result_package_index(**components, verification=verification)
-    write_bundle(
-        output,
-        {
-            "package_index.json": package_index,
-            "data_role_manifest.json": manifest,
-            "rq1_budget_qualification.json": budget,
-            "discovery_design_freeze.json": discovery,
-            "fixed_slot_ledger.json": ledger,
-            "shared_confirmation_union.json": union,
-            "confirmation_dispatch_manifest.json": dispatch,
-            "target_randomization_plan.json": randomization_plan,
-            "confirmation_task_bundles.json": frozen_task_bundles,
-            "assignments.json": frozen_assignments,
-            "formal_budget_preflight.json": preflight,
-            "confirmation_freeze.json": confirmation,
-            "study_freeze_index.json": index,
-            "shared_evidence_record.json": evidence,
-            "target_selector_yield_result.json": yields,
-            "formal_report_authorization.json": authorization,
-            "execution_artifacts.json": execution_artifacts,
-            "rq_tables.json": report,
-            "verification.json": verification,
-        },
-    )
+def write_target_result_bundle(output: Path, *, study, confirmation, evidence, yields, measurement_records):
+    """Store direct inputs and results; byte/semantic verification is performed once on readback."""
+    from prompt_mechanism_study.verification import verify_target_shared_evidence, load_and_verify_target_result_bundle
+    verification = verify_target_shared_evidence(evidence, yields)
+    report = build_target_rq_tables(evidence, yields, verification=verification)
+    write_bundle(output, {
+        "study_config.json": study,
+        "confirmation_inputs.json": confirmation,
+        "measurement_records.json": {"records": measurement_records},
+        "shared_evidence_record.json": evidence,
+        "target_selector_yield_result.json": yields,
+        "rq_tables.json": report,
+    })
     return load_and_verify_target_result_bundle(output)
-
-
-__all__ = ["SMOKE_STAGES", "run_target_reviewer_smoke", "write_target_result_bundle"]

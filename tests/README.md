@@ -6,7 +6,7 @@ Use Python 3.12 with the repository's `dev,selectors,languages` extras:
 python -m pytest -q
 ```
 
-The default suite contains **108 cases in 84 test functions**. Its end-to-end
+The default suite contains **104 cases in 80 test functions**. Its end-to-end
 smoke executes all seven stages with offline model responses and a real FCI fit
 on synthetic observations. It also runs the independent saved-result verifier.
 These checks make no paid provider calls and cannot establish real-model TSG or
@@ -50,16 +50,36 @@ calls retain successful source extraction, absent assessments remain unknown,
 and a state table cannot attach to a different source contract. Independent
 qualification replays the saved source and assessment outputs; these changes
 reuse the existing scientific scenarios without increasing the test case count.
-Python test code totals 6,498 lines.
+Python test code totals 5,700 lines.
 
 Run the affected test file while editing. Before a reviewer-path change is
 declared complete, use the installed package to run the default suite and the
-independent verifier once. The 2026-09-25 isolated run passed in 32.31 seconds;
-its slowest checks were power replay (13.02 s), budget/dispatch replay (5.61 s),
-and the seven-stage smoke (3.97 s). These protect statistical replay, planned
-assignment accounting and independent result reconstruction. They need not run
-after each local TSG edit. The focused TSG/input/candidate checks took 4.14 seconds.
-All 20 smoke output files matched the preceding run byte for byte.
+independent verifier once. The 2026-09-25 framework contraction was validated in
+a fresh Python 3.12.13 environment, installed with `dev,selectors,languages`:
+**104 passed in 31.67 seconds**. The slowest checks were numerical power replay
+(13.21 s), temporal non-ancestry (9.11 s) and exact qualification error bounds
+(4.33 s). Focused checks are sufficient between changes.
+
+Four tests of retired qualification/budget/freeze receipts were removed. Their
+scientific boundaries now exercise the direct configuration in the existing smoke:
+call ceilings, confirmation membership, task/arm/seed replay, rejection of formal
+activation, and raw-request tampering even after bundle hashes are regenerated.
+Numerical power and independent effect estimation tests are retained.
+
+Reference comparison against `8e9241d2d` found:
+
+- `shared_evidence_record.json` and `target_selector_yield_result.json` remain
+  byte-identical; all four scientific RQ row collections are unchanged.
+- RQ metadata drops the unused null formal-authorization field; the table ID
+  changes accordingly. Old packages are not rewritten or accepted as new packages.
+- Source `contracts.json` and `factor-states.json` remain byte-identical on the
+  extraction reference. Compiling the source record reproduces the old saved
+  graph exactly. The viewer and candidate path no longer depend on a graph cache.
+
+Reproduction environment and output for this local check:
+`C:/Users/WuSiyu/AppData/Local/Temp/causal-contraction-review-20260925/venv`
+and `C:/Users/WuSiyu/AppData/Local/Temp/causal-contraction-review-20260925/tests`.
+The portable command remains `python -m pytest -q`; no API calls were made.
 
 Earlier suite reductions and frozen result replays remain on
 `codex/pre-artifact-scope-20260923` at `f1cd0011`. The implementation and tests
@@ -70,3 +90,6 @@ The current-wire candidate fixture now includes explicit applicability bindings.
 An old four-field response is rejected rather than silently assigned a background.
 Existing scope/requirement expectations remain checked; no historical format
 compatibility test is needed in the production path.
+
+The immediately preceding implementation and package reader are preserved on
+`codex/pre-framework-contraction-20260925` at `8e9241d2d`.

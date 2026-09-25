@@ -1,7 +1,6 @@
 """Linear extraction orchestration and closed provider evidence."""
 
 from __future__ import annotations
-
 import hashlib
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -315,7 +314,6 @@ def extract_contract_task_file(
         {
             "report.json": report,
             "contracts.json": contracts,
-            "graphs.json": graphs,
             "factor-states.json": [attempt.scope_assessment['assessment'] for attempt in extracted
                 if attempt.scope_assessment and 'assessment' in attempt.scope_assessment],
             "requests.json": requests,
@@ -323,8 +321,7 @@ def extract_contract_task_file(
             **({"qualification-reference.json": reference, "selection.json": selection}
                if reference is not None else {}),
             "tasks.json": selected,
-            "catalogs.json": {catalog_sha256(attempt.contract.catalog): attempt.contract.catalog
-                              for attempt in extracted if isinstance(attempt.contract, OpenTaskContract)},
+
         },
     )
     if not complete:

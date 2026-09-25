@@ -63,9 +63,8 @@ for stage inputs/outputs and a reading order of at most ten core files.
 ## Artifact scope and evidence
 
 The reviewer command above reproduces a **non-claim** seven-stage result from
-bundled synthetic tasks and offline code responses. The fixture retains the raw
-code; the result package saves assignments, measured labels, unknowns and the
-independently checked result.
+bundled synthetic tasks and offline code responses. The result package retains raw code and evaluator responses alongside prospective
+inputs, assignments, measured labels, unknowns and independently checked results.
 There is not yet a claim-bearing natural-task result table in `main`.
 
 The static file-permission and credential-source profiles currently return
@@ -99,8 +98,21 @@ does not run a separate contract-production and repair campaign. Extraction, gen
 is shared in `artifact_io.py`, while result arithmetic is independently replayed
 in `verification/`. `experiment/reporting.py` builds tables without calling the
 verifier or writing files; `target_workflow.py` coordinates verification and
-package writing. Source graphs and candidate-state tables are saved separately,
-so changing an assessment does not rewrite source semantics.
+package writing. `contracts.json` is the authoritative source representation;
+candidate analysis and visualization compile graph views from it. Candidate states
+stay in `factor-states.json`, so changing an assessment does not rewrite source
+semantics. No second graph cache is maintained.
+
+The reviewer package has six business files plus its byte-integrity manifest:
+study configuration, confirmation inputs, raw measurement records, statistical
+evidence, selector yields and RQ tables. Prospective call limits, role separation,
+randomization and independent numerical replay remain checked. The unused
+qualification/budget/freeze/report-authorization hierarchy has been retired;
+formal provider execution and claim authorization remain unavailable. Numerical
+power planning and endpoint-specific qualification remain available separately.
+The preceding implementation is preserved on
+`codex/pre-framework-contraction-20260925` at `8e9241d2d`; old frozen packages
+must use that implementation, not be rewritten into this format.
 
 | Author operation | Entry or guide |
 | --- | --- |

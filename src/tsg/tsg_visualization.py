@@ -1,12 +1,10 @@
 """Offline, evidence-linked Prompt TSG and assigned-arm result inspection."""
 from __future__ import annotations
-
 import json
 import hashlib
 import zipfile
 from pathlib import Path
 from typing import Any
-
 from prompt_mechanism_study.artifact_io import (
     read_json,
     verify_bundle,
@@ -14,17 +12,8 @@ from prompt_mechanism_study.artifact_io import (
     confined_path,
 )
 from prompt_mechanism_study.tsg.prompt_contract_qualification import open_graph_assertions
-from prompt_mechanism_study.tsg.prompt_tsg import (
-    _occurrence_span,
-    load_catalog,
-    prompt_tsg_from_record,
-    prompt_tsg_record,
-    source_nodes,
-    validate_prompt_tsg,
-)
-from prompt_mechanism_study.tsg.prompt_contract import (
-    compile_task_context_contract, task_context_contract_from_record,
-)
+from prompt_mechanism_study.tsg.prompt_tsg import _occurrence_span, load_catalog, prompt_tsg_record, source_nodes
+from prompt_mechanism_study.tsg.prompt_contract import task_context_contract_from_record
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.tsg.task_input import prepare_task_input, generation_input_for_prompt
 
@@ -138,20 +127,13 @@ def _export_prompts(comparisons: list[dict], output: Path, generation_system_pro
     return {"markdown": md_path.name, "json": json_path.name, "zip": zip_path.name}
 
 
-def _source_graph_view(raw_graph: dict | None, contract: dict | None, prompt: str, catalog: dict | None) -> dict:
-    """Display the record-derived graph; a saved graph is a checked projection."""
-    if raw_graph is None:
-        return dict(graph=None, edge_evidence={})
-    saved = prompt_tsg_from_record(raw_graph)
+def _source_graph_view(contract: dict | None, prompt: str, assessment=None, *, catalog=None) -> dict:
+    """Display the same contract-derived graph used by candidate analysis."""
+    from prompt_mechanism_study.tsg.scope_assessment import assessed_graph
     if contract is None:
-        if catalog is None:
-            raise ValueError("graph's exact catalog is required for evidence verification")
-        validate_prompt_tsg(saved, prompt=prompt, catalog=catalog)
-        return dict(graph=raw_graph, edge_evidence={})
+        return dict(graph=None, edge_evidence={})
     record = task_context_contract_from_record(contract)
-    graph = compile_task_context_contract(record, prompt=prompt)
-    if graph != saved or catalog is not None and graph.catalog_sha256 != content_hash(catalog):
-        raise ValueError('saved graph differs from its source records or catalog')
+    graph = assessed_graph(record, assessment, prompt=prompt, catalog=catalog)
     local_ids = {key:node.node_id for key,node in source_nodes(record.facts, prompt=prompt).items()}
     edge_ids = {(edge.source_id, edge.edge_type, edge.target_id): edge.edge_id for edge in graph.edges}
     evidence = {}
@@ -171,7 +153,6 @@ def build_tsg_viewer(
     review_root: Path | None = None,
 ) -> dict[str, Any]:
     """Export verified extraction bundles; no provider calls, filtering, or estimators."""
-    from prompt_mechanism_study.tsg.scope_assessment import load_assessed_graphs
 
     tasks = {task["task_id"]: task for task in read_json(tasks_path)}
     cases: dict[str, dict] = {}
@@ -179,10 +160,8 @@ def build_tsg_viewer(
     for root in extraction_roots:
         verify_bundle(root)
         reports.append(read_json(root / "report.json"))
-        catalogs = read_json(root / "catalogs.json") if (root / "catalogs.json").exists() else {}
         prepared_tasks = {task["task_id"]: task for task in read_json(root / "tasks.json")} if (root / "tasks.json").exists() else {}
-        graphs = {row["task_id"]: row for row in read_json(root / "graphs.json")}
-        assessed = {g.task_id: prompt_tsg_record(g) for g in load_assessed_graphs(root)}
+        assessments = {row["task_id"]: row for row in read_json(root / "factor-states.json")} if (root / "factor-states.json").exists() else {}
         contracts = {row["task_id"]: row for row in read_json(root / "contracts.json")}
         requests = ({row["task_id"]: row["request"] for row in read_json(root / "requests.json")}
                     if (root / "requests.json").exists() else {})
@@ -196,17 +175,10 @@ def build_tsg_viewer(
                 prepare_task_input(task)
                 if task["source_prompt"] != tasks[task_id].get("source_prompt", tasks[task_id]["prompt"]):
                     raise ValueError("represented prepared input has a different original source")
-            raw_graph = graphs.get(task_id)
             contract = contracts.get(task_id)
-            catalog = None
-            if raw_graph:
-                graph = prompt_tsg_from_record(raw_graph)
-                catalog = catalogs.get(graph.catalog_sha256) or (contract or {}).get("catalog")
-                if catalog is None and catalog_path is not None:
-                    catalog = load_catalog(catalog_path)
-            view = _source_graph_view(raw_graph, contract, task["prompt"], catalog)
-            if task_id in assessed:
-                view["graph"] = assessed[task_id]
+            catalog = (contract or {}).get("catalog")
+            view = _source_graph_view(contract, task["prompt"], assessments.get(task_id),
+                catalog=load_catalog(catalog_path) if catalog_path is not None else None)
             cases[task_id] = {"task_id": task_id, "prompt": task["prompt"],
                               "case_number": task.get("case_number", list(tasks).index(task_id) + 1),
                               "source_prompt": task.get("source_prompt", task["prompt"]),
@@ -215,7 +187,7 @@ def build_tsg_viewer(
                               "annotation_response": response,
                               "inventory_request": requests.get(task_id),
                               "generation_input": task.get("generation_input"),
-                              "graph_state": ("NO_GRAPH" if not raw_graph else
+                              "graph_state": ("NO_GRAPH" if not view["graph"] else
                                   ("BOUND_PARTIAL" if response.get("scope_assessment") else "INTERMEDIATE")
                                   if response.get("status") == "failed" else "COMPILED"),
                               "representation_status": response.get("representation_status", "automatic_extraction")}
@@ -223,7 +195,7 @@ def build_tsg_viewer(
                 comparison = comparisons[task_id]
                 for version in comparison["versions"]:
                     version.update(_source_graph_view(
-                        version["graph"], version["contract"], version["prompt"], version["catalog"]))
+                        version["contract"], version["prompt"]))
                 cases[task_id]["graph_comparison"] = comparison
     results = None
     if results_root is not None:

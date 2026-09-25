@@ -27,13 +27,7 @@ from prompt_mechanism_study.tsg.scope_assessment import (
 )
 from prompt_mechanism_study.tsg.prompt_contract_extract import extract_contract_task_file
 from prompt_mechanism_study.artifact_io import file_sha256, read_json
-from prompt_mechanism_study.tsg.prompt_tsg import (
-    PromptTSGError,
-    prompt_tsg_record,
-    catalog_sha256,
-    FeatureScope,
-    build_prompt_tsg,
-)
+from prompt_mechanism_study.tsg.prompt_tsg import PromptTSGError, prompt_tsg_record, catalog_sha256, FeatureScope
 from prompt_mechanism_study.tsg.prompt_contract_qualification import (
     evaluate_open_graph_expectations,
     evaluate_open_semantic_case,
@@ -186,7 +180,7 @@ def test_independent_source_qualification_replays_three_steps_and_keeps_failed_t
     assert len(report["candidate_assessment_failed_task_ids"]) == int(failure == "scope")
     if failure not in {"graph", "binding"}:
         assert "feature_states" not in read_json(output / "contracts.json")[0]
-        assert not read_json(output / "graphs.json")[0].get("scoped_feature_assessments")
+        assert not (output / "graphs.json").exists()
     assert result["task_units"] == 1
     assert result["failed_extraction_task_units"] == int(failure in {"graph", "binding"})
     assert result["complete_task_units"] == int(failure is None)
@@ -384,7 +378,7 @@ def _contract():
 
 
 def _scoped_graph(*, bound_inputs=("x",), source_prefix="", source_query=False,
-                  shell_required=True, task_id="synthetic-scoped-boundaries"):
+                  shell_required=True, task_id="synthetic-scoped-boundaries", return_source=False):
     """Exposed synthetic boundary fixture; never a natural support or accuracy sample."""
     source = ("Run query A using input x and input y. Run query B using input z. "
               "If remote, bind x in A. Reject shell syntax for z. Preserve response order.")
@@ -424,12 +418,16 @@ def _scoped_graph(*, bound_inputs=("x",), source_prefix="", source_query=False,
                         state="present" if "y" in bound_inputs else "absent", requirements=["p"] if "y" in bound_inputs else []),
                    dict(target="b", subjects=["z"], conditions=[], concept_id="shell_syntax_rejection",
                         state="present" if shell_required else "absent", requirements=["s"] if shell_required else [])]
-    graph = build_prompt_tsg(task_id=task_id, prompt=source, extractor_id="source-fixture",
-        catalog=catalog, schema_version="3.0",
-        facts=[dict(local_id=key, node_type=kind, semantic_id=concept, evidence_text=quote, occurrence=1, attributes={})
-               for key, kind, concept, quote in facts],
-        relations=[dict(source=a, edge_type=rel, target=b) for a, rel, b in relations],
-        scoped_feature_assessments=assessments)
+    from prompt_mechanism_study.tsg.prompt_contract import OpenTaskContract
+    contract = OpenTaskContract("4.0", task_id, content_hash(source), catalog_sha256(catalog),
+        "source-fixture", "development_exposed", False, catalog,
+        tuple(dict(local_id=key, node_type=kind, semantic_id=concept, evidence_text=quote, occurrence=1, attributes={})
+              for key, kind, concept, quote in facts),
+        tuple(dict(source=a, edge_type=rel, target=b, evidence_text=source, occurrence=1) for a,rel,b in relations), (), ())
+    assessments = [{**row, "rationale": "Synthetic scope state for accounting tests."} for row in assessments]
+    graph = compile_task_context_contract(contract, prompt=source, feature_states=assessments)
+    if return_source:
+        return contract, dict(task_id=task_id, source_contract_id=contract.contract_id, states=assessments)
     ids = {key: next(node.node_id for node in graph.nodes
                     if node.semantic_id == concept and source[node.evidence_start:node.evidence_end] == quote)
            for key, _, concept, quote in facts}
@@ -508,7 +506,7 @@ def _scoped_support_fixture(tmp_path, *, missing_graph=False):
     scope = AnalysisScope("sql-inputs", "sql", ("python",), ("database",), ("query",))
     add = AtomicPolicyKey(scope, PolicyFactor("parameter_binding", Operation.ADD), "secure_yield")
     remove = replace(add, factor=replace(add.factor, operation=Operation.REMOVE))
-    tasks, graphs, bindings = ([], [], [])
+    tasks, graphs, bindings, contracts, states = ([], [], [], [], [])
     for first in (False, True):
         for second in (False, True):
             for replicate in range(2):
@@ -533,6 +531,10 @@ def _scoped_support_fixture(tmp_path, *, missing_graph=False):
                         covariates=[["size", 1.0]],
                     )
                 )
+                contract, assessment = _scoped_graph(bound_inputs=("x",) if first else ("y",),
+                    shell_required=second, task_id=task_id, source_query=True, return_source=True)
+                contracts.append(task_context_contract_record(contract))
+                states.append(assessment)
                 graphs.append(prompt_tsg_record(graph))
                 bindings.append(
                     dict(
@@ -566,7 +568,7 @@ def _scoped_support_fixture(tmp_path, *, missing_graph=False):
         return path
 
     task_path, catalog_path = (write("tasks.json", tasks), write("catalog.json", catalog))
-    graph_bundle = write_bundle(tmp_path / "graphs", {"graphs.json": graphs})
+    graph_bundle = write_bundle(tmp_path / "graphs", {"contracts.json": contracts, "factor-states.json": states, "tasks.json": tasks})
     config = dict(
         source_tasks_sha256=file_sha256(task_path),
         catalog_sha256=catalog_sha256(catalog),

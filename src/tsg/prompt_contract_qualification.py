@@ -1,14 +1,12 @@
 """Source-reference coverage, independent assertion review and extraction replay."""
 
 from __future__ import annotations
-
 import hashlib
 import math
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
-
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
     read_json,
@@ -712,7 +710,6 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
     requests = indexed("requests", read_json(extraction_bundle / "requests.json"), True)
     responses = indexed("responses", read_json(extraction_bundle / "responses.json"), True)
     contracts = indexed("contracts", read_json(extraction_bundle / "contracts.json"))
-    graphs = indexed("graphs", read_json(extraction_bundle / "graphs.json"))
     assessments = indexed("factor states", read_json(extraction_bundle / "factor-states.json"))
     reviews = indexed("reviews", audit.get("cases", []))
     failed = {row["task_id"] for row in report["failed_task_units"]}
@@ -725,7 +722,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
         or report.get("graph_annotation_calls") != report.get("initial_record_calls", 0) + report.get("record_review_and_repair_calls", 0)
         or report["candidate_assessment_failed_task_ids"] != [k for k, r in responses.items()
             if r.get("scope_assessment", {}).get("status") == "FAILED"]
-        or report["graphs"] != len(graphs) or report["contracts"] != len(contracts)):
+        or report["graphs"] != len(contracts) or report["contracts"] != len(contracts)):
         raise PromptContractQualificationError("extraction failure/call accounting differs")
     results = []
     for task, case in zip(tasks, reference["cases"], strict=True):
@@ -793,7 +790,7 @@ def _qualify_open_contract(tasks_path, extraction_bundle, catalog_path, gold_pat
             raise PromptContractQualificationError("scope assessment exists without completed source bindings")
         actual = prompt_tsg_record(graph) if graph is not None else None
         from prompt_mechanism_study.tsg.prompt_contract import task_context_contract_record
-        if (replay_failed != (key in failed) or actual != graphs.get(key)
+        if (replay_failed != (key in failed)
             or (task_context_contract_record(replayed) if actual is not None else None) != contracts.get(key)):
             raise PromptContractQualificationError("raw annotation replay differs from saved partial/full output")
         if assessment != assessments.get(key) or assessment != (scope or {}).get("assessment"):

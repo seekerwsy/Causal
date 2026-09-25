@@ -104,8 +104,9 @@ state call. `assess_candidate_scopes` consumes that graph, applies the frozen
 candidate domains and judges applicability/expression. It cannot add, split or
 rebind source facts. Its failure preserves the graph and leaves candidate states
 unknown. Candidate states are saved in `factor-states.json`, bound to the
-source contract identity. `contracts.json` and `graphs.json` contain source
-semantics only; downstream consumers project states without rewriting them.
+source contract identity. `contracts.json` is the sole stored source representation;
+its graph is compiled on demand. Downstream consumers project candidate states
+without rewriting source semantics or comparing a redundant `graphs.json` cache.
 This separation changes responsibilities and artifacts, not the meaning
 of existing scope judgments or the seven scientific stages.
 

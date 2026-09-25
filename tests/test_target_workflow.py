@@ -99,7 +99,35 @@ def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
     assert receipt["evidence_level"] == "tested"
     assert receipt["package_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert receipt["scientific_claim_allowed"] is False
-    assert verified["bundle_sha256"] == receipt["result_bundle_sha256"]
+    assert verified["result_bundle_sha256"] == receipt["result_bundle_sha256"]
+
+    # Replay uses direct prospective inputs, not budget/authorization receipts.
+    from copy import deepcopy
+    from prompt_mechanism_study.artifact_io import read_json, write_bundle
+    from prompt_mechanism_study.experiment.study_design import StudyConfig, ConfirmationInputs
+    from prompt_mechanism_study.experiment.inference import SharedEvidenceRecord
+    from prompt_mechanism_study.verification.integrity import _decode_target_file
+    from prompt_mechanism_study.verification import verify_confirmation_inputs
+    study = _decode_target_file(output / "study_config.json", StudyConfig)
+    confirmation = _decode_target_file(output / "confirmation_inputs.json", ConfirmationInputs)
+    evidence = _decode_target_file(output / "shared_evidence_record.json", SharedEvidenceRecord)
+    assignments = evidence.ledger.assignments
+    limited = replace(study, generation_call_limit=39)
+    with pytest.raises(ValueError, match="call limit"):
+        verify_confirmation_inputs(limited, replace(confirmation, study_id=limited.study_id), assignments)
+    with pytest.raises(ValueError, match="replay"):
+        verify_confirmation_inputs(study, confirmation, (replace(assignments[0], provider_seed=1), *assignments[1:]))
+    alien = replace(confirmation.task_bundles[0], task_unit_id="unassigned-task")
+    with pytest.raises(ValueError, match="confirmation population"):
+        verify_confirmation_inputs(study, replace(confirmation, task_bundles=(alien, *confirmation.task_bundles[1:])), assignments)
+    with pytest.raises(ValueError, match="SPECIFIED_DRAFT"):
+        replace(study, protocol_status="FROZEN")
+    artifacts = {name: read_json(output / name) for name in read_json(output / "manifest.json")["files"]}
+    tampered = deepcopy(artifacts)
+    tampered["measurement_records.json"]["records"][0]["generation_request"]["provider_seed"] = -1
+    altered = write_bundle(tmp_path / "changed-request", tampered)
+    with pytest.raises(ValueError, match="binding failed"):
+        load_and_verify_target_result_bundle(altered)
 
 
 def test_zero_discoverable_candidates_keep_empty_fixed_slots(tmp_path) -> None:

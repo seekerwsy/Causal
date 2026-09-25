@@ -1,26 +1,18 @@
-"""Independent RQ-table and formal-claim authorization reconstruction."""
+"""Independent measurement, development-result and RQ-table reconstruction."""
+
 
 from __future__ import annotations
-
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from difflib import SequenceMatcher
 import hashlib
 from pathlib import Path
-from typing import Any
 import ast
 import itertools
 import json
 import math
 import random
-
-from prompt_mechanism_study.artifact_io import (
-    json_object,
-    read_json_exact,
-    read_json,
-    verify_bundle,
-    bundle_digest,
-)
+from prompt_mechanism_study.artifact_io import json_object, read_json, verify_bundle, bundle_digest
 from prompt_mechanism_study.measurement.functional_judge import (
     build_review_request,
     code_syntax_valid,
@@ -28,28 +20,9 @@ from prompt_mechanism_study.measurement.functional_judge import (
     validate_review_response,
 )
 from prompt_mechanism_study.measurement.evaluate import Measurement
-
-from prompt_mechanism_study.experiment.inference import (
-    ConfirmatoryEffectStatus,
-    EvidenceLevel,
-    SharedEvidenceRecord,
-    TargetITTPlan,
-    TargetSelectorYieldResult,
-)
-from prompt_mechanism_study.discovery.prioritization import (
-    ConfirmationDispatchManifest,
-    FixedSlotLedger,
-    PolicyTrack,
-    SharedConfirmationUnion,
-    SlotStatus,
-)
-from prompt_mechanism_study.experiment.randomization import (
-    AssignedArmITTRecord,
-    TargetRandomizationPlan,
-    TargetTaskBundle,
-)
+from prompt_mechanism_study.experiment.inference import ConfirmatoryEffectStatus, EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult
+from prompt_mechanism_study.discovery.prioritization import PolicyTrack, SlotStatus
 from prompt_mechanism_study.records import content_hash, content_id
-from prompt_mechanism_study.experiment.study_planning import FreezeArtifactReference
 
 
 def _exact_task_randomization_probability(differences, seed_count):
@@ -833,129 +806,12 @@ def _verify_reviewed_edit_projection(graph, variant, source, policy, scopes, fla
     return kept
 
 
-from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest
-from prompt_mechanism_study.experiment.study_design import (
-    ConfirmationFreeze,
-    DiscoveryDesignFreeze,
-    FormalBudgetPreflight,
-    FormalReportAuthorization,
-    StudyFreezeIndex,
-)
-from prompt_mechanism_study.experiment.study_planning import (
-    QualificationBundle,
-    QualificationPlanBundle,
-    QualificationProfileKind,
-    RQ1BudgetQualification,
-)
-
-from prompt_mechanism_study.verification.design import verify_target_study_freezes
 from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
 from prompt_mechanism_study.verification.integrity import _decode_target_value
 from prompt_mechanism_study.measurement.security_profiles import (
     evaluate_security_profile,
     security_profile_producer_sha256,
 )
-
-
-def verify_target_execution_artifacts(
-    *, discovery, confirmation, evidence, environment_reference, command_reference,
-    provider_ledger_reference, execution_artifacts,
-) -> dict[str, object]:
-    """Resolve actual frozen inputs and replay each assignment's raw measurements.
-
-    This is evidence consistency, not cryptographic proof of a historical event.
-    The checked-out author decision is the authority for this active protocol;
-    a package cannot grant itself permission by changing its evidence-level tag.
-    """
-    if not isinstance(execution_artifacts, Mapping):
-        raise ValueError("formal execution requires the actual execution artifacts")
-
-    def resolve(reference):
-        value = execution_artifacts.get(reference.artifact_id)
-        if value is None or content_hash(value) != reference.sha256:
-            raise ValueError(f"execution artifact missing or hash mismatch: {reference.artifact_id}")
-        return value
-
-    decision = resolve(discovery.identity_and_scope_decision)
-    root = Path(__file__).resolve().parents[2]
-    try:
-        active_decision = read_json_exact(root / "configs/formal/identity_and_scope_decision.json")
-        active_manifest = read_json_exact(root / "configs/formal/qualification_data_manifest.json")
-    except ValueError as exc:
-        raise ValueError(
-            "active protocol is not frozen and authorized for formal execution: "
-            "checked-out author decision or qualification manifest is unavailable or invalid"
-        ) from exc
-    if (
-        decision != active_decision or decision.get("formal_execution_authorized") is not True
-        or active_manifest.get("protocol_status") != "FROZEN"
-        or decision.get("protocol_id") != discovery.protocol_id
-    ):
-        raise ValueError("active protocol is not frozen and authorized for formal execution")
-    qualification = _decode_target_value(
-        resolve(discovery.qualification_bundle), QualificationBundle, "execution qualification",
-    )
-    plans = _decode_target_value(
-        resolve(qualification.qualification_plan_bundle), QualificationPlanBundle,
-        "execution qualification plans",
-    )
-    roles = _decode_target_value(
-        resolve(qualification.data_role_manifest), DataRoleManifest, "execution data roles",
-    )
-    if (
-        not plans.acceptance_ready
-        or plans.data_role_manifest_id != roles.data_role_manifest_id
-        or plans.qualification_accept_data_id != qualification.qualification_accept_data_id
-        or roles.qualification_accept_data_id != qualification.qualification_accept_data_id
-        or plans.protocol_id != qualification.protocol_id
-    ):
-        raise ValueError("execution qualification plans drifted from frozen roles")
-    for plan, profile in zip(plans.plans, qualification.profiles, strict=True):
-        accepted = resolve(profile.artifact)
-        if (
-            profile.profile_kind != plan.profile_kind
-            or profile.selected_profile_id != plan.selected_profile_id
-            or profile.code_commit != plan.code_commit
-            or not isinstance(accepted, Mapping) or accepted.get("status") != "ACCEPTED"
-            or accepted.get("qualification_accept_data_id") != qualification.qualification_accept_data_id
-            or (
-                profile.profile_kind not in {
-                    QualificationProfileKind.POWER_AND_MARGIN,
-                    QualificationProfileKind.RQ1_BASELINES,
-                }
-                and accepted.get("selected_profile_id") != profile.selected_profile_id
-            )
-        ):
-            raise ValueError("execution lacks the frozen accepted qualification result")
-    environment, command = resolve(environment_reference), resolve(command_reference)
-    if (
-        not isinstance(environment, Mapping)
-        or environment.get("execution_kind") != "FORMAL_PROVIDER_EXECUTION"
-        or not all(isinstance(environment.get(key), str) and environment[key]
-                   for key in ("python_version", "platform", "code_commit"))
-        or environment.get("code_commit") != qualification.profiles[0].code_commit
-        or not isinstance(command, Mapping) or not isinstance(command.get("argv"), list)
-        or not command["argv"] or not all(isinstance(arg, str) for arg in command["argv"])
-        or "smoke" in command["argv"]
-    ):
-        raise ValueError("execution environment/command is missing or non-confirmatory")
-    contract = resolve(confirmation.outcome_contract)
-    if not isinstance(contract, Mapping) or contract.get("execution_kind") != "FORMAL_PROVIDER_EXECUTION":
-        raise ValueError("formal execution requires the prospectively frozen measurement contract")
-    provider = decision.get("prospective_provider_policy", {})
-    snapshot = provider.get("fixed_snapshot_model_id")
-    if not snapshot or any(a.model_id != snapshot for a in evidence.ledger.assignments):
-        raise ValueError("execution assignments drifted from the author-selected snapshot")
-    task_contracts = contract.get("task_contracts")
-    if not isinstance(task_contracts, Mapping) or any(
-        not isinstance(frozen, Mapping)
-        or not isinstance(frozen.get("functional_evaluator"), Mapping)
-        or frozen["functional_evaluator"].get("model_id") != snapshot
-        for frozen in task_contracts.values()
-    ):
-        raise ValueError("execution functional evaluator drifted from the author-selected snapshot")
-    raw = resolve(provider_ledger_reference)
-    return _replay_execution_measurements(evidence, contract, raw)
 
 
 def _replay_execution_measurements(evidence, contract, raw) -> dict[str, object]:
@@ -1142,157 +998,21 @@ def _replay_execution_measurements(evidence, contract, raw) -> dict[str, object]
             "completed_measurement_calls": calls}
 
 
-def verify_formal_report_authorization(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Independently verify the only receipt that can enable paper-facing claims."""
-    if type(authorization) is not FormalReportAuthorization:
-        raise TypeError("report authorization verifier requires a formal receipt")
-    if preflight.actual_power_results is None:
-        raise ValueError("formal claims require independently verified actual task-support power")
-    verify_target_execution_artifacts(
-        discovery=discovery,
-        confirmation=confirmation,
-        evidence=evidence,
-        environment_reference=authorization.execution_environment,
-        command_reference=authorization.execution_command,
-        provider_ledger_reference=authorization.provider_call_ledger,
-        execution_artifacts=execution_artifacts,
-    )
-    freeze_verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    frozen_assignments = tuple(sorted(assignments, key=lambda item: item.assignment_id))
-    confirmation_task_units = {
-        task.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for task in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    plan = TargetITTPlan(
-        budget.power_and_margin_memo.bootstrap_seed,
-        budget.power_and_margin_memo.bootstrap_draws,
-        budget.power_and_margin_memo.alpha,
-        budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_stratum,
-        budget.power_and_margin_memo.minimum_valid_bootstrap_fraction,
-        budget.power_and_margin_memo.atomic_power.plan.practical_margin,
-        budget.power_and_margin_memo.maximum_unknown_fraction_among_valid,
-        atomic_minimum_task_units_per_realization=budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_realization,
-    )
-    if (
-        evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
-        or evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != frozen_assignments
-        or (evidence.plan != plan)
-        or (not assigned_task_units <= confirmation_task_units)
-    ):
-        raise ValueError("formal report evidence boundary failed independent replay")
-    return _check_formal_authorization(
-        index, evidence, yields, authorization, freeze_verification, evidence_verification
-    )
-
-
-def _check_formal_authorization(
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization,
-    freeze_verification: Mapping[str, object],
-    evidence_verification: Mapping[str, object],
-) -> dict[str, object]:
-    """Check receipt references after the caller has verified its actual inputs."""
-    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
-        raise ValueError("formal report requires executed evidence")
-    expected = (
-        index.protocol_id,
-        index.study_freeze_index_id,
-        content_hash(index),
-        evidence.shared_evidence_record_id,
-        content_hash(evidence),
-        yields.target_selector_yield_result_id,
-        content_hash(yields),
-        evidence.ledger.evidence_ledger_id,
-        content_hash(evidence.ledger),
-        content_hash(freeze_verification),
-        content_hash(evidence_verification),
-        evidence.evidence_level.value,
-        "AUTHORIZED",
-        True,
-    )
-    observed = (
-        authorization.protocol_id,
-        authorization.study_freeze_index.artifact_id,
-        authorization.study_freeze_index.sha256,
-        authorization.shared_evidence_record.artifact_id,
-        authorization.shared_evidence_record.sha256,
-        authorization.target_selector_yield_result.artifact_id,
-        authorization.target_selector_yield_result.sha256,
-        authorization.evidence_ledger.artifact_id,
-        authorization.evidence_ledger.sha256,
-        authorization.freeze_verification_sha256,
-        authorization.evidence_verification_sha256,
-        authorization.evidence_level,
-        authorization.authorization_status,
-        authorization.scientific_claim_allowed,
-    )
-    if observed != expected:
-        raise ValueError("formal report authorization failed independent replay")
-    return {
-        "status": "FORMAL_REPORT_AUTHORIZATION_VERIFIED",
-        "formal_report_authorization_id": (
-            authorization.formal_report_authorization_id
-        ),
-        "scientific_claim_allowed": True,
-        "evidence_level": evidence.evidence_level.value,
-    }
-
-
 def verify_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
     report: Mapping[str, object],
-    authorization: FormalReportAuthorization | None = None,
 ) -> dict[str, object]:
     """Independently rebuild every target RQ row and its claim-level Gate."""
 
     verification = verify_target_shared_evidence(evidence, yields)
-    return _check_target_rq_tables(evidence, yields, report, authorization, verification)
+    return _check_target_rq_tables(evidence, yields, report, verification)
 
 
 def _check_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
     report: Mapping[str, object],
-    authorization: FormalReportAuthorization | None,
     verification: Mapping[str, object],
 ) -> dict[str, object]:
     """Rebuild tables from the evidence verified once by this invocation."""
@@ -1431,33 +1151,10 @@ def _check_target_rq_tables(
                     ],
                 }
             )
-    claim_allowed = authorization is not None
-    if authorization is not None:
-        if type(authorization) is not FormalReportAuthorization:
-            raise TypeError("RQ verifier requires a formal authorization receipt")
-        if (
-            authorization.protocol_id != evidence.ledger.dispatch.union.ledger.protocol_id
-            or authorization.shared_evidence_record.artifact_id
-            != evidence.shared_evidence_record_id
-            or authorization.shared_evidence_record.sha256 != content_hash(evidence)
-            or (
-                authorization.target_selector_yield_result.artifact_id
-                != yields.target_selector_yield_result_id
-            )
-            or (authorization.target_selector_yield_result.sha256 != content_hash(yields))
-            or (authorization.evidence_ledger.artifact_id != evidence.ledger.evidence_ledger_id)
-            or (authorization.evidence_ledger.sha256 != content_hash(evidence.ledger))
-            or (authorization.evidence_level != evidence.evidence_level.value)
-            or (authorization.scientific_claim_allowed is not True)
-        ):
-            raise ValueError("RQ authorization failed independent evidence binding")
-        report_status = "FORMAL_REPORT_AUTHORIZED"
-    else:
-        report_status = (
-            "EXECUTED_EVIDENCE_AWAITING_FORMAL_REPORT_AUTHORIZATION"
-            if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
-            else "NON_CLAIM_TEST_ARTIFACT"
-        )
+    if evidence.evidence_level in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
+        raise ValueError("formal execution is unavailable under SPECIFIED_DRAFT")
+    claim_allowed = False
+    report_status = "NON_CLAIM_TEST_ARTIFACT"
     expected = {
         "schema_version": "3.0",
         "protocol_id": evidence.ledger.dispatch.union.ledger.protocol_id,
@@ -1466,9 +1163,6 @@ def _check_target_rq_tables(
         "evidence_level": evidence.evidence_level.value,
         "report_status": report_status,
         "scientific_claim_allowed": claim_allowed,
-        "formal_report_authorization_id": (
-            None if authorization is None else authorization.formal_report_authorization_id
-        ),
         "endpoint_order": [item.value for item in evidence.plan.metrics],
         "inference_method": evidence.plan.inference_method,
         "context_analysis_status": evidence.plan.context_analysis.status.value,
@@ -1492,114 +1186,3 @@ def _check_target_rq_tables(
         "rq2_rows": len(rq2_rows),
         "unique_effect_rows": len(effects),
     }
-
-
-__all__ = [
-    "verify_formal_report_authorization",
-    "verify_target_rq_tables",
-]
-
-
-def authorize_target_report(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: Any,
-    task_bundles: Sequence[Any],
-    assignments: Sequence[Any],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: Any,
-    yields: Any,
-    execution_environment: FreezeArtifactReference,
-    execution_command: FreezeArtifactReference,
-    provider_call_ledger: FreezeArtifactReference,
-    execution_artifacts: Mapping[str, object] | None = None,
-) -> FormalReportAuthorization:
-    """Authorize claim-bearing tables only after the exact formal chain verifies."""
-    from prompt_mechanism_study.verification.design import verify_target_study_freezes
-    from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
-    from prompt_mechanism_study.experiment.study_planning import StudyDesignError
-    from prompt_mechanism_study.tsg.representation import DataRole
-
-    if type(evidence) is not SharedEvidenceRecord:
-        raise TypeError("formal report authorization requires shared target evidence")
-    if type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("formal report authorization requires target selector yields")
-    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
-        raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
-    if preflight.actual_power_results is None:
-        raise StudyDesignError("formal claims require the actual task-support power check")
-    verify_target_execution_artifacts(
-        discovery=discovery, confirmation=confirmation, evidence=evidence,
-        environment_reference=execution_environment, command_reference=execution_command,
-        provider_ledger_reference=provider_call_ledger, execution_artifacts=execution_artifacts,
-    )
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    if (
-        evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != frozen_assignments
-        or evidence.plan != budget.power_and_margin_memo.target_itt_plan()
-    ):
-        raise StudyDesignError("report evidence drifted from the formal confirmation freeze")
-    confirmation_task_units = {
-        task.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for task in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    if not assigned_task_units <= confirmation_task_units:
-        raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
-    freeze_verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    if (
-        freeze_verification.get("status") != "TARGET_STUDY_FREEZE_VERIFIED"
-        or evidence_verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED"
-    ):
-        raise StudyDesignError("formal report inputs did not independently verify")
-    return FormalReportAuthorization(
-        manifest.protocol_id,
-        FreezeArtifactReference(
-            index.study_freeze_index_id,
-            content_hash(index),
-        ),
-        FreezeArtifactReference(
-            evidence.shared_evidence_record_id,
-            content_hash(evidence),
-        ),
-        FreezeArtifactReference(
-            yields.target_selector_yield_result_id,
-            content_hash(yields),
-        ),
-        FreezeArtifactReference(
-            evidence.ledger.evidence_ledger_id,
-            content_hash(evidence.ledger),
-        ),
-        execution_environment,
-        execution_command,
-        provider_call_ledger,
-        content_hash(freeze_verification),
-        content_hash(evidence_verification),
-        evidence.evidence_level.value,
-    )

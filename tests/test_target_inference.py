@@ -5,7 +5,6 @@ import copy
 import json
 import random
 from dataclasses import asdict, replace
-from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from prompt_mechanism_study.experiment.inference import (
@@ -48,7 +47,6 @@ from prompt_mechanism_study.verification import (
 )
 from prompt_mechanism_study.verification.reporting import (
     _replay_execution_measurements,
-    verify_target_execution_artifacts,
 )
 from prompt_mechanism_study.measurement.security_profiles import (
     security_profile_producer_sha256,
@@ -169,37 +167,14 @@ def test_joint_bootstrap_applies_frozen_minimum_to_every_effect() -> None:
     assert any(value == float('inf') for value in maxima)
 
 
-def test_execution_package_cannot_grant_itself_formal_authorization(
-    tmp_path, monkeypatch,
-) -> None:
-    decision = json.loads(Path("configs/formal/identity_and_scope_decision.json").read_text())
-    monkeypatch.setattr(
-        "prompt_mechanism_study.verification.reporting.__file__",
-        str(tmp_path / "installed/site-packages/prompt_mechanism_study/verification/reporting.py"),
-    )
-    forged = tmp_path / "execution-package/configs/formal"
-    forged.mkdir(parents=True)
-    (forged / "identity_and_scope_decision.json").write_text(json.dumps(
-        {**decision, "formal_execution_authorized": True},
-    ))
-    (forged / "qualification_data_manifest.json").write_text(json.dumps(
-        {"protocol_status": "FROZEN"},
-    ))
-    monkeypatch.chdir(tmp_path / "execution-package")
-    for package_decision in (decision, {**decision, "formal_execution_authorized": True}):
-        discovery = SimpleNamespace(
-            protocol_id=decision["protocol_id"],
-            identity_and_scope_decision=SimpleNamespace(
-                artifact_id="author-decision", sha256=content_hash(package_decision),
-            ),
-        )
-        with pytest.raises(ValueError, match="not frozen and authorized"):
-            verify_target_execution_artifacts(
-                discovery=discovery, confirmation=None, evidence=None,
-                environment_reference=None, command_reference=None,
-                provider_ledger_reference=None,
-                execution_artifacts={"author-decision": package_decision},
-            )
+def test_draft_result_cannot_grant_itself_formal_authorization():
+    from prompt_mechanism_study.experiment.reporting import build_target_rq_tables
+    from prompt_mechanism_study.experiment.inference import EvidenceLevel
+    ledger, plan = _target_v3_fixture()
+    evidence = estimate_target_itt(ledger, plan, evidence_level=EvidenceLevel.EXECUTED)
+    yields = build_target_selector_yields(evidence)
+    with pytest.raises(ValueError, match="SPECIFIED_DRAFT"):
+        build_target_rq_tables(evidence, yields, verification={})
 
 
 @pytest.mark.parametrize("code,source_status,verdict", [

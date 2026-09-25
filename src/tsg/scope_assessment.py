@@ -1,7 +1,6 @@
 """Candidate applicability and expression on fixed source graphs."""
 
 from __future__ import annotations
-
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -380,26 +379,17 @@ def assessed_graph(contract, assessment, *, prompt, catalog=None):
         feature_states=assessment['states'] if assessment is not None else ())
 
 
-def load_assessed_graphs(bundle, graph_artifact='graphs.json'):
-    """Read source graphs and, when present, their separate candidate-state table."""
+def load_assessed_graphs(bundle):
+    """Compile the authoritative source contracts, then attach separate candidate states."""
     from prompt_mechanism_study.artifact_io import read_json
     from prompt_mechanism_study.tsg.prompt_contract import task_context_contract_from_record
-    from prompt_mechanism_study.tsg.prompt_tsg import prompt_tsg_from_record
-    graphs = [prompt_tsg_from_record(row) for row in read_json(bundle / graph_artifact)]
-    path = bundle / 'factor-states.json'
-    if not path.exists():
-        return graphs
-    rows = read_json(path)
-    assessments = {row['task_id']: row for row in rows}
-    if len(assessments) != len(rows) or set(assessments) - {g.task_id for g in graphs}:
-        raise PromptContractExtractionError('candidate assessment task identities differ')
-    contracts = {row['task_id']: task_context_contract_from_record(row) for row in read_json(bundle / 'contracts.json')}
+    contracts = [task_context_contract_from_record(row) for row in read_json(bundle / 'contracts.json')]
     tasks = {row['task_id']: row for row in read_json(bundle / 'tasks.json')}
-    result = []
-    for graph in graphs:
-        contract = contracts[graph.task_id]
-        prompt = tasks[graph.task_id]['prompt']
-        if compile_task_context_contract(contract, prompt=prompt) != graph:
-            raise PromptContractExtractionError('saved source graph differs from its contract')
-        result.append(assessed_graph(contract, assessments.get(graph.task_id), prompt=prompt))
-    return result
+    path = bundle / 'factor-states.json'
+    rows = read_json(path) if path.exists() else []
+    assessments = {row['task_id']: row for row in rows}
+    ids = {c.task_id for c in contracts}
+    if (len(ids) != len(contracts) or len(assessments) != len(rows)
+        or set(assessments) - ids or ids - tasks.keys()):
+        raise PromptContractExtractionError('source/candidate task identities differ')
+    return [assessed_graph(c, assessments.get(c.task_id), prompt=tasks[c.task_id]['prompt']) for c in contracts]

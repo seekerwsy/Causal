@@ -547,12 +547,9 @@ def _write_candidate_request(tmp_path, *, include_template=False):
     tasks, contracts = _development_sources(include_template=include_template)
     task_path = tmp_path / "source-tasks.json"
     task_path.write_text(json.dumps(tasks), encoding="utf-8")
-    original_graphs = [compile_task_context_contract(contract, prompt=task["prompt"], catalog=open_concept_catalog())
-                       for task, contract in zip(tasks, contracts, strict=True)]
     extraction = write_bundle(tmp_path / "extraction", {
         "report.json": dict(review_status="development_exposed", arms_or_outcomes_used=False),
         "tasks.json": tasks, "contracts.json": [task_context_contract_record(contract) for contract in contracts],
-        "graphs.json": [prompt_tsg_record(graph) for graph in original_graphs],
     })
     request_bundle = tmp_path / "request"
     prepared = prepare_candidate_request(task_path, extraction, request_bundle)

@@ -1,19 +1,11 @@
 """Independent randomization and study-freeze reconstruction."""
 
-from __future__ import annotations
 
+from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 import math
-
-from prompt_mechanism_study.experiment.inference import TargetITTPlan
-from prompt_mechanism_study.discovery.prioritization import (
-    BridgeStatus,
-    ConfirmationDispatchManifest,
-    FixedSlotLedger,
-    PolicyTrack,
-    SharedConfirmationUnion,
-)
+from prompt_mechanism_study.discovery.prioritization import BridgeStatus, ConfirmationDispatchManifest, PolicyTrack
 from prompt_mechanism_study.data.discovery_population import (
     DiscoveryPopulationStatus,
     SupplementationDecision,
@@ -26,18 +18,6 @@ from prompt_mechanism_study.experiment.randomization import (
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.tsg.representation import DataRole, DataRoleManifest
-from prompt_mechanism_study.experiment.study_design import (
-    ConfirmationFreeze,
-    DiscoveryDesignFreeze,
-    FormalBudgetPreflight,
-    StudyFreezeIndex,
-)
-from prompt_mechanism_study.experiment.study_planning import (
-    RQ1BudgetQualification,
-    RQ1BudgetScenario,
-)
-
-from prompt_mechanism_study.verification.qualification import verify_formal_budget_preflight
 
 
 def _verify_realization_allocation(plan, bundles):
@@ -219,233 +199,6 @@ def verify_target_randomization(
     }
 
 
-def verify_target_study_freezes(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-) -> dict[str, object]:
-    """Standalone verification including its upstream prerequisites."""
-
-    verify_formal_budget_preflight(budget, dispatch, assignments, preflight)
-    return _check_target_study_freezes(
-        manifest=manifest, budget=budget, discovery=discovery, ledger=ledger,
-        union=union, dispatch=dispatch, randomization_plan=randomization_plan,
-        task_bundles=task_bundles, assignments=assignments, preflight=preflight,
-        confirmation=confirmation, index=index,
-    )
-
-
-def _check_target_study_freezes(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-) -> dict[str, object]:
-    """Independently close the complete target design-to-confirmation freeze chain."""
-    if type(manifest) is not DataRoleManifest:
-        raise TypeError("target freeze verifier requires a DataRoleManifest")
-    randomization_verification = verify_target_randomization(
-        dispatch, randomization_plan, task_bundles, assignments
-    )
-    qualification = budget.qualification_bundle
-    d0_receipt = discovery.discovery_population_lineage.receipt
-    qualification_roles = manifest if d0_receipt is None else d0_receipt.pre_data_role_manifest
-    if type(qualification_roles) is not DataRoleManifest:
-        raise ValueError("discovery qualification requires its original data-role manifest")
-    if (
-        discovery.protocol_id != manifest.protocol_id
-        or discovery.protocol_id != budget.protocol_id
-        or discovery.data_role_manifest.artifact_id != manifest.data_role_manifest_id
-        or (discovery.data_role_manifest.sha256 != content_hash(manifest))
-        or (discovery.qualification_bundle.artifact_id != qualification.qualification_bundle_id)
-        or (discovery.qualification_bundle.sha256 != content_hash(qualification))
-        or (
-            qualification.data_role_manifest.artifact_id
-            != qualification_roles.data_role_manifest_id
-        )
-        or (qualification.data_role_manifest.sha256 != content_hash(qualification_roles))
-        or (discovery.rq1_budget_qualification.artifact_id != budget.rq1_budget_qualification_id)
-        or (discovery.rq1_budget_qualification.sha256 != content_hash(budget))
-        or (discovery.discovery_population_sha256 != manifest.discovery_population_sha256)
-        or (not _verify_discovery_population(discovery.discovery_population_lineage, manifest))
-        or (discovery.discovery_population_lineage.profile.protocol_id != manifest.protocol_id)
-        or (
-            discovery.discovery_population_lineage.accepted_population_manifest_sha256
-            != manifest.discovery_population_sha256
-        )
-        or (
-            discovery.discovery_population_lineage.post_census.data_role_manifest_id
-            != manifest.data_role_manifest_id
-        )
-        or (
-            discovery.discovery_population_lineage.receipt is not None
-            and discovery.discovery_population_lineage.receipt.data_role_manifest_sha256
-            != content_hash(manifest)
-        )
-        or (discovery.atomic_discovery_population_sha256 != discovery.discovery_population_sha256)
-    ):
-        raise ValueError("discovery freeze lineage failed independent replay")
-    selector_count = {
-        RQ1BudgetScenario.CORE: 2,
-        RQ1BudgetScenario.CORE_EXPERT: 3,
-        RQ1BudgetScenario.CORE_EXPERT_RANDOM: 4,
-    }[budget.scenario]
-    atomic_selectors = ["atomic_full", "atomic_rd_only"]
-    if selector_count >= 3:
-        atomic_selectors.append("atomic_blind_expert")
-    if selector_count == 4:
-        atomic_selectors.append("atomic_seeded_random")
-    frozen_atomic = tuple(sorted(atomic_selectors))
-    core = {"atomic_full", "atomic_rd_only"}
-    baselines = tuple(sorted(set((*frozen_atomic,)) - core))
-    if (
-        discovery.atomic_top_k != budget.dimensions.atomic_top_k
-        or discovery.model_ids != budget.dimensions.model_ids
-        or discovery.rq1_budget_scenario is not budget.scenario
-        or (discovery.atomic_selector_ids != frozen_atomic)
-        or (discovery.rq1_baseline_ids != baselines)
-        or (
-            discovery.rq2_comparison_semantics
-            != "descriptive_fixed_denominator_full_minus_ablation_no_interval"
-        )
-        or (discovery.created_before_discovery_outcomes is not True)
-    ):
-        raise ValueError("discovery dimensions failed independent replay")
-    expected_coordinates = {
-        (track, model_id, selector_id)
-        for track, selectors in ((PolicyTrack.ATOMIC, frozen_atomic),)
-        for model_id in discovery.model_ids
-        for selector_id in selectors
-    }
-    if (
-        ledger.protocol_id != discovery.protocol_id
-        or ledger.schema_version != discovery.schema_version
-        or ledger.top_k_by_track != ((PolicyTrack.ATOMIC, discovery.atomic_top_k),)
-        or (
-            {(source.track, source.model_id, source.selector_id) for source in ledger.sources}
-            != expected_coordinates
-        )
-        or (union.ledger != ledger)
-        or (dispatch.union != union)
-    ):
-        raise ValueError("confirmation selection failed independent replay")
-    frozen_assignments = tuple(sorted(assignments, key=lambda item: item.assignment_id))
-    frozen_task_bundles = tuple(task_bundles)
-    if randomization_plan.atomic_total_block_slots != budget.dimensions.atomic_total_block_slots:
-        raise ValueError("target randomization slots failed independent budget replay")
-    eligible_rows = tuple(
-        sorted(
-            {
-                (item.policy_key, item.task_unit_id, item.task_instance_id, item.stratum_id)
-                for item in frozen_task_bundles
-                if item.exclusion_reason is None
-            }
-        )
-    )
-    realization_rows = tuple(
-        sorted(
-            {
-                (
-                    item.policy_key,
-                    item.task_unit_id,
-                    item.realization_id,
-                    item.task_bundle_id,
-                    item.realization_weight,
-                    item.exclusion_reason,
-                )
-                for item in frozen_task_bundles
-            }
-        )
-    )
-    plan = TargetITTPlan(
-        budget.power_and_margin_memo.bootstrap_seed,
-        budget.power_and_margin_memo.bootstrap_draws,
-        budget.power_and_margin_memo.alpha,
-        budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_stratum,
-        budget.power_and_margin_memo.minimum_valid_bootstrap_fraction,
-        budget.power_and_margin_memo.atomic_power.plan.practical_margin,
-        budget.power_and_margin_memo.maximum_unknown_fraction_among_valid,
-        atomic_minimum_task_units_per_realization=budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_realization,
-    )
-    dispatch_id = dispatch.confirmation_dispatch_manifest_id
-    dispatch_hash = content_hash(dispatch)
-    confirmation_checks = (
-        confirmation.protocol_id == discovery.protocol_id,
-        confirmation.schema_version == discovery.schema_version,
-        confirmation.discovery_design_freeze.artifact_id == discovery.discovery_design_freeze_id,
-        confirmation.discovery_design_freeze.sha256 == content_hash(discovery),
-        confirmation.fixed_slot_ledger.artifact_id == ledger.fixed_slot_ledger_id,
-        confirmation.fixed_slot_ledger.sha256 == content_hash(ledger),
-        confirmation.unique_candidate_union.artifact_id == union.shared_confirmation_union_id,
-        confirmation.unique_candidate_union.sha256 == content_hash(union),
-        confirmation.candidate_to_slots.artifact_id
-        == content_id("candidate_to_slots_", union.candidate_to_slots),
-        confirmation.candidate_to_slots.sha256 == content_hash(union.candidate_to_slots),
-        confirmation.bridge_results.artifact_id == dispatch_id,
-        confirmation.bridge_results.sha256 == dispatch_hash,
-        confirmation.protocolization_results.artifact_id
-        == content_id("target_task_bundles_", frozen_task_bundles),
-        confirmation.protocolization_results.sha256 == content_hash(frozen_task_bundles),
-        confirmation.confirmation_dispatch_manifest.artifact_id == dispatch_id,
-        confirmation.confirmation_dispatch_manifest.sha256 == dispatch_hash,
-        confirmation.eligible_tasks.artifact_id
-        == content_id("eligible_task_units_", eligible_rows),
-        confirmation.eligible_tasks.sha256 == content_hash(eligible_rows),
-        confirmation.realization_allocation.artifact_id
-        == content_id("realization_allocation_", realization_rows),
-        confirmation.realization_allocation.sha256 == content_hash(realization_rows),
-        confirmation.randomization_plan.artifact_id
-        == randomization_plan.target_randomization_plan_id,
-        confirmation.randomization_plan.sha256 == content_hash(randomization_plan),
-        confirmation.model_bound_assignments.artifact_id
-        == content_id("assigned_arm_manifest_", frozen_assignments),
-        confirmation.model_bound_assignments.sha256 == content_hash(frozen_assignments),
-        confirmation.formal_budget_preflight.artifact_id == preflight.formal_budget_preflight_id,
-        confirmation.formal_budget_preflight.sha256 == content_hash(preflight),
-        confirmation.inference_and_reporting_plan.artifact_id == plan.target_itt_plan_id,
-        confirmation.inference_and_reporting_plan.sha256 == content_hash(plan),
-        confirmation.created_before_confirmation_outcomes is True,
-    )
-    if not all(confirmation_checks):
-        raise ValueError("confirmation freeze lineage failed independent replay")
-    if (
-        index.protocol_id != discovery.protocol_id
-        or index.discovery_design_freeze.artifact_id != discovery.discovery_design_freeze_id
-        or index.discovery_design_freeze.sha256 != content_hash(discovery)
-        or (index.confirmation_freeze.artifact_id != confirmation.confirmation_freeze_id)
-        or (index.confirmation_freeze.sha256 != content_hash(confirmation))
-    ):
-        raise ValueError("study freeze index failed independent replay")
-    return {
-        "status": "TARGET_STUDY_FREEZE_VERIFIED",
-        "study_freeze_index_id": index.study_freeze_index_id,
-        "discovery_design_freeze_id": discovery.discovery_design_freeze_id,
-        "confirmation_freeze_id": confirmation.confirmation_freeze_id,
-        "provider_calls_authorized": True,
-        "confirmation_outcomes_used": False,
-        "randomization_verification_status": randomization_verification["status"],
-    }
-
-
 def _verify_discovery_population(lineage, manifest: DataRoleManifest) -> bool:
     """Independently replay D0 readiness without calling production Gate helpers."""
 
@@ -535,9 +288,3 @@ def _verify_discovery_population(lineage, manifest: DataRoleManifest) -> bool:
         and receipt.data_role_manifest_sha256 == content_hash(manifest)
         and receipt.independent_verifier_status == "PASS"
     )
-
-
-__all__ = [
-    "verify_target_randomization",
-    "verify_target_study_freezes",
-]

@@ -1,7 +1,6 @@
 """Outcome-blind source population, role allocation and optional D0 supplementation."""
 
 from __future__ import annotations
-
 import json
 import math
 from collections import Counter, defaultdict
@@ -9,7 +8,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
     read_json,
@@ -729,7 +727,6 @@ def audit_discovery_positivity(
     catalog_path: Path,
     output: Path,
     *,
-    graph_artifact: str = "graphs.json",
     scope_bindings_path: Path,
 ) -> dict[str, object]:
     """Audit source support for frozen open-graph factor scopes."""
@@ -741,13 +738,6 @@ def audit_discovery_positivity(
         CandidateKind,
     )
 
-    if graph_artifact not in {
-        "graphs.json",
-        "discovery-graphs.json",
-        "pilot-graphs.json",
-        "confirm-graphs.json",
-    }:
-        raise ValueError("invalid source graph artifact")
     tasks, catalog, config = (
         _task_records(tasks_path),
         load_catalog(catalog_path),
@@ -766,7 +756,7 @@ def audit_discovery_positivity(
         verify_bundle(bundle)
         graph_digests.append(bundle_digest(bundle))
         from prompt_mechanism_study.tsg.scope_assessment import load_assessed_graphs
-        for graph in load_assessed_graphs(bundle, graph_artifact):
+        for graph in load_assessed_graphs(bundle):
             if graph.task_id in graphs or graph.task_id not in task_ids:
                 raise ValueError("source support graph task is duplicate or outside the selection")
             graphs[graph.task_id] = graph
@@ -1098,7 +1088,6 @@ def audit_discovery_positivity(
     return report
 
 
-
 def _source_policy(record):
     """Decode one Atomic policy; research-branch Pair records are not accepted."""
     from prompt_mechanism_study.tsg.representation import (
@@ -1119,7 +1108,6 @@ def _source_policy(record):
         PolicyFactor(factor["actionable_feature_id"], Operation(factor["operation"])),
         record["outcome_id"],
     )
-
 
 
 def _task_records(path: Path) -> list[dict[str, object]]:
