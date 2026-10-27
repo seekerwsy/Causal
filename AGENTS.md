@@ -77,6 +77,24 @@ deployment machinery, or several competing execution paths.
 
 ## Proportional Data, Intervention, and Oracle Requirements
 
+### Current Bounded Development Roles (Owner Decision, 2026-09-26)
+
+For the current local-model development work, Codex prepares the source semantic
+records/Prompt TSG, binds the Atomic intervention, and prepares the edited prompts
+and controls. Freeze these inputs before inspecting the new generated code. The
+vLLM-served local model is the experimental subject and performs code generation
+only; do not use it for TSG extraction, intervention binding, prompt editing, or
+outcome judging. Use independently specified programmatic measurement and retain
+unknown outcomes where it is insufficient.
+
+The completed 27-call Qwen binding diagnostic retains its original identity and
+results; it is not evidence for this revised division of labor. Codex-assisted
+preparation does not establish automatic extraction/binding accuracy or a Graph
+advantage. A representation comparison requires a separately specified design
+that accounts for shared author knowledge; do not label the same author-prepared
+prompt as independent Raw/Flat/Graph treatments. This decision changes current
+bounded development roles, not formal protocol activation or protected-data use.
+
 1. Judge source usability against the research question and declared endpoint.
    Require an interpretable task, the relevant operation/security boundary, and
    the observable non-target behavior that must be preserved. Missing details

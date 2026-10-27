@@ -291,8 +291,8 @@ def randomize_target_confirmation(
     if type(plan) is not TargetRandomizationPlan:
         raise TypeError("target randomization requires a TargetRandomizationPlan")
     if (
-        dispatch.union.ledger.protocol_id != plan.protocol_id
-        or dispatch.union.ledger.schema_version != plan.schema_version
+        dispatch.ledger.protocol_id != plan.protocol_id
+        or dispatch.ledger.schema_version != plan.schema_version
     ):
         raise ValueError("target randomization plan drifted from the fixed-slot protocol")
     frozen_bundles = tuple(
@@ -327,9 +327,11 @@ def randomize_target_confirmation(
     if {item.policy_key for item in frozen_bundles} != successful_policy_keys:
         raise ValueError("task bundles must exactly cover successfully protocolized policies")
     track_by_policy: dict[str, PolicyTrack] = {}
-    for entry in dispatch.union.entries:
-        previous = track_by_policy.setdefault(entry.candidate.policy_key, entry.track)
-        if previous is not entry.track:
+    for slot in dispatch.ledger.slots:
+        if slot.policy_key is None:
+            continue
+        previous = track_by_policy.setdefault(slot.policy_key, slot.track)
+        if previous is not slot.track:
             raise ValueError("one semantic policy cannot cross Atomic tracks")
     protocol_by_policy: dict[str, str] = {}
     for record in successful:

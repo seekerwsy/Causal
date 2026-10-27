@@ -20,7 +20,7 @@ import json
 import random
 import sys
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
-from prompt_mechanism_study.development.reviewer_fixture import (
+from prompt_mechanism_study.experiment.reviewer_fixture import (
     ReviewerSmokeFixture,
     load_reviewer_smoke_fixture,
 )
@@ -31,7 +31,7 @@ from prompt_mechanism_study.measurement.evaluate import (
 from prompt_mechanism_study.experiment.inference import EvidenceLevel, build_target_selector_yields, estimate_target_itt, freeze_assigned_arm_evidence
 from prompt_mechanism_study.experiment.randomization import TargetRandomizationPlan, randomize_target_confirmation
 from prompt_mechanism_study.experiment.outcomes import derive_outcomes
-from prompt_mechanism_study.discovery.prioritization import FixedSlotSource, PolicyTrack, atomic_preoutcome_observations, freeze_atomic_candidate_folds, freeze_confirmation_dispatch, freeze_fixed_slot_ledger, freeze_shared_confirmation_union, run_atomic_shadow_qualification, run_atomic_fci_bootstrap
+from prompt_mechanism_study.discovery.prioritization import FixedSlotSource, PolicyTrack, atomic_preoutcome_observations, freeze_atomic_candidate_folds, freeze_confirmation_dispatch, freeze_fixed_slot_ledger, run_atomic_shadow_qualification, run_atomic_fci_bootstrap
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.tsg.representation import DataRole, validate_data_role_firewall
 from prompt_mechanism_study.experiment.reporting import build_target_rq_tables
@@ -303,12 +303,12 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
     Exact source/arm/seed assignments are saved before provider calls. Raw responses
     and failures survive independently of final analysis. No task is replaced.
     """
-    from prompt_mechanism_study.llm import complete_chat
+    from prompt_mechanism_study.llm import ProviderError, complete_chat
     from prompt_mechanism_study.experiment.inference import (
         summarize_development_itt,
         summarize_development_sampling,
     )
-    from prompt_mechanism_study.measurement.evaluate import MeasurementLedger
+    from prompt_mechanism_study.measurement.evaluate import MeasurementExecutionError, MeasurementLedger
 
     plan = read_json(plan_path)
     assignments = prepare_development_assignments(plan)
@@ -340,7 +340,7 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
                 raw = provider(request, evaluator, prompt)
                 attempt["response"] = raw.decode("utf-8")
                 return raw
-            except Exception as error:
+            except (ProviderError, MeasurementExecutionError, UnicodeDecodeError) as error:
                 attempt["error"] = f"{type(error).__name__}: {error}"
                 raise
 
@@ -393,13 +393,8 @@ def run_target_development(plan_path: Path, output: Path, *, complete=None) -> d
                 measurement=asdict(measurement),
                 outcome=asdict(outcome),
             )
-        except Exception as error:
+        except (ProviderError, MeasurementExecutionError, UnicodeDecodeError) as error:
             result["error"] = f"{type(error).__name__}: {error}"
-            if calls and "response" in calls[0]:
-                try:
-                    result["code"] = json.loads(calls[0]["response"]).get("code")
-                except (ValueError, AttributeError):
-                    pass
         result["provider_calls"] = len(calls)
         result["provider_calls_by_kind"] = dict(
             Counter((call["evaluator"].get("provider", "unspecified") for call in calls))
@@ -536,14 +531,14 @@ def run_target_reviewer_smoke(
         ),
     )
     ledger = freeze_fixed_slot_ledger(PROTOCOL_ID, SCHEMA_VERSION, sources)
-    union = freeze_shared_confirmation_union(ledger)
+    candidates = ledger.selected_candidates
     protocol_records = {
-        entry.candidate_record_id: content_id(
-            "reviewer_smoke_protocol_record_", entry.candidate.policy_key
+        candidate.candidate_record_id: content_id(
+            "reviewer_smoke_protocol_record_", candidate.policy_key
         )
-        for entry in union.entries
+        for candidate in candidates
     }
-    dispatch = freeze_confirmation_dispatch(union, protocol_records)
+    dispatch = freeze_confirmation_dispatch(ledger, protocol_records)
     randomization_plan = TargetRandomizationPlan(
         PROTOCOL_ID,
         SCHEMA_VERSION,
@@ -553,8 +548,8 @@ def run_target_reviewer_smoke(
         tuple(
             sorted(
                 (
-                    (entry.candidate.policy_key, "reviewer-smoke-realization-1", 1.0)
-                    for entry in union.entries
+                    (candidate.policy_key, "reviewer-smoke-realization-1", 1.0)
+                    for candidate in candidates
                 )
             )
         ),
@@ -562,11 +557,11 @@ def run_target_reviewer_smoke(
             sorted(
                 (
                     (
-                        entry.candidate.policy_key,
-                        f"{entry.track.value}-smoke-task-{index:02d}",
+                        candidate.policy_key,
+                        f"{PolicyTrack.ATOMIC.value}-smoke-task-{index:02d}",
                         "reviewer-smoke-stratum",
                     )
-                    for entry in union.entries
+                    for candidate in candidates
                     for index in range(10)
                 )
             )
@@ -651,15 +646,14 @@ def run_target_reviewer_smoke(
         "evidence_level": evidence.evidence_level.value,
         "package_status": written["package_status"],
         "scientific_claim_allowed": written["scientific_claim_allowed"],
-        "result_bundle_sha256": bundle_digest(output),
+        "result_bundle_sha256": written["result_bundle_sha256"],
     }
 
 
 def write_target_result_bundle(output: Path, *, study, confirmation, evidence, yields, measurement_records):
     """Store direct inputs and results; byte/semantic verification is performed once on readback."""
-    from prompt_mechanism_study.verification import verify_target_shared_evidence, load_and_verify_target_result_bundle
-    verification = verify_target_shared_evidence(evidence, yields)
-    report = build_target_rq_tables(evidence, yields, verification=verification)
+    from prompt_mechanism_study.verification import load_and_verify_target_result_bundle
+    report = build_target_rq_tables(evidence, yields)
     write_bundle(output, {
         "study_config.json": study,
         "confirmation_inputs.json": confirmation,

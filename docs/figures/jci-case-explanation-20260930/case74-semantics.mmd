@@ -1,0 +1,5 @@
+flowchart TB
+    A["User-provided content"] ---|"embedded in"| B["HTML output"]
+    S["HTML safety requirement"] ---|"constrains handling of"| A
+    classDef target fill:#edf3f8,stroke:#315f85,stroke-width:1.6px;
+    class S target;

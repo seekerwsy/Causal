@@ -1,6 +1,6 @@
 """Replay direct experiment inputs, raw measurements, assignment and statistical results."""
 from pathlib import Path
-from prompt_mechanism_study.artifact_io import bundle_digest, read_json_exact, verify_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, read_json_exact, verify_bundle
 from prompt_mechanism_study.experiment.inference import EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult
 from prompt_mechanism_study.records import content_id
 from prompt_mechanism_study.experiment.study_design import StudyConfig, ConfirmationInputs
@@ -25,7 +25,7 @@ def verify_confirmation_inputs(study, confirmation, assignments):
     if confirmation.study_id != study.study_id or not _verify_discovery_population(study.population_lineage, manifest):
         raise ValueError("study input/population binding differs")
     dispatch = confirmation.dispatch
-    ledger = dispatch.union.ledger
+    ledger = dispatch.ledger
     expected = {(model, selector) for model in study.model_ids for selector in study.selector_ids}
     universe = study.discovery_inputs["universe"]
     if (universe["discovery_population_sha256"] != manifest.discovery_population_sha256
@@ -63,12 +63,12 @@ def load_and_verify_target_result_bundle(root: Path) -> dict[str, object]:
         raise ValueError("evidence differs from prospective inputs")
     verify_confirmation_inputs(study, confirmation, evidence.ledger.assignments)
     measurement = _replay_execution_measurements(evidence, confirmation.measurement_contract, raw)
-    verification = verify_target_shared_evidence(evidence, yields)
-    tables = _check_target_rq_tables(evidence, yields, report, verification)
+    verify_target_shared_evidence(evidence, yields)
+    tables = _check_target_rq_tables(evidence, yields, report)
     return dict(status="TARGET_RESULT_BUNDLE_VERIFIED", package_status=report["report_status"],
         scientific_claim_allowed=False, evidence_level=evidence.evidence_level.value,
         assignment_count=len(evidence.ledger.assignments),
         task_unit_count=len({a.task_unit_id for a in evidence.ledger.assignments}),
         study_id=study.study_id, target_rq_tables_id=tables["target_rq_tables_id"],
         measurement_verification_status=measurement["status"],
-        result_bundle_sha256=bundle_digest(root))
+        result_bundle_sha256=file_sha256(root / "manifest.json"))

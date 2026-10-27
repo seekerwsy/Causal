@@ -8,14 +8,22 @@ version = "1.6.0"
 description = "Auditable task-unit experiments for frozen prompt-mechanism policies."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = ["cattrs>=26.2,<27", "jsonschema>=4.26,<5", "numpy>=2,<3"]
 
 [project.scripts]
 prompt-mechanism-study = "prompt_mechanism_study.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "markdown-it-py>=4,<5"]
 selectors = ["causal-learn==0.1.4.7", "numpy>=2,<3"]
+preparation = ["tiktoken==0.14.0"]
+source-acquisition = ["requests==2.34.2", "beautifulsoup4==4.15.0"]
+analysis = [
+  "networkx==3.7",
+  "numpy==2.5.1",
+  "scipy==1.18.0",
+  "scikit-learn==1.9.0",
+]
 languages = [
   "tree-sitter==0.25.2",
   "tree-sitter-c==0.24.1",
@@ -37,15 +45,17 @@ packages = [
   "prompt_mechanism_study.experiment",
   "prompt_mechanism_study.measurement",
   "prompt_mechanism_study.verification",
-  "prompt_mechanism_study.development",
 ]
 package-dir = {prompt_mechanism_study = "src"}
 
 [tool.setuptools.package-data]
 prompt_mechanism_study = ["fixtures/*.json", "fixtures/*.html", "fixtures/*.js"]
+"prompt_mechanism_study.discovery" = ["*.R"]
+"prompt_mechanism_study.verification" = ["*.R"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["development"]
 markers = [
   "milestone: minimal end-to-end reproduction checks",
 ]

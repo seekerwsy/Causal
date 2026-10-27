@@ -1005,15 +1005,14 @@ def verify_target_rq_tables(
 ) -> dict[str, object]:
     """Independently rebuild every target RQ row and its claim-level Gate."""
 
-    verification = verify_target_shared_evidence(evidence, yields)
-    return _check_target_rq_tables(evidence, yields, report, verification)
+    verify_target_shared_evidence(evidence, yields)
+    return _check_target_rq_tables(evidence, yields, report)
 
 
 def _check_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
     report: Mapping[str, object],
-    verification: Mapping[str, object],
 ) -> dict[str, object]:
     """Rebuild tables from the evidence verified once by this invocation."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[object]] = defaultdict(list)
@@ -1157,7 +1156,7 @@ def _check_target_rq_tables(
     report_status = "NON_CLAIM_TEST_ARTIFACT"
     expected = {
         "schema_version": "3.0",
-        "protocol_id": evidence.ledger.dispatch.union.ledger.protocol_id,
+        "protocol_id": evidence.ledger.dispatch.ledger.protocol_id,
         "shared_evidence_record_id": evidence.shared_evidence_record_id,
         "target_selector_yield_result_id": yields.target_selector_yield_result_id,
         "evidence_level": evidence.evidence_level.value,
@@ -1173,7 +1172,6 @@ def _check_target_rq_tables(
         "unique_effect_rows": sorted(
             effects, key=lambda row: (row["track"], row["candidate_record_id"])
         ),
-        "independent_verification": verification,
     }
     expected["target_rq_tables_id"] = content_id("target_rq_tables_", expected)
     if dict(report) != expected:

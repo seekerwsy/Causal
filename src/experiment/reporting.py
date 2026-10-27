@@ -1,7 +1,6 @@
 """Pure result-table assembly; execution and independent verification live outside."""
 from __future__ import annotations
 from collections import Counter
-from collections.abc import Mapping
 from typing import Any
 from prompt_mechanism_study.experiment.inference import (
     ConfirmatoryEffectStatus, EvidenceLevel, SharedEvidenceRecord, TargetSelectorYieldResult,
@@ -13,9 +12,8 @@ from prompt_mechanism_study.records import content_id
 def build_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
-    *, verification: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Assemble tables from evidence and the caller's independent verification result."""
+    """Assemble the reported fields; the stored bundle is independently verified."""
     slots_by_selector: dict[tuple[PolicyTrack, str, str], list[Any]] = {}
     for slot in yields.slots:
         slots_by_selector.setdefault((slot.track, slot.model_id, slot.selector_id), []).append(slot)
@@ -157,7 +155,7 @@ def build_target_rq_tables(
     report_status = "NON_CLAIM_TEST_ARTIFACT"
     report: dict[str, Any] = {
         "schema_version": "3.0",
-        "protocol_id": evidence.ledger.dispatch.union.ledger.protocol_id,
+        "protocol_id": evidence.ledger.dispatch.ledger.protocol_id,
         "shared_evidence_record_id": evidence.shared_evidence_record_id,
         "target_selector_yield_result_id": yields.target_selector_yield_result_id,
         "evidence_level": evidence.evidence_level.value,
@@ -173,7 +171,6 @@ def build_target_rq_tables(
         "unique_effect_rows": sorted(
             effect_rows, key=lambda row: (row["track"], row["candidate_record_id"])
         ),
-        "independent_verification": verification,
     }
     report["target_rq_tables_id"] = content_id("target_rq_tables_", report)
     return report

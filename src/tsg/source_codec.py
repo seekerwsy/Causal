@@ -53,10 +53,10 @@ def _has_fixed_concept_layers(request: Mapping[str, Any]) -> bool:
 
 def source_fact_schema(request: Mapping[str, Any], *, group: str) -> dict[str, Any]:
     """Define a fact once; response adapters add their own references/participants."""
-    text = {"type": "string"}
+    text = {"type": "string", "pattern": r"\S"}
     def row(properties):
         return dict(type="object", additionalProperties=False, properties=properties, required=list(properties))
-    concept = dict(type="string", description="Exact supplied or declared concept ID whose complete definition the source entails. Each requirement node expresses one atomic requirement, never a bundle of independently changeable requirements.")
+    concept = dict(type="string", pattern=r"\S", description="Exact supplied or declared concept ID whose complete definition the source entails. Each requirement node expresses one atomic requirement, never a bundle of independently changeable requirements.")
     if request["concept_policy"] == "FROZEN" and request["known_concepts"]:
         concept["enum"] = list(request["known_concepts"])
     meaning = dict(concept_id=concept) if request["concept_policy"] == "FROZEN" else dict(
@@ -85,7 +85,7 @@ def source_fact_schema(request: Mapping[str, Any], *, group: str) -> dict[str, A
 def source_citation_schema(request: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "evidence_source_unit": dict(type="string", enum=list(request["source_units"])),
-        "evidence_text": dict(type="string", description="Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."),
+        "evidence_text": dict(type="string", pattern=r"\S", description="Copy one exact, uniquely located word-aligned quote from the selected source unit. The program computes its positions."),
     }
 
 
@@ -94,7 +94,7 @@ def source_coverage_schema(request: Mapping[str, Any]) -> dict[str, Any]:
         return dict(type="object", additionalProperties=False, properties=properties, required=list(properties))
     return row({key: row(dict(
         status=dict(type="string", enum=["represented", "unresolved", "no_task_fact"]),
-        reason=dict(type="string", description="Short source-specific coverage or missing-meaning statement.")))
+        reason=dict(type="string", pattern=r"\S", description="Short source-specific coverage or missing-meaning statement.")))
         for key in request["source_units"]})
 
 

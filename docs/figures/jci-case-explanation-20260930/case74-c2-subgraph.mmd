@@ -1,0 +1,15 @@
+flowchart LR
+    N1["N1 · Implementation request"]
+    N11["N11 · Options"]
+    N12["N12 · Sanitized forum-post return"]
+    N13["N13 · Harmful HTML / JavaScript"]
+    N14["N14 · Neutralize or escape"]
+    N15["N15 · Web-page rendering"]
+    N1 -->|E14: has_argument| N11
+    N12 -->|E15: returned_by| N1
+    N12 -->|E18: includes_sanitized| N11
+    N14 -->|E19: applies_to| N13
+    N14 -->|E20: precedes| N15
+    classDef target fill:#fbf0e8,stroke:#a66536,stroke-width:1.7px;
+    class N1,N11,N12,N13,N14,N15 target;
+    linkStyle default stroke:#a66536,stroke-width:1.5px;

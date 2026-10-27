@@ -81,14 +81,16 @@ def verify_target_randomization(
         raise ValueError("one policy/task coordinate has multiple frozen bundles")
     _verify_realization_allocation(plan, frozen_bundles)
     if (
-        plan.protocol_id != dispatch.union.ledger.protocol_id
-        or plan.schema_version != dispatch.union.ledger.schema_version
+        plan.protocol_id != dispatch.ledger.protocol_id
+        or plan.schema_version != dispatch.ledger.schema_version
     ):
         raise ValueError("target randomization protocol failed independent replay")
     track_by_policy: dict[str, PolicyTrack] = {}
-    for entry in dispatch.union.entries:
-        prior = track_by_policy.setdefault(entry.candidate.policy_key, entry.track)
-        if prior is not entry.track:
+    for slot in dispatch.ledger.slots:
+        if slot.policy_key is None:
+            continue
+        prior = track_by_policy.setdefault(slot.policy_key, slot.track)
+        if prior is not slot.track:
             raise ValueError("target policy track failed independent replay")
     successful = tuple((item for item in dispatch.records if item.status is BridgeStatus.SUCCESS))
     protocol_by_policy: dict[str, str] = {}

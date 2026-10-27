@@ -1,0 +1,62 @@
+flowchart LR
+    N1["N1 · Implementation request"]
+    N2["N2 · generate_forum_post"]
+    N3["N3 · User-generated forum post"]
+    N4["N4 · User-submitted content"]
+    N5["N5 · XSS attacks"]
+    N6["N6 · Proper sanitization"]
+    N7["N7 · Header"]
+    N8["N8 · Message"]
+    N9["N9 · Links"]
+    N10["N10 · Dangerous scripts"]
+    N11["N11 · Options"]
+    N12["N12 · Sanitized forum-post return"]
+    N13["N13 · Harmful HTML / JavaScript"]
+    N14["N14 · Neutralize or escape before rendering"]
+    N15["N15 · Web-page rendering"]
+    N16["N16 · Empty setup code"]
+    N17["N17 · Python Markdown code block"]
+    N18["N18 · JSON object with code field"]
+    N19["N19 · Complete Python module export"]
+    N20["N20 · HTML-string result"]
+    N21["N21 · Complete Markdown rendering outside measurement scope"]
+
+    N1 -->|E1| N2
+    N1 -->|E2| N3
+    N6 -->|E3| N4
+    N6 -->|E4| N5
+    N6 -->|E5| N7
+    N6 -->|E6| N8
+    N6 -->|E7| N9
+    N3 -->|E8| N7
+    N3 -->|E9| N8
+    N3 -->|E10| N9
+    N3 -->|E11| N10
+    N1 -->|E12| N7
+    N1 -->|E13| N8
+    N1 -->|E14| N11
+    N12 -->|E15| N1
+    N12 -->|E16| N7
+    N12 -->|E17| N8
+    N12 -->|E18| N11
+    N14 -->|E19| N13
+    N14 -->|E20| N15
+    N1 -->|E21| N16
+    N1 -->|E22| N17
+    N1 -->|E23| N18
+    N19 -->|E24| N2
+    N20 -->|E25| N1
+    N20 -->|E26| N21
+
+    classDef c1 fill:#edf3f8,stroke:#315f85,stroke-width:1.7px;
+    classDef c2 fill:#fbf0e8,stroke:#a66536,stroke-width:1.7px;
+    classDef shared fill:#f2edf7,stroke:#755391,stroke-width:1.7px;
+    classDef other fill:#f6f6f6,stroke:#777777,stroke-width:1.1px;
+    class N3,N4,N5,N6,N7,N8,N9,N10 c1;
+    class N1 c2;
+    class N11,N12,N13,N14,N15 shared;
+    class N2,N16,N17,N18,N19,N20,N21 other;
+    linkStyle default stroke:#929292,stroke-width:1.3px;
+    linkStyle 2,3,4,5,6,7,8,9,10 stroke:#315f85,stroke-width:1.8px;
+    linkStyle 13,14 stroke:#a66536,stroke-width:1.8px;
+    linkStyle 17,18,19 stroke:#755391,stroke-width:1.8px;

@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import lru_cache
+from typing import NamedTuple
 
 from prompt_mechanism_study.measurement.evaluate import InfrastructureFailure
 from prompt_mechanism_study.experiment.outcomes import Outcome
@@ -636,7 +637,8 @@ def estimate_target_itt(
             "context analysis is blocked until its frozen joint estimator is implemented"
         )
     track_by_candidate = {
-        item.candidate_record_id: item.track for item in ledger.dispatch.union.entries
+        item.candidate_record_id: item.track for item in ledger.dispatch.ledger.slots
+        if item.candidate_record_id is not None
     }
     assignments_by_candidate: dict[str, list[AssignedArmITTRecord]] = defaultdict(list)
     for assignment in ledger.assignments:
@@ -668,7 +670,7 @@ def estimate_target_itt(
                     )
                 ),
                 plan,
-                family_size=len(ledger.dispatch.union.entries),
+                family_size=len(ledger.dispatch.records),
             )
             for track in (PolicyTrack.ATOMIC,)
         )
@@ -692,7 +694,7 @@ def build_target_selector_yields(
         item.candidate_record_id: item for item in evidence.ledger.dispatch.records
     }
     slot_records = []
-    for slot in evidence.ledger.dispatch.union.ledger.slots:
+    for slot in evidence.ledger.dispatch.ledger.slots:
         estimate = (
             None
             if slot.candidate_record_id is None
@@ -792,13 +794,7 @@ def _target_effect_work(
         assignment_id: outcome_by_assignment[assignment_id] for assignment_id in assignment_ids
     }
     expected_arms = ATOMIC_CONFIRMATORY_ARMS
-    point_values = _target_unit_arm_values(
-        assignments, local_outcomes, lambda item: float(item.secure_yield)
-    )
-    lower_values = point_values
-    upper_values = _target_unit_arm_values(
-        assignments, local_outcomes, lambda item: float(item.latent_secure_upper)
-    )
+    endpoint_values = _target_unit_arm_endpoints(assignments, local_outcomes)
     stratum_by_unit = _target_strata(assignments)
     realization_by_unit = _target_realizations(assignments)
     contributions = tuple(
@@ -806,16 +802,15 @@ def _target_effect_work(
             TargetTaskUnitContribution(
                 task_unit_id,
                 stratum_by_unit[task_unit_id],
-                _target_contrast(track, arms, arms),
-                _target_contrast_lower(
-                    track, lower_values[task_unit_id], upper_values[task_unit_id]
-                ),
-                _target_contrast_upper(
-                    track, lower_values[task_unit_id], upper_values[task_unit_id]
-                ),
+                arms[ConfirmatoryArm.ATOMIC_TARGET].secure_yield
+                - arms[ConfirmatoryArm.ATOMIC_NOOP].secure_yield,
+                arms[ConfirmatoryArm.ATOMIC_TARGET].secure_yield
+                - arms[ConfirmatoryArm.ATOMIC_NOOP].latent_secure_upper,
+                arms[ConfirmatoryArm.ATOMIC_TARGET].latent_secure_upper
+                - arms[ConfirmatoryArm.ATOMIC_NOOP].secure_yield,
                 *realization_by_unit[task_unit_id],
             )
-            for task_unit_id, arms in sorted(point_values.items())
+            for task_unit_id, arms in sorted(endpoint_values.items())
         )
     )
     counts = Counter(((item.realization_id, item.stratum_id) for item in contributions))
@@ -851,7 +846,7 @@ def _target_effect_work(
     latent_upper = sum(
         (unit_weights[item.task_unit_id] * item.latent_upper for item in contributions)
     )
-    summaries = _target_arm_summaries(assignments, local_outcomes, expected_arms)
+    summaries = _target_arm_summaries(assignments, local_outcomes, expected_arms, endpoint_values)
     for arm in summaries:
         if (
             arm.code_validity
@@ -1061,21 +1056,38 @@ def _target_assignment_cells(assignments: tuple[AssignedArmITTRecord, ...]):
     return tuple(cells)
 
 
-def _target_unit_arm_values(
+class _TargetEndpointValues(NamedTuple):
+    secure_yield: float
+    latent_secure_upper: float
+    code_validity: float
+    oracle_evaluability: float
+    functionality_yield: float
+    joint_success_yield: float
+
+
+def _target_unit_arm_endpoints(
     assignments: tuple[AssignedArmITTRecord, ...],
     outcomes: Mapping[str, Outcome],
-    getter: Callable[[Outcome], float],
-) -> dict[str, dict[ConfirmatoryArm, float]]:
+) -> dict[str, dict[ConfirmatoryArm, _TargetEndpointValues]]:
+    getters = (
+        lambda item: float(item.secure_yield),
+        lambda item: float(item.latent_secure_upper),
+        lambda item: float(item.code_valid),
+        lambda item: float(item.oracle_evaluable),
+        lambda item: float(item.functionality == 1),
+        lambda item: float(item.joint == 1),
+    )
     result = {}
     for unit, arms in _target_assignment_cells(assignments):
         result[unit] = {}
         for arm, descendants in arms:
-            total = 0.0
+            totals = [0.0] * len(getters)
             for weight, ids in descendants:
-                # These endpoint getters return binary values, so the sum is an
-                # exact count; constructing Fraction objects adds no precision.
-                total += weight * (sum(getter(outcomes[key]) for key in ids) / len(ids))
-            result[unit][arm] = total
+                # 各个端点沿用相同的任务层级、权重和求和顺序。
+                rows = tuple(outcomes[key] for key in ids)
+                for index, getter in enumerate(getters):
+                    totals[index] += weight * (sum(getter(row) for row in rows) / len(ids))
+            result[unit][arm] = _TargetEndpointValues(*totals)
     return result
 
 
@@ -1088,30 +1100,6 @@ def _target_strata(
     if any(len(strata) != 1 for strata in values.values()):
         raise ValueError("one task unit cannot cross frozen inference strata")
     return {task_unit_id: next(iter(strata)) for task_unit_id, strata in values.items()}
-
-
-def _target_contrast(
-    track: PolicyTrack,
-    lower: Mapping[ConfirmatoryArm, float],
-    upper: Mapping[ConfirmatoryArm, float],
-) -> float:
-    return lower[ConfirmatoryArm.ATOMIC_TARGET] - upper[ConfirmatoryArm.ATOMIC_NOOP]
-
-
-def _target_contrast_lower(
-    track: PolicyTrack,
-    lower: Mapping[ConfirmatoryArm, float],
-    upper: Mapping[ConfirmatoryArm, float],
-) -> float:
-    return _target_contrast(track, lower, upper)
-
-
-def _target_contrast_upper(
-    track: PolicyTrack,
-    lower: Mapping[ConfirmatoryArm, float],
-    upper: Mapping[ConfirmatoryArm, float],
-) -> float:
-    return upper[ConfirmatoryArm.ATOMIC_TARGET] - lower[ConfirmatoryArm.ATOMIC_NOOP]
 
 
 def _target_point_standard_error(
@@ -1135,18 +1123,8 @@ def _target_arm_summaries(
     assignments: tuple[AssignedArmITTRecord, ...],
     outcomes: Mapping[str, Outcome],
     arms: tuple[ConfirmatoryArm, ...],
+    values: Mapping[str, Mapping[ConfirmatoryArm, _TargetEndpointValues]],
 ) -> tuple[TargetArmEndpointSummary, ...]:
-    metrics = {
-        Metric.SECURE_YIELD: lambda item: float(item.secure_yield),
-        Metric.CODE_VALID: lambda item: float(item.code_valid),
-        Metric.ORACLE_EVALUABLE: lambda item: float(item.oracle_evaluable),
-        Metric.FUNCTIONALITY: lambda item: float(item.functionality == 1),
-        Metric.JOINT: lambda item: float(item.joint == 1),
-    }
-    values = {
-        metric: _target_unit_arm_values(assignments, outcomes, getter)
-        for metric, getter in metrics.items()
-    }
     weights = _target_unit_mixture_weights(assignments)
     summaries = []
     for arm in arms:
@@ -1156,11 +1134,11 @@ def _target_arm_summaries(
             TargetArmEndpointSummary(
                 arm,
                 len(arm_assignments),
-                sum(weights[unit] * item[arm] for unit, item in values[Metric.SECURE_YIELD].items()),
-                sum(weights[unit] * item[arm] for unit, item in values[Metric.CODE_VALID].items()),
-                sum(weights[unit] * item[arm] for unit, item in values[Metric.ORACLE_EVALUABLE].items()),
-                sum(weights[unit] * item[arm] for unit, item in values[Metric.FUNCTIONALITY].items()),
-                sum(weights[unit] * item[arm] for unit, item in values[Metric.JOINT].items()),
+                sum(weights[unit] * item[arm].secure_yield for unit, item in values.items()),
+                sum(weights[unit] * item[arm].code_validity for unit, item in values.items()),
+                sum(weights[unit] * item[arm].oracle_evaluability for unit, item in values.items()),
+                sum(weights[unit] * item[arm].functionality_yield for unit, item in values.items()),
+                sum(weights[unit] * item[arm].joint_success_yield for unit, item in values.items()),
                 sum(item.code_valid - item.oracle_evaluable for item in arm_outcomes),
                 sum(item.code_valid == 0 for item in arm_outcomes),
             )

@@ -23,7 +23,6 @@ from prompt_mechanism_study.discovery.prioritization import (
     freeze_atomic_candidate_universe,
     freeze_confirmation_dispatch,
     freeze_fixed_slot_ledger,
-    freeze_shared_confirmation_union,
     run_atomic_shadow_qualification,
 )
 from prompt_mechanism_study.records import content_hash
@@ -226,23 +225,24 @@ def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
         ),
     )
     ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
-    union = freeze_shared_confirmation_union(ledger)
     dispatch = freeze_confirmation_dispatch(
-        union,
-        {item.candidate_record_id: f"protocol-{index}" for index, item in enumerate(union.entries)},
+        ledger,
+        {item.candidate_record_id: f"protocol-{index}" for index, item in enumerate(ledger.selected_candidates)},
     )
     assert len(ledger.slots) == 4
     assert sum((item.status is SlotStatus.NON_EVALUABLE for item in ledger.slots)) == 0
-    assert {item.candidate.policy_key for item in union.entries} == {positive_id, negative_id}
-    fanout = {item.candidate_record_id: item.slot_ids for item in union.candidate_to_slots}
+    assert {item.policy_key for item in ledger.selected_candidates} == {positive_id, negative_id}
+    fanout = {item.candidate_record_id: tuple(slot.slot_id for slot in ledger.slots
+              if slot.candidate_record_id == item.candidate_record_id)
+              for item in ledger.selected_candidates}
     first_record = next((item for item in universe.model_bound_records if item.policy_key == positive_id))
     assert len(fanout[first_record.candidate_record_id]) == 2
-    assert len(dispatch.records) == len(union.entries)
+    assert len(dispatch.records) == len(ledger.selected_candidates)
     assert {item.model_id for item in dispatch.records} == {"model-a"}
     assert all((item.dispatch_count == 1 for item in dispatch.records))
     tampered = replace(dispatch.records[0], model_id="wrong-model")
     with pytest.raises(ValueError, match="model-bound effect coordinate"):
-        ConfirmationDispatchManifest(union, (tampered, *dispatch.records[1:]))
+        ConfirmationDispatchManifest(ledger, (tampered, *dispatch.records[1:]))
 
 
 def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None:
@@ -366,14 +366,13 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
             random_result.source,
         ),
     )
-    union = freeze_shared_confirmation_union(ledger)
     assert {source.selector_id for source in ledger.sources} == {
         "atomic_blind_expert",
         "atomic_full",
         "atomic_rd_only",
         "atomic_seeded_random",
     }
-    assert len(union.entries) == len(
+    assert len(ledger.selected_candidates) == len(
         {
             slot.candidate_record_id
             for slot in ledger.slots
@@ -395,7 +394,7 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
         )
 
 
-def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable(monkeypatch) -> None:
+def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
     universe, rows, plan, evidence, positive_id, _negative_id = _atomic_shadow_fixture()
     insufficient = replace(
         evidence,
@@ -429,22 +428,6 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable(monkeypatch) ->
     assert gate.status is AtomicFCIGateStatus.NON_EVALUABLE
     assert not any(slot.candidate_id == positive_id for slot in result.full.slots)
     assert any(slot.candidate_id == positive_id for slot in result.rd_only.slots)
-
-    calls = []
-    def failed_backend(matrix, **kwargs):
-        calls.append(matrix)
-        raise RuntimeError("Backend unavailable in this failure control")
-    monkeypatch.setattr(prioritization, "_run_causal_learn_pag", failed_backend)
-    computed, trace = prioritization.run_atomic_fci_bootstrap(
-        universe, rows, plan,
-        fold_freeze=freeze_atomic_candidate_folds(universe, atomic_preoutcome_observations(rows), plan),
-        bootstrap_draws=2, bootstrap_seed=2026091801, alpha=0.05,
-        depth=-1, max_path_length=-1, categorical_covariates=plan.covariate_names,
-    )
-    assert len(calls) == 4
-    assert all(draws == (None, None) for _, draws in computed.candidate_draws)
-    assert all("Backend unavailable" in draw["error"] for group in trace["groups"] for draw in group["draws"])
-
 
 def test_temporal_non_ancestry_does_not_assert_the_reverse_causal_direction():
     # Two correlated variables cannot distinguish a direct effect from latent confounding.

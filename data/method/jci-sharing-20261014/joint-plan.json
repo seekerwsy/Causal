@@ -1,0 +1,49 @@
+{
+  "study_id": "jci-joint-policy-20261014",
+  "evidence_role": "AUTHORIZED_BOUNDED_JOINT_CONTEXT_METHOD_DEVELOPMENT",
+  "historical_role": "POST_HOC_EXPOSED_JOINT_CONTEXT_REANALYSIS",
+  "authorization": "2026-10-14 user: 要让jci算法带来增量才行",
+  "formal_claim_allowed": false,
+  "seed": 2026101402,
+  "ci_draws": 1999,
+  "ci_alpha": 0.05,
+  "structural_methods": ["time", "jci12", "jci123"],
+  "subsamples": 8,
+  "subsample_fraction": 0.8,
+  "ridge_penalties": [0.001, 0.01, 0.1, 1.0, 10.0],
+  "gate_strengths": [0.0, 0.25, 0.5, 0.75, 1.0],
+  "lcb_multipliers": [0.0, 0.5, 1.0, 1.5, 2.0],
+  "historical_training_per_family": 50,
+  "historical_inputs": "data/method/controlled-semantic-20260930/experiment-qualified-inputs",
+  "historical_analysis": "results/controlled-semantic-20260930/analysis/analysis",
+  "historical_report": "results/controlled-semantic-20260930/report",
+  "simulation": {
+    "mechanisms": {
+      "sparse": [0.18, 0.0, 0.0, 0.0],
+      "signed": [0.18, -0.12, 0.0, 0.0],
+      "dense": [0.10, 0.08, 0.06, 0.04]
+    },
+    "tasks_per_role": [128, 512],
+    "repetitions": 16,
+    "baseline_probability": 0.20,
+    "latent_outcome_coefficient": 0.25,
+    "source_probability_by_latent": [0.15, 0.70],
+    "generations_per_observed_prompt": 1,
+    "outcome_generation": "one independently randomized baseline or single-ADD context per task; no unobserved arm labels supplied to learners",
+    "evaluation": "exact policy value across all latent and source states; truth used after CAL selection only"
+  },
+  "learner_families": ["full", "target_factorized"],
+  "calibration_value": "complete task mean for historical effects; shared-training-nuisance doubly robust known-propensity policy gain for randomized simulations",
+  "simulation_nuisance_penalty": 0.01,
+  "primary_comparisons": ["jci123_minus_full", "jci123_minus_direct_gate", "jci123_minus_direct_lcb", "jci123_minus_direct_envelope", "jci123_minus_time", "jci123_minus_jci12"],
+  "scientific_invariants": [
+    "Each context selects baseline or exactly one complete requirement edit; no Pair treatment",
+    "Randomized context indicators share a single categorical assignment; JCI123 uses a complete bidirected context graph",
+    "Non-ancestry is queried for assigned context to outcome, never inferred from a Prompt TSG edge",
+    "Graph methods share the same outcome learner, training data, CAL data, candidate strengths and evaluation denominator",
+    "Direct bootstrap gates and confidence penalties use the same task subsamples",
+    "Unknown ancestry retains the candidate; all-zero gate strength includes the complete reference",
+    "Failures and unknown measurements retain their original frozen endpoint values",
+    "All registered repetitions and comparators are reported, including harmful and null differences"
+  ]
+}

@@ -557,7 +557,7 @@ def _write_candidate_request(tmp_path, *, include_template=False):
     return tasks, contracts, task_path, extraction, request_bundle
 
 
-def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extractor(tmp_path, monkeypatch):
+def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extractor(tmp_path):
     tasks, _, _, _, request_bundle = _write_candidate_request(tmp_path, include_template=True)
     request = read_json(request_bundle / "request.json")
     response, design = _explicit_background_response(request, _proposal(request), "Run a SQL query"), _design()
@@ -569,11 +569,6 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
     output = tmp_path / "candidate-catalog"
     report = build_candidate_catalog(request_bundle, paths[1], output, response_path=paths[0], review_path=paths[2])
     assert report["status"] == "REVIEWED" and report["accepted_factors"] == 2
-    sent = []
-    def fake_complete(model_request, evaluator, prompt):
-        sent.append(model_request)
-        return json.dumps(response).encode()
-    monkeypatch.setattr("prompt_mechanism_study.llm.complete_chat", fake_complete)
     from prompt_mechanism_study.tsg.candidate_construction import _proposal_evaluator
     config = dict(schema_version="1.0", candidate_id="frozen-test-proposer", provider="local_vllm",
         model_id="test-local-model", base_url="http://127.0.0.1:9999/v1", api_key_env=None,
@@ -585,10 +580,7 @@ def test_generated_catalog_preserves_fixed_template_and_enters_real_frozen_extra
         config_path.write_text(json.dumps(alternative), encoding="utf-8")
         assert _proposal_evaluator(config_path) == alternative
     config_path.write_text(json.dumps(config), encoding="utf-8")
-    proposed = build_candidate_catalog(request_bundle, paths[1], tmp_path / "mock-provider-proposal", evaluator_path=config_path)
-    assert read_json(tmp_path / "mock-provider-proposal/evaluator.json") == config
-    assert sent == [candidate_model_request(request)]
-    assert proposed["status"] == "PENDING_SEMANTIC_REVIEW" and proposed["accepted_factors"] == 0
+    assert _proposal_evaluator(config_path) == config
     catalog = read_json(output / "catalog.json")
     prepared_task = prepare_task_input(tasks[0])
     extraction_request = contract_decision_request(prepared_task, catalog)

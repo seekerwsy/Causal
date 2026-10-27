@@ -9,6 +9,15 @@ Discovery, provider Confirmation, protected-task exposure, provider spending or
 scientific reporting. Formal use requires a prospectively authorized frozen
 package and the qualifications below.
 
+The sole prospective bounded-development specification is the
+[TSG discovery and randomized policy evaluation protocol](graph-guided-discovery-protocol.md),
+`tsg-discovery-development-20260929`. Within that explicitly scoped study, its
+candidate preparation, arms, selectors, randomization and three-comparison inference
+rules govern; the formal Discovery roster and FCI admission rules below do not
+define that development experiment. This is a specified protocol, with no new
+execution authorized by its publication. Earlier development packages replay their
+own frozen rules. The new study's implementation status is listed in its Section 13.
+
 The 2026-09-16 scope decision defers Pair interaction research to
 [`codex/pair-interaction-research`](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research),
 commit `e6833027`. Main now has one Atomic policy family. The old draft, complete

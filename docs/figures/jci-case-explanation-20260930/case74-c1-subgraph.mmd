@@ -1,0 +1,29 @@
+flowchart LR
+    N3["N3 · Forum post"]
+    N4["N4 · User-submitted content"]
+    N5["N5 · XSS attacks"]
+    N6["N6 · Proper sanitization"]
+    N7["N7 · Header"]
+    N8["N8 · Message"]
+    N9["N9 · Links"]
+    N10["N10 · Dangerous scripts"]
+    N11["N11 · Options"]
+    N12["N12 · Sanitized forum-post return"]
+    N13["N13 · Harmful HTML / JavaScript"]
+    N14["N14 · Neutralize or escape"]
+    N15["N15 · Web-page rendering"]
+    N6 -->|E3: applies_to| N4
+    N6 -->|E4: safeguards_against| N5
+    N6 -->|E5: covers_component| N7
+    N6 -->|E6: covers_component| N8
+    N6 -->|E7: covers_component| N9
+    N3 -->|E8: may_include| N7
+    N3 -->|E9: may_include| N8
+    N3 -->|E10: may_include| N9
+    N3 -->|E11: should_exclude| N10
+    N12 -->|E18: includes_sanitized| N11
+    N14 -->|E19: applies_to| N13
+    N14 -->|E20: precedes| N15
+    classDef target fill:#edf3f8,stroke:#315f85,stroke-width:1.7px;
+    class N3,N4,N5,N6,N7,N8,N9,N10,N11,N12,N13,N14,N15 target;
+    linkStyle default stroke:#315f85,stroke-width:1.5px;

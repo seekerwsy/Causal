@@ -43,6 +43,78 @@ from prompt_mechanism_study.tsg.representation import (
 _REQUIREMENTS = {"safety_requirement", "task_requirement", "constraint", "presentation_control"}
 
 
+def source_participant_query(source_prompt, source_records, operation_id, participant_role):
+    view = validate_development_records(source_records, source_prompt)
+    if view['structural_diagnostics'] or view['evidence_diagnostics']:
+        raise ValueError('participant query requires valid source records and quotations')
+    if operation_id not in view['groups']['operations']:
+        raise ValueError('participant query operation is absent')
+    if participant_role not in {'value_input', 'identifier_input', 'resource', 'destination', 'input_unspecified'}:
+        raise ValueError('participant query role is invalid')
+    operation = view['records'][operation_id]
+    matches = [row for row in operation['inputs'] if row['role'] == participant_role]
+    return dict(operation_id=operation_id, participant_role=participant_role,
+                targets=[row['subject'] for row in matches],
+                relations=[dict(source=row['subject'], edge_type='used_by', target=operation_id,
+                                role=row['role'], evidence_text=row['evidence_text']) for row in matches],
+                execution_conditions=operation['execution_conditions'],
+                scope_conditions=operation['scope_conditions'],
+                state='supported' if matches else 'unresolved')
+
+
+def source_requirement_query(source_prompt, source_records, requirement_id):
+    view = validate_development_records(source_records, source_prompt)
+    if view['structural_diagnostics'] or view['evidence_diagnostics']:
+        raise ValueError('requirement query requires valid source records and quotations')
+    if requirement_id not in view['groups']['requirements']:
+        raise ValueError('requirement query identity is absent')
+    row = view['records'][requirement_id]
+    if row['modality'] != 'obligation' or row['structure']['kind'] != 'atom':
+        raise ValueError('this bounded query requires one complete atomic obligation')
+    targets, operations = row['subjects'], row['operations']
+    return dict(requirement_id=requirement_id, targets=list(targets), operations=list(operations),
+                conditions=list(row['conditions']), scope_kind=row['scope_kind'],
+                target_class=row['target_class'], owned_relations=list(row.get('relations', [])),
+                relations=[dict(source=requirement_id, edge_type='constrains', target=target,
+                                evidence_text=row['fact']['evidence_text']) for target in targets + operations],
+                state='supported' if targets or operations or row['scope_kind'] in {'task', 'implementation', 'each'}
+                else 'unresolved')
+
+
+def source_remove_candidate(*, source_prompt, source_records, knowledge, binding, assessment):
+    view = validate_development_records(source_records, source_prompt)
+    if view['structural_diagnostics'] or view['evidence_diagnostics']:
+        raise ValueError('REMOVE requires valid source records and quotations')
+    if (assessment['source_state'] != 'EXPRESSED' or assessment['compatibility'] != 'compatible'
+            or assessment['relevance'] != 'supported' or assessment.get('complete_binding') is not True):
+        raise ValueError('REMOVE requires an expressed, relevant, completely bound requirement')
+    evidence = assessment.get('evidence', [])
+    if not evidence or source_evidence_diagnostics(assessment, source_prompt):
+        raise ValueError('REMOVE requires exact source evidence')
+    for field in ('author', 'rationale'):
+        require_text(assessment.get(field), field)
+    if not assessment.get('non_target_invariants'):
+        raise ValueError('REMOVE requires explicit retained source behavior')
+    for field in ('id', 'url', 'version', 'principle'):
+        require_text(knowledge.get(field), field)
+    for field in ('requirement', 'scope', 'time', 'endpoint'):
+        require_text(binding.get(field), field)
+    for field, group in (('targets', 'objects'), ('operations', 'operations')):
+        refs = binding[field]
+        if not isinstance(refs, list) or len(refs) != len(set(refs)) or not set(refs) <= set(view['groups'][group]):
+            raise ValueError('REMOVE binding references must identify source records')
+    if not isinstance(binding['conditions'], list):
+        raise ValueError('REMOVE requires explicit complete conditions')
+    policy = canonical_value(binding)
+    policy['operation'] = 'REMOVE'
+    policy['policy_id'] = 'policy.' + content_hash(dict(source=source_prompt, policy=policy))
+    return dict(decision='include', policy=policy, knowledge=dict(knowledge), assessment=dict(assessment),
+                source_sha256=content_hash(source_prompt), source_records_sha256=view['source_records_sha256'],
+                policy_origin='source_supported_development_remove', effect_status='UNTESTED',
+                formal_eligible=False, source_graph_mutated=False, automatic_semantic_certification=False,
+                evidence_diagnostics=[], structural_diagnostics=[])
+
+
 def render_add_policy(binding, view, source_prompt):
     """Render the one binding verbatim; no independent model-written edit."""
     parts = ['Additional requirement: ' + binding['requirement']]

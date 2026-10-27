@@ -10,6 +10,8 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 import json
 
+from jsonschema import Draft202012Validator, ValidationError
+
 from prompt_mechanism_study.artifact_io import json_object
 from prompt_mechanism_study.tsg.source_codec import fact_layer
 from prompt_mechanism_study.tsg.prompt_contract import OpenTaskContract
@@ -96,13 +98,13 @@ def record_response_format(request):
         source_citation_schema,
         source_coverage_schema,
     )
-    text = dict(type="string")
+    text = dict(type="string", pattern=r"\S")
     ref = _array(text)
     citation = source_citation_schema(request)
     fields = {}
     for group in ("objects", "operations", "requirements"):
         fact = source_fact_schema(request, group=group)
-        props = dict(record_id=dict(type="string", description="Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."), fact=fact)
+        props = dict(record_id=dict(type="string", pattern=r"\S", description="Unique stable local ID. ALL subject/operation/target references must copy this exact ID, not its source name or quotation."), fact=fact)
         condition = source_fact_schema(request, group="conditions")
         if group == "operations":
             if 'concept' in fact['properties']:
@@ -110,11 +112,11 @@ def record_response_format(request):
                     'Action predicate with necessary API/mechanism distinctions. Concrete participants, '
                     'execution conditions and order belong exclusively in their structural fields. '
                     'Keep distinct source occurrences as distinct record IDs, not compound definitions.')
-            props.update(inputs=_array(_object(dict(subject=dict(type="string", description="Exact record_id of an objects entry, e.g. obj_form, never a new name or quotation."),
+            props.update(inputs=_array(_object(dict(subject=dict(type="string", pattern=r"\S", description="Exact record_id of an objects entry, e.g. obj_form, never a new name or quotation."),
                 role=dict(type="string", enum=["value_input", "identifier_input", "resource", "destination", "input_unspecified"]), **citation))),
-                results=_array(_object(dict(subject=dict(type="string", description="Exact record_id of an objects entry."), **citation))),
+                results=_array(_object(dict(subject=dict(type="string", pattern=r"\S", description="Exact record_id of an objects entry."), **citation))),
                 execution_conditions=_array(condition), scope_conditions=_array(condition),
-                precedes=_array(_object(dict(operation=dict(type="string", description="Exact record_id of another operation. Only independent context; requirement-owned order goes in requirement.relations."), **citation))))
+                precedes=_array(_object(dict(operation=dict(type="string", pattern=r"\S", description="Exact record_id of another operation. Only independent context; requirement-owned order goes in requirement.relations."), **citation))))
         if group == "requirements":
             if 'concept' in fact['properties']:
                 fact['properties']['concept']['properties']['definition']['description'] = (
@@ -128,12 +130,12 @@ def record_response_format(request):
                     description="task: overall runtime-task boundary, NEVER all operations. targets: direct bindings. each: universal class rule within the task or one enclosing operation. composite: logical container, members carry bindings. implementation: generated artifact."),
                 operations={**ref, "description": "Direct recipients of the ENTIRE predicate, not relation participants. For each, zero/one enclosing runtime operation. Empty for task/implementation/composite."},
                 subjects={**ref, "description": "Exact direct object targets; empty except for targets scope."},
-                target_class=dict(type=["string", "null"], description="For each only: complete source-supported target class, not an instance list. Otherwise null."),
+                target_class=dict(type=["string", "null"], pattern=r"\S", description="For each only: complete source-supported target class, not an instance list. Otherwise null."),
                 conditions=_array(condition),
                 relations=_array(_object(dict(
-                    source=dict(type="string", description="Exact runtime operation record_id: first operand, not a direct target declaration."),
+                    source=dict(type="string", pattern=r"\S", description="Exact runtime operation record_id: first operand, not a direct target declaration."),
                     edge_type=dict(type="string", enum=["precedes"]),
-                    target=dict(type="string", description="Exact runtime operation record_id: second operand, not a direct target declaration."),
+                    target=dict(type="string", pattern=r"\S", description="Exact runtime operation record_id: second operand, not a direct target declaration."),
                     **citation))))
             # Require the model to commit composition and binding before fluent prose.
             props = {**{key: val for key, val in props.items() if key != "fact"}, "fact": fact}
@@ -359,31 +361,12 @@ def candidate_record_dependencies(view, binding):
 
 
 def _validate_shape(value, schema, path="response"):
-    """Validate the small schema subset used here, also in ordinary JSON mode."""
     from prompt_mechanism_study.tsg.source_codec import PromptContractExtractionError as Error
-    kind = schema["type"]
-    if isinstance(kind, list):
-        if value is None and "null" in kind:
-            return
-        return _validate_shape(value, {**schema, "type": "string"}, path)
-    if kind == "object":
-        if not isinstance(value, dict) or set(value) != set(schema["properties"]):
-            raise Error(f"{path}: fields differ from the record schema")
-        for key, field in schema["properties"].items():
-            _validate_shape(value[key], field, f"{path}.{key}")
-    elif kind == "array":
-        if not isinstance(value, list) or len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", float("inf")):
-            raise Error(f"{path}: invalid array")
-        for index, item in enumerate(value):
-            _validate_shape(item, schema["items"], f"{path}[{index}]")
-    elif kind == "string":
-        if not isinstance(value, str) or not value.strip() or "enum" in schema and value not in schema["enum"]:
-            raise Error(f"{path}: invalid string or choice")
-    elif kind == "boolean":
-        if type(value) is not bool:
-            raise Error(f"{path}: invalid boolean")
-    else:
-        raise Error(f"unsupported record schema type {kind}")
+    try:
+        Draft202012Validator(schema).validate(value)
+    except ValidationError as error:
+        location = ".".join((path, *(str(item) for item in error.absolute_path)))
+        raise Error(f"{location}: {error.message}") from error
 
 
 def _inherit_conditions(value):
@@ -806,8 +789,8 @@ def review_request(request, value, *, compiled_contract=None):
 def review_response_format(request):
     status = dict(type="string", enum=["supported", "unsupported", "unresolved"])
     return dict(type="json_schema", json_schema=dict(name="source_record_review", strict=True,
-        schema=_object(dict(records=_object({r["record_id"]: _object(dict(status=status, reason=dict(type="string"))) for r in _records(request["records"])}),
-            source_units=_object({key: _object(dict(complete=dict(type="boolean"), reason=dict(type="string")))
+        schema=_object(dict(records=_object({r["record_id"]: _object(dict(status=status, reason=dict(type="string", pattern=r"\S"))) for r in _records(request["records"])}),
+            source_units=_object({key: _object(dict(complete=dict(type="boolean"), reason=dict(type="string", pattern=r"\S")))
                                   for key in request["source_units"]})))))
 
 

@@ -1,128 +1,144 @@
 # CausalGuide
 
-Research prototype for finding and testing prompt-side security requirements in
-LLM code generation. Each Atomic policy changes one complete requirement while
-preserving the task's non-target behavior.
+The normative [Atomic protocol](docs/protocol.md) is `phase-context-policy-v3`,
+**SPECIFIED_DRAFT**. The active implementation supports source preparation,
+offline component reproduction, independently verified results and explicitly
+authorized bounded development. Formal execution remains inactive.
 
-The normative [protocol](docs/protocol.md) is `phase-context-policy-v3`,
-**SPECIFIED_DRAFT**. Formal execution is inactive. Implemented components, offline
-smoke checks and bounded development results do not establish whole-method efficacy.
+Each Atomic policy changes one complete prompt requirement while preserving
+non-target behavior. Prompt TSG records source meaning and scope. The primary
+analysis uses assigned-arm, deduplicated-task-unit ITT. Generation failures,
+unknown measurements and post-assignment diagnostics retain their assigned
+denominators. Secure-code yield, code validity, Oracle evaluability,
+functionality and joint success are reported separately.
 
-## Method
+## Reproduce the reviewer artifact
 
-```text
-representation → prioritization → hypothesis freeze
-→ intervention/randomization → measurement → outcome assembly → inference/reporting
-```
-
-| Stage | Responsibility |
-| --- | --- |
-| Representation | Preserve requirements, objects, conditions and scope in Prompt TSG; construct Atomic candidates. |
-| Prioritization | Check support and compare Full (FCI admission plus RD ranking) with RD-only on the same candidates and folds. |
-| Hypothesis freeze | Fix policies, slots, task populations, models, budgets and analysis before evaluation. |
-| Intervention/randomization | Assign Target, No-op, Style and Generic-security prompts for one requirement. |
-| Measurement | Measure security, code validity and functionality independently of assigned-arm labels. |
-| Outcome assembly | Account for every assigned task/arm/seed, including failure and unknown. |
-| Inference/reporting | Estimate task-unit ITT effects, retain the frozen comparison family and independently verify saved results. |
-
-TSG edges express source semantics, not causal relationships. An unexpressed
-requirement does not imply insecure generated code; unknown does not mean absent.
-Post-assignment compliance, generation success and drift never filter the ITT
-denominator. Secure-code yield, Oracle coverage, functionality and joint success
-remain separate. Current TSG uses source-contract schema 4, graph schema 3 and concept-catalog schema 2;
-older formats are replayed with their captured Git implementation.
-TSG program validation checks structure, references and source locations, not
-semantic entailment. Models judge source meaning and candidate applicability;
-independent reference evaluation measures their errors. The compiler does not
-complete roles or classify domains using hand-coded concept rules.
-`main` is Atomic-only; [Pair research is deferred](https://github.com/seekerwsy/Causal/tree/codex/pair-interaction-research).
-
-## Reproduce the reviewer smoke
-
-Use Python 3.12:
+Use Python 3.12 from the repository root:
 
 ```text
 python -m pip install -e ".[dev,selectors,languages]"
 python -m pytest -q
-```
-
-The default suite includes the complete seven-stage smoke and independent result
-verification. To inspect a standalone saved package:
-
-```text
 prompt-mechanism-study study smoke NEW_OUTPUT_DIRECTORY
 prompt-mechanism-study study verify-result NEW_OUTPUT_DIRECTORY
 ```
 
-The smoke uses synthetic tasks and offline model responses, makes no provider
-calls, and runs real FCI on fixture observations. Its output is
-`NON_CLAIM_TEST_ARTIFACT`. Reviewers do not need to rebuild the source dataset or
-repeat historical curation to run it. See the [reviewer guide](docs/reviewer-guide.md)
-for stage inputs/outputs and a reading order of at most ten core files.
+The smoke runs real FCI on synthetic observations and measures bundled offline
+code/review responses. It makes zero provider calls and saves a
+`NON_CLAIM_TEST_ARTIFACT`. The independent verifier replays assignment,
+measurement, statistical estimates and table rows from the saved package.
 
-## Artifact scope and evidence
+The [reviewer guide](docs/reviewer-guide.md) identifies stage inputs and outputs,
+scientific invariants, six result files and ten core reading files. The
+[test guide](tests/README.md) identifies the default suite and the separate
+exposed-development checks.
 
-The reviewer command above reproduces a **non-claim** seven-stage result from
-bundled synthetic tasks and offline code responses. The result package retains raw code and evaluator responses alongside prospective
-inputs, assignments, measured labels, unknowns and independently checked results.
-There is not yet a claim-bearing natural-task result table in `main`.
+## Seven scientific stages
 
-The static file-permission and credential-source profiles currently return
-`unknown`: recognizing a permission-setting call or a credential-like name does
-not establish the task's complete security boundary. Those endpoints require
-task-bound measurement before use; qualification reports each profile separately.
-See the [measurement scope amendment](docs/protocol.md) for the prospective
-boundary and preservation of earlier frozen results.
-
-The [outcome-blind scope preflight](docs/artifact-scope-preflight.md) recounts the
-released v4 task inventory and earlier candidate-screen coverage for four Python
-CWE labels. It also records why existing AST examples alone do not qualify an
-endpoint on generated code. This preflight does not admit any task or policy to a
-formal experiment. Natural-task transfer, automatic TSG's incremental value and
-FCI's selection benefit remain unproved.
-
-The complete pre-scope development workspace is retained on local branch
-`codex/pre-artifact-scope-20260923` at `f1cd0011`. Historical results keep their
-original measurement rules and are outside the default reviewer artifact.
-
-## Work on the prototype
-
-Source is grouped directly under `src/`: `data`, `tsg`, `discovery`, `experiment`,
-`measurement` and `verification`. `src/cli.py` is the command entry and
-`src/target_workflow.py` the linear workflow. `development` only supplies the
-reviewer smoke fixture. The import package remains `prompt_mechanism_study`.
-Source import and read-only input verification live in `data/commands.py`.
-Contracts and independent source judgments are supplied inputs; the prototype
-does not run a separate contract-production and repair campaign. Extraction, generation and functional review share
-`llm.py`; each stage retains its own response interpretation. File serialization
-is shared in `artifact_io.py`, while result arithmetic is independently replayed
-in `verification/`. `experiment/reporting.py` builds tables without calling the
-verifier or writing files; `target_workflow.py` coordinates verification and
-package writing. `contracts.json` is the authoritative source representation;
-candidate analysis and visualization compile graph views from it. Candidate states
-stay in `factor-states.json`, so changing an assessment does not rewrite source
-semantics. No second graph cache is maintained.
-
-The reviewer package has six business files plus its byte-integrity manifest:
-study configuration, confirmation inputs, raw measurement records, statistical
-evidence, selector yields and RQ tables. Prospective call limits, role separation,
-randomization and independent numerical replay remain checked. The unused
-qualification/budget/freeze/report-authorization hierarchy has been retired;
-formal provider execution and claim authorization remain unavailable. Numerical
-power planning and endpoint-specific qualification remain available separately.
-The preceding implementation is preserved on
-`codex/pre-framework-contraction-20260925` at `8e9241d2d`; old frozen packages
-must use that implementation, not be rewritten into this format.
-
-| Author operation | Entry or guide |
+| Stage | Responsibility |
 | --- | --- |
-| Prepare new source data | `data`; [dataset boundaries](docs/research-dataset-spec.md) and [source preparation](docs/contract-content-cleaning.md) |
-| Extract and assess TSG | `representation` / `qualification`; [TSG workflow](docs/tsg-workflow-stability.md) and [candidate semantics](docs/tsg-candidate-construction.md) |
-| Run authorized bounded development | `study development OUTPUT --development-plan FROZEN_PLAN` |
-| Verify its saved results | `study verify-development SAVED_RUN` |
+| Representation | Preserve source requirements, objects, conditions and scopes; construct Atomic candidates. |
+| Prioritization | Use shared candidates and folds for Full and RD-only; retain every fixed selector slot. |
+| Hypothesis freeze | Fix policies, populations, models, budgets and analysis before evaluation. |
+| Intervention/randomization | Bind one requirement to Target, No-op, Style and Generic-security prompts and replay task/arm/seed assignment. |
+| Measurement | Independently measure security, validity and functionality from generated code. |
+| Outcome assembly | Account for every assignment, including terminal, unknown and failed outcomes. |
+| Inference/reporting | Estimate task-unit ITT effects and independently reconstruct reported rows. |
 
-Use `GROUP --help` for available commands. Source preparation is an author task,
-not an extra scientific stage. Frozen historical inputs use their corresponding
-implementations on the preserved branch. Current tests are described in the
-[test guide](tests/README.md). The [paper draft](paper/fse2027/main.tex) is separate
-from the development archive.
+Context-modifier inference remains blocked pending prospective assignment and
+joint inference rules. Pair interaction remains outside the Atomic method.
+Natural-task transfer, automatic representation accuracy and a graph selection
+advantage require their own prospectively specified evidence.
+
+## Implementation and commands
+
+`src/cli.py` is the single command entry; `src/target_workflow.py` coordinates
+the seven stages. Scientific logic belongs to `data`, `tsg`, `discovery`,
+`experiment`, `measurement` and `verification`. `artifact_io.py` supplies shared
+serialization and integrity checks. `verification` retains independent
+assignment and numerical calculations.
+
+Fixed slots directly determine unique selected candidates. The dispatch manifest
+binds their protocolization results to the fixed-slot ledger. Inference computes
+all endpoints over the same task hierarchy. Result-table assembly is pure;
+the workflow writes the package and independently verifies its readback.
+
+Source contracts are authoritative; graphs are compiled from them. Candidate
+assessments remain separately bound to their source contracts. Record decoding
+uses cattrs with exact primitive types and canonical readback checks. Response
+structure uses JSON Schema; source evidence and scientific constraints retain
+their explicit checks.
+
+| Operation | Command |
+| --- | --- |
+| Prepare source data | `data --help` |
+| Extract and assess source representations | `representation --help` |
+| Submit complete prepared prompts | `representation submit-preparation INPUTS SUBMISSION OUTPUT` |
+| Submit complete Atomic reviews | `representation submit-review INPUTS SUBMISSION OUTPUT` |
+| Compute exposed safety-gain decisions | `prioritization safe-decisions INPUTS ANALYSIS OUTPUT --minimum-gain THRESHOLD` |
+| Run authorized bounded development | `study development OUTPUT --development-plan FROZEN_PLAN` |
+| Verify its results | `study verify-development SAVED_RUN` |
+| Verify exposed observer and decision records | `study verify-repair INPUTS OBSERVATIONS DECISIONS OUTPUT` |
+| Run endpoint qualification | `qualification --help` |
+
+The current [exposed-development check](docs/experiments/2026-10-07-controlled-repair.md)
+uses real native-tool target-access observations, signed edit gains with baseline
+abstention, and complete preparation/review submissions. Its saved 168 probes
+and 400 decisions retain their development evidence identity. Offline decision
+reproduction and its independent verifier additionally require `.[analysis]`.
+
+The [JCI sharing development study](docs/experiments/2026-10-14-jci-sharing-results.md)
+executes multi-environment structure searches and policy consumers, with a separate
+exposed historical-code analysis. Its [frozen design](docs/experiments/2026-10-14-jci-sharing-plan.md)
+and saved results distinguish the original comparison, causal-query diagnostics,
+and shared-component calibration. Use `study jci-sharing`,
+`study diagnose-jci-sharing`, and `study verify-jci-sharing`; these commands require
+`.[analysis]` and the declared R/pcalg environment. The evidence remains bounded
+method development.
+
+The [joint-context JCI study](docs/experiments/2026-10-14-jci-joint-policy-results.md)
+tests directional ancestry information and zero-effect constrained refitting on
+96 computational repetitions and the exposed historical outcomes. Use the same
+study and verification entry points with `--joint-policies`; add
+`--zero-effect-refit` for the constrained consumer. Its report separates known
+graphical information from finite-sample policy value and direct-CI comparisons.
+
+The [exposed direction comparison](docs/experiments/2026-10-14-jci-direction-comparison-results.md)
+uses eight frozen training/CAL splits of the exposed historical tasks, equal-budget
+policy consumers, a direct-CI comparison and an ancestry-versus-adjacency ablation.
+Its [design](docs/experiments/2026-10-14-jci-direction-comparison-plan.md) uses
+`study jci-sharing --joint-policies --historical-only` with `direction-plan.json`;
+the existing joint verification command reconstructs all task-level comparisons.
+The results retain their post-hoc development identity.
+
+The [JCI reliability study](docs/experiments/2026-10-14-jci-reliability-results.md)
+replays false non-ancestry decisions and tests conservative structure search,
+finite regularization, direct-dependence protection and separated calibration
+roles under its [frozen SCM design](docs/experiments/2026-10-14-jci-reliability-plan.md).
+Use `study jci-reliability`, `study verify-jci-reliability` and
+`study diagnose-jci-reliability`. Its prospective comparisons cover all registered
+mechanisms and direct/structural comparators with a common multiplicity family.
+The evidence remains a bounded computational method check.
+
+The [limited-budget replay](docs/experiments/2026-10-14-jci-budget-replay-results.md)
+freezes 24 scoped expression-policy candidates, request budgets, confirmation
+panels and independent test tasks. Its [design](docs/experiments/2026-10-14-jci-budget-replay-plan.md)
+uses the same historical joint-study command with `budget-plan.json`.
+Discovery learners receive only budgeted real random-mixture outcomes; the saved
+results separately report requirement ancestry, candidate changes and test value.
+
+## Frozen research
+
+Completed controlled studies retain their original inputs, observations, rules
+and reports. Their implementation, scripts and historical tests are preserved in
+[the verified source archive](archive/frozen-research-20261007.zip). Follow the
+[archive reproduction guide](docs/archive-reproduction.md) to run them in an
+isolated environment with the matching frozen implementation.
+
+The [controlled study report](docs/experiments/2026-09-30-controlled-semantic-results.md)
+records 9,216 evaluation requests, eleven executed primary comparisons and an
+unexecuted natural comparison whose frozen eligible sets are empty. Its primary
+nonconstant intervals include zero; the frozen JCI, FCI and RD actions coincide.
+The [experiment documents](docs/experiments/README.md) identify the retained
+designs and results. These historical artifacts keep their original evidential
+limits. The [paper draft](paper/fse2027/main.tex) is a separate research artifact.

@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from numpy.linalg import LinAlgError
+
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.discovery.selector_numerics import fit_ridge_logit, sigmoid as _sigmoid
 from prompt_mechanism_study.records import content_hash, content_id, require_text
@@ -845,6 +847,7 @@ class FixedSlotLedger:
             raise ValueError("fixed slots must bind every source exactly")
         for source in self.sources:
             fixed = tuple(slots_by_source[source.source_id])
+            candidates = {item.policy_key: item for item in source.model_bound_records}
             if tuple(item.rank for item in fixed) != tuple(range(1, len(source.slots) + 1)):
                 raise ValueError("fixed slots do not preserve the source K denominator")
             for original, record in zip(source.slots, fixed, strict=True):
@@ -852,79 +855,30 @@ class FixedSlotLedger:
                     raise ValueError("fixed slot status or reason drifted from its source")
                 if original.candidate_id != record.policy_key:
                     raise ValueError("fixed slot policy identity drifted from its source")
+                if record.status is SlotStatus.FILLED:
+                    candidate = candidates[record.policy_key]
+                    if (record.candidate_record_id != candidate.candidate_record_id
+                        or record.effect_coordinate_id != candidate.effect_coordinate.effect_coordinate_id
+                        or record.model_id != candidate.discovery_model_id):
+                        raise ValueError("fixed slot drifted from its model-bound candidate")
+        candidates = self.selected_candidates
+        if len({item.effect_coordinate.effect_coordinate_id for item in candidates}) != len(candidates):
+            raise ValueError("one model effect may enter confirmation only once")
 
     @property
     def fixed_slot_ledger_id(self) -> str:
         return content_id("fixed_slot_ledger_", self)
 
-
-@dataclass(frozen=True, slots=True)
-class SharedCandidateUnionEntry:
-    track: PolicyTrack
-    candidate: ModelBoundCandidateRecord
-
-    def __post_init__(self) -> None:
-        if type(self.track) is not PolicyTrack:
-            raise TypeError("shared candidate track must be typed")
-        if type(self.candidate) is not ModelBoundCandidateRecord:
-            raise TypeError("shared union entry requires a model-bound candidate")
-
     @property
-    def candidate_record_id(self) -> str:
-        return self.candidate.candidate_record_id
-
-    @property
-    def effect_coordinate_id(self) -> str:
-        return self.candidate.effect_coordinate.effect_coordinate_id
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateSlotFanout:
-    candidate_record_id: str
-    slot_ids: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        require_text(self.candidate_record_id, "fan-out candidate_record_id")
-        _canonical_unique(self.slot_ids, "fan-out slot_ids")
-
-
-@dataclass(frozen=True, slots=True)
-class SharedConfirmationUnion:
-    """Unique model-effect union and exact fan-out back to fixed selector slots."""
-
-    ledger: FixedSlotLedger
-    entries: tuple[SharedCandidateUnionEntry, ...]
-    candidate_to_slots: tuple[CandidateSlotFanout, ...]
-
-    def __post_init__(self) -> None:
-        if type(self.ledger) is not FixedSlotLedger:
-            raise TypeError("shared confirmation union requires a fixed-slot ledger")
-        if any(type(item) is not SharedCandidateUnionEntry for item in self.entries):
-            raise TypeError("shared confirmation entries must be typed")
-        entry_ids = tuple(item.candidate_record_id for item in self.entries)
-        _canonical_unique(entry_ids, "shared confirmation candidate records")
-        effect_ids = tuple(item.effect_coordinate_id for item in self.entries)
-        if len(set(effect_ids)) != len(effect_ids):
-            raise ValueError("one model effect may enter the confirmation union only once")
-        if tuple(item.candidate_record_id for item in self.candidate_to_slots) != entry_ids:
-            raise ValueError("candidate-to-slots must exactly follow the unique union")
-        filled = {
-            item.candidate_record_id: []
-            for item in self.ledger.slots
-            if item.status is SlotStatus.FILLED
+    def selected_candidates(self) -> tuple[ModelBoundCandidateRecord, ...]:
+        record_by_id = {
+            item.candidate_record_id: item
+            for source in self.sources
+            for item in source.model_bound_records
         }
-        for slot in self.ledger.slots:
-            if slot.status is SlotStatus.FILLED:
-                filled[slot.candidate_record_id].append(slot.slot_id)
-        if set(filled) != set(entry_ids):
-            raise ValueError("unique union must equal every filled candidate record")
-        for fanout in self.candidate_to_slots:
-            if fanout.slot_ids != tuple(sorted(filled[fanout.candidate_record_id])):
-                raise ValueError("candidate-to-slots fan-out does not replay from the ledger")
-
-    @property
-    def shared_confirmation_union_id(self) -> str:
-        return content_id("shared_confirmation_union_", self)
+        selected_ids = sorted({slot.candidate_record_id for slot in self.slots
+                               if slot.status is SlotStatus.FILLED})
+        return tuple(record_by_id[candidate_id] for candidate_id in selected_ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -962,19 +916,18 @@ class ConfirmationDispatchRecord:
 
 @dataclass(frozen=True, slots=True)
 class ConfirmationDispatchManifest:
-    union: SharedConfirmationUnion
+    ledger: FixedSlotLedger
     records: tuple[ConfirmationDispatchRecord, ...]
 
     def __post_init__(self) -> None:
-        if type(self.union) is not SharedConfirmationUnion:
-            raise TypeError("dispatch manifest requires a shared confirmation union")
-        expected = self.union.entries
+        if type(self.ledger) is not FixedSlotLedger:
+            raise TypeError("dispatch manifest requires a fixed-slot ledger")
+        expected = self.ledger.selected_candidates
         if tuple(item.candidate_record_id for item in self.records) != tuple(
             item.candidate_record_id for item in expected
         ):
             raise ValueError("dispatch records must exactly follow the unique union")
-        for entry, record in zip(expected, self.records, strict=True):
-            candidate = entry.candidate
+        for candidate, record in zip(expected, self.records, strict=True):
             if (
                 record.effect_coordinate_id
                 != candidate.effect_coordinate.effect_coordinate_id
@@ -1052,54 +1005,16 @@ def freeze_fixed_slot_ledger(
     )
 
 
-def freeze_shared_confirmation_union(
-    ledger: FixedSlotLedger,
-) -> SharedConfirmationUnion:
-    """Deduplicate filled slots at the model-effect record, never at rank."""
-
-    record_by_id = {
-        record.candidate_record_id: (source.track, record)
-        for source in ledger.sources
-        for record in source.model_bound_records
-    }
-    selected_ids = tuple(
-        sorted(
-            {
-                slot.candidate_record_id
-                for slot in ledger.slots
-                if slot.status is SlotStatus.FILLED
-            }
-        )
-    )
-    entries = tuple(
-        SharedCandidateUnionEntry(*record_by_id[candidate_id])
-        for candidate_id in selected_ids
-    )
-    fanout = tuple(
-        CandidateSlotFanout(
-            candidate_id,
-            tuple(
-                sorted(
-                    slot.slot_id
-                    for slot in ledger.slots
-                    if slot.candidate_record_id == candidate_id
-                )
-            ),
-        )
-        for candidate_id in selected_ids
-    )
-    return SharedConfirmationUnion(ledger, entries, fanout)
-
-
 def freeze_confirmation_dispatch(
-    union: SharedConfirmationUnion,
+    ledger: FixedSlotLedger,
     protocol_record_ids: Mapping[str, str],
     *,
     failures: Mapping[str, tuple[BridgeStatus, str]] | None = None,
 ) -> ConfirmationDispatchManifest:
     """Dispatch each selected record only to its discovery-bound model."""
 
-    expected_ids = tuple(item.candidate_record_id for item in union.entries)
+    candidates = ledger.selected_candidates
+    expected_ids = tuple(item.candidate_record_id for item in candidates)
     frozen_failures = {} if failures is None else dict(failures)
     if set(protocol_record_ids) & set(frozen_failures) or (
         set(protocol_record_ids) | set(frozen_failures)
@@ -1112,26 +1027,26 @@ def freeze_confirmation_dispatch(
         raise ValueError("dispatch failures must be typed bridge/protocolization failures")
     records = tuple(
         ConfirmationDispatchRecord(
-            entry.candidate_record_id,
-            entry.effect_coordinate_id,
-            entry.candidate.policy_key,
-            entry.candidate.discovery_model_id,
+            candidate.candidate_record_id,
+            candidate.effect_coordinate.effect_coordinate_id,
+            candidate.policy_key,
+            candidate.discovery_model_id,
             (
                 BridgeStatus.SUCCESS
-                if entry.candidate_record_id in protocol_record_ids
-                else frozen_failures[entry.candidate_record_id][0]
+                if candidate.candidate_record_id in protocol_record_ids
+                else frozen_failures[candidate.candidate_record_id][0]
             ),
-            protocol_record_ids.get(entry.candidate_record_id),
+            protocol_record_ids.get(candidate.candidate_record_id),
             (
                 None
-                if entry.candidate_record_id in protocol_record_ids
-                else frozen_failures[entry.candidate_record_id][1]
+                if candidate.candidate_record_id in protocol_record_ids
+                else frozen_failures[candidate.candidate_record_id][1]
             ),
-            1 if entry.candidate_record_id in protocol_record_ids else 0,
+            1 if candidate.candidate_record_id in protocol_record_ids else 0,
         )
-        for entry in union.entries
+        for candidate in candidates
     )
-    return ConfirmationDispatchManifest(union, records)
+    return ConfirmationDispatchManifest(ledger, records)
 
 
 def freeze_atomic_candidate_universe(
@@ -1284,8 +1199,8 @@ def run_atomic_fci_bootstrap(
                 item["adjacent_factor_ids"] = [features[i] for i in sorted(adjacent) if i < len(features)]
                 for candidate in candidates:
                     results[candidate][draw] = policies[candidate].factor.actionable_feature_id in item["adjacent_factor_ids"]
-            except Exception as error:
-                # A failed numerical backend is unknown, never a negative edge.
+            except (ValueError, ArithmeticError, LinAlgError) as error:
+                # 数值计算失败保留未知状态；程序错误直接终止。
                 item["error"] = f"{type(error).__name__}: {error}"
     evidence = AtomicFCIBootstrapEvidence(
         universe.universe_id,
@@ -2022,7 +1937,6 @@ __all__ = [
     "BridgeStatus",
     "CandidateCoverageSummary",
     "CandidateKind",
-    "CandidateSlotFanout",
     "ConfirmationDispatchManifest",
     "ConfirmationDispatchRecord",
     "DiscoverabilityDecision",
@@ -2036,8 +1950,6 @@ __all__ = [
     "RankedCandidate",
     "SelectorFailure",
     "SelectorSlot",
-    "SharedCandidateUnionEntry",
-    "SharedConfirmationUnion",
     "SlotStatus",
     "atomic_preoutcome_data_sha256",
     "atomic_preoutcome_observations",
@@ -2046,7 +1958,6 @@ __all__ = [
     "freeze_atomic_candidate_universe",
     "freeze_confirmation_dispatch",
     "freeze_fixed_slot_ledger",
-    "freeze_shared_confirmation_union",
     "run_atomic_shadow_qualification",
     "run_atomic_fci_bootstrap",
 ]

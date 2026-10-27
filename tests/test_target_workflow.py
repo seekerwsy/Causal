@@ -13,7 +13,7 @@ from prompt_mechanism_study.discovery.prioritization import (
 )
 from prompt_mechanism_study.verification import load_and_verify_target_result_bundle
 from prompt_mechanism_study.target_workflow import SMOKE_STAGES
-from prompt_mechanism_study.development.reviewer_fixture import load_reviewer_smoke_fixture
+from prompt_mechanism_study.experiment.reviewer_fixture import load_reviewer_smoke_fixture
 from prompt_mechanism_study import target_workflow
 
 
@@ -49,31 +49,24 @@ def test_functional_review_uses_original_task_without_missing_or_inapplicable_su
 def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
     tmp_path,
     capsys,
-    monkeypatch,
 ) -> None:
     output = tmp_path / "target-reviewer-smoke"
-    measured_rows = []
-    measure = target_workflow.measure_generated_code
-
-    def record_measurement(**kwargs):
-        result = measure(**kwargs)
-        measured_rows.append(result)
-        return result
-
-    monkeypatch.setattr(target_workflow, "measure_generated_code", record_measurement)
     assert main(["study", "smoke", str(output)]) == 0
     receipt = json.loads(capsys.readouterr().out)
     verified = load_and_verify_target_result_bundle(output)
 
+    from prompt_mechanism_study.artifact_io import read_json
+    measured_rows = read_json(output / "measurement_records.json")["records"]
     assert len(measured_rows) == 40
-    assert {row.oracle_status.value for row, _ in measured_rows} == {"secure", "insecure"}
-    for row, raw in measured_rows:
-        assert row.code_status.value == "valid"
+    assert {raw["measurement"]["oracle_status"] for raw in measured_rows} == {"secure", "insecure"}
+    for raw in measured_rows:
+        row = raw["measurement"]
+        assert row["code_status"] == "valid"
         assert raw["syntax_valid"] is True
-        assert row.oracle_status.value == (
+        assert row["oracle_status"] == (
             "insecure" if "verify=False" in raw["code"] else "secure"
         )
-        assert row.functional_status.value == "pass"
+        assert row["functional_status"] == "pass"
         assert raw["functional_response"] is not None
         assert all(raw["functional_request"]["blindness"].values())
 

@@ -13,6 +13,14 @@ from prompt_mechanism_study.records import canonical_json
 MANIFEST = "manifest.json"
 
 
+def write_json_new(path: Path, value: Any) -> Path:
+    payload = canonical_json(value) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('x', encoding='utf-8', newline='\n') as stream:
+        stream.write(payload)
+    return path
+
+
 def write_bundle(root: Path, artifacts: Mapping[str, Any]) -> Path:
     root = root.resolve()
     if root.exists():

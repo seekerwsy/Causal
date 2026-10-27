@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.codex/
 .env
 .env.*
 !.env.example
@@ -27,6 +28,7 @@ htmlcov/
 
 # Generated experiment outputs
 runs/
+results/
 datasets/
 .artifacts/
 .codex-runtime/
@@ -36,6 +38,18 @@ paper/tmp/
 paper/fse2027/out/
 .codex-tmp-*.tar.gz
 secaware-*.tar.gz
+
+# Frozen research inputs retained in the server artifact store
+data/method/command-binding-repair-20260926/
+data/method/controlled-semantic-20260930/
+data/method/day-research-20260926/
+data/method/graph-guided-20260928/
+data/method/graph-guided-20260929/
+data/method/graph-guided-20260930/
+data/method/jci-ridge-20260930/
+data/method/night-command-development-20260926/
+data/method/source-hypotheses-20260927/
+data/method/structure-binding-development-20260926/
 
 # Editor and OS files
 .idea/

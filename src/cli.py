@@ -33,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     from prompt_mechanism_study.data.commands import add_source_commands
     add_source_commands(groups)
     _add_representation_group(groups)
+    _add_prioritization_group(groups)
     _add_qualification_group(groups)
     _add_artifact_group(groups)
     return parser
@@ -48,10 +49,74 @@ def _add_study_group(groups: Any) -> None:
             "Formal provider execution remains disabled."
         ),
     )
-    study.set_defaults(handler=_run_study)
-    study.add_argument("phase", choices=("smoke", "verify-result", "development", "verify-development"))
-    study.add_argument("output", type=Path)
-    study.add_argument("--development-plan", type=Path)
+    actions = study.add_subparsers(dest="phase", required=True, metavar="ACTION")
+    for name, help_text in (
+        ("smoke", "run the offline seven-stage reviewer smoke"),
+        ("verify-result", "independently verify a saved reviewer result"),
+        ("development", "run an explicitly authorized frozen development comparison"),
+        ("verify-development", "independently verify saved development results"),
+    ):
+        action = _leaf(actions, name, _run_study, help_text)
+        action.add_argument("output", type=Path)
+        if name == "development":
+            action.add_argument("--development-plan", type=Path, required=True)
+    repair = _leaf(actions, "verify-repair", _run_verify_repair,
+                   "independently replay exposed observer checks and safety-gain decisions")
+    repair.add_argument("inputs", type=Path)
+    repair.add_argument("results", type=Path)
+    repair.add_argument("decisions", type=Path)
+    repair.add_argument("output", type=Path)
+    repair.add_argument("--repository-root", type=Path, default=Path.cwd())
+    sharing = _leaf(actions, "jci-sharing", _run_jci_sharing,
+                    "run the authorized multi-environment JCI sharing development study")
+    sharing.add_argument("output", type=Path)
+    sharing.add_argument("--plan", type=Path, required=True)
+    sharing.add_argument("--rscript", type=Path, required=True)
+    sharing.add_argument("--limit", type=int)
+    sharing.add_argument("--analyze-saved", action="store_true")
+    sharing.add_argument("--recalibrate-saved", action="store_true")
+    sharing.add_argument("--joint-policies", action="store_true")
+    sharing.add_argument("--historical-only", action="store_true")
+    sharing.add_argument("--joint-source-results", type=Path)
+    sharing.add_argument("--zero-effect-refit", action="store_true")
+    sharing_verify = _leaf(actions, "verify-jci-sharing", _run_verify_jci_sharing,
+                          "independently verify the saved JCI sharing development study")
+    sharing_verify.add_argument("output", type=Path)
+    sharing_verify.add_argument("--joint-policies", action="store_true")
+    sharing_verify.add_argument("--zero-effect-refit", action="store_true")
+    sharing_diagnosis = _leaf(actions, "diagnose-jci-sharing", _run_diagnose_jci_sharing,
+                             "localize sharing precision and query causal information in saved PAGs")
+    sharing_diagnosis.add_argument("output", type=Path)
+    sharing_diagnosis.add_argument("--rscript", type=Path, required=True)
+    reliability = _leaf(actions, "jci-reliability", _run_jci_reliability,
+                        "run the frozen bounded JCI policy reliability comparison")
+    reliability.add_argument("output", type=Path)
+    reliability.add_argument("--plan", type=Path, required=True)
+    reliability.add_argument("--rscript", type=Path, required=True)
+    reliability.add_argument("--limit", type=int)
+    reliability.add_argument("--workers", type=int)
+    reliability_verify = _leaf(actions, "verify-jci-reliability", _run_verify_jci_reliability,
+                               "independently verify JCI reliability fits and policy comparisons")
+    reliability_verify.add_argument("output", type=Path)
+    reliability_verify.add_argument("--workers", type=int, default=4)
+    reliability_diagnosis = _leaf(actions, "diagnose-jci-reliability", _run_diagnose_jci_reliability,
+                                  "replay the exact CI deletions behind exposed false non-ancestry")
+    reliability_diagnosis.add_argument("parent", type=Path)
+    reliability_diagnosis.add_argument("output", type=Path)
+    reliability_diagnosis.add_argument("--rscript", type=Path, required=True)
+    reliability_diagnosis.add_argument("--limit", type=int)
+    reliability_diagnosis.add_argument("--population", action="store_true")
+
+
+def _add_prioritization_group(groups: Any) -> None:
+    group = groups.add_parser("prioritization", help="prepare exposed development safety-gain decisions")
+    actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+    decisions = _leaf(actions, "safe-decisions", _run_safe_decisions,
+                      "fit task-equal Ridge and retain baseline when no edit exceeds the threshold")
+    decisions.add_argument("inputs", type=Path)
+    decisions.add_argument("analysis", type=Path)
+    decisions.add_argument("output", type=Path)
+    decisions.add_argument("--minimum-gain", type=float, required=True)
 
 
 def _add_representation_group(groups: Any) -> None:
@@ -61,6 +126,15 @@ def _add_representation_group(groups: Any) -> None:
         description=("Freeze task roles and extract evidence-bound Prompt TSG representations."),
     )
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
+
+    for name, handler, help_text in (
+        ("submit-preparation", _run_submit_preparation, "validate and save all prepared expression versions"),
+        ("submit-review", _run_submit_review, "validate and save complete Atomic state and binding reviews"),
+    ):
+        submission = _leaf(actions, name, handler, help_text)
+        submission.add_argument("inputs", type=Path)
+        submission.add_argument("submission", type=Path)
+        submission.add_argument("output", type=Path)
 
     selection = _leaf(
         actions,
@@ -178,6 +252,19 @@ def _add_qualification_group(groups: Any) -> None:
     )
     actions = group.add_subparsers(dest="action", required=True, metavar="ACTION")
 
+    controls = _leaf(actions, "controlled-inputs", _run_controlled_inputs,
+                     "prepare the fixed twenty-four exposed observer controls")
+    controls.add_argument("output", type=Path)
+    controls.add_argument("--repository-root", type=Path, default=Path.cwd())
+
+    observer = _leaf(actions, "controlled-observer", _run_controlled_observer,
+                     "measure the fixed controls with the declared isolated Docker worker")
+    observer.add_argument("inputs", type=Path)
+    observer.add_argument("output", type=Path)
+    observer.add_argument("--worker", type=Path, required=True)
+    observer.add_argument("--image", required=True)
+    observer.add_argument("--workers", type=int, choices=(1, 4), default=1)
+
     target_security = _leaf(
         actions,
         "target-security-oracle",
@@ -266,8 +353,6 @@ def _run_study(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
     elif args.phase == "development":
         from prompt_mechanism_study.target_workflow import run_target_development
 
-        if args.development_plan is None:
-            raise ValueError("development execution requires a prospectively frozen --development-plan")
         report = run_target_development(args.development_plan, args.output)
     elif args.phase == "verify-development":
         from prompt_mechanism_study.verification.reporting import verify_development_result
@@ -278,6 +363,110 @@ def _run_study(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
 
         report = load_and_verify_target_result_bundle(args.output)
     return _emit_json(report)
+
+
+def _run_safe_decisions(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.discovery.safe_yield import prepare_safe_decisions
+
+    return _emit_json(prepare_safe_decisions(args.inputs, args.analysis, args.output, args.minimum_gain))
+
+
+def _run_jci_sharing(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.experiment.jci_sharing import run_jci_sharing, recalibrate_saved_sharing
+
+    if args.joint_policies:
+        if args.zero_effect_refit:
+            from prompt_mechanism_study.experiment.jci_refit import run_zero_refit
+
+            return _emit_json(run_zero_refit(args.output, args.plan, args.rscript))
+        from prompt_mechanism_study.artifact_io import read_json
+
+        if read_json(args.plan).get('budget_replay', False):
+            from prompt_mechanism_study.experiment.jci_replay import run_budget_replay
+
+            if not args.historical_only or args.joint_source_results is not None:
+                raise ValueError('预算重放必须使用已暴露历史材料')
+            return _emit_json(run_budget_replay(args.plan, args.output, args.rscript, args.limit))
+        from prompt_mechanism_study.experiment.jci_policy import run_joint_policy
+
+        return _emit_json(run_joint_policy(args.plan, args.output, args.rscript, args.limit, args.historical_only, args.joint_source_results))
+    if args.recalibrate_saved:
+        return _emit_json(recalibrate_saved_sharing(args.output))
+    return _emit_json(run_jci_sharing(args.plan, args.output, args.rscript, args.limit, args.analyze_saved))
+
+
+def _run_verify_jci_sharing(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    if args.joint_policies:
+        if args.zero_effect_refit:
+            from prompt_mechanism_study.verification.jci_refit import verify_zero_refit
+
+            return _emit_json(verify_zero_refit(args.output))
+        from prompt_mechanism_study.verification.jci_policy import verify_joint_policy
+
+        return _emit_json(verify_joint_policy(args.output))
+    from prompt_mechanism_study.verification.jci_sharing import verify_jci_sharing
+
+    return _emit_json(verify_jci_sharing(args.output))
+
+
+def _run_diagnose_jci_sharing(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.jci_sharing_diagnostics import diagnose_jci_sharing
+
+    return _emit_json(diagnose_jci_sharing(args.output, args.rscript))
+
+
+def _run_jci_reliability(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.experiment.jci_reliability import run_reliability
+
+    return _emit_json(run_reliability(args.plan, args.output, args.rscript, args.limit, args.workers))
+
+
+def _run_verify_jci_reliability(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.jci_reliability import verify_reliability
+
+    return _emit_json(verify_reliability(args.output, args.workers))
+
+
+def _run_diagnose_jci_reliability(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.jci_reliability import diagnose_false_zeros
+
+    if args.population:
+        from prompt_mechanism_study.verification.jci_reliability import diagnose_population_information
+
+        return _emit_json(diagnose_population_information(args.parent,args.output,args.rscript))
+    return _emit_json(diagnose_false_zeros(args.parent, args.output, args.rscript, args.limit))
+
+
+def _run_verify_repair(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.verification.controlled import verify_controlled_repair
+
+    return _emit_json(verify_controlled_repair(args.inputs, args.results, args.decisions, args.output,
+                                              repository_root=args.repository_root))
+
+
+def _run_submit_preparation(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.tsg.prepared_prompts import submit_controlled_preparation
+
+    return _emit_json(submit_controlled_preparation(args.inputs, args.submission, args.output))
+
+
+def _run_submit_review(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.tsg.prepared_prompts import submit_controlled_review
+
+    return _emit_json(submit_controlled_review(args.inputs, args.submission, args.output))
+
+
+def _run_controlled_inputs(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.measurement.controlled_qualification import controlled_repair_inputs
+
+    controlled_repair_inputs(args.repository_root, args.output)
+    return _emit_json(dict(status="PREPARED", cases=24, output=str(args.output)))
+
+
+def _run_controlled_observer(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
+    from prompt_mechanism_study.measurement.controlled_qualification import qualify_controlled_observer
+
+    return _emit_json(qualify_controlled_observer(args.inputs, args.output, args.worker, args.image, args.workers))
 
 
 def _run_select_tsg_tasks(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:

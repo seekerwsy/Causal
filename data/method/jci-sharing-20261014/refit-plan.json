@@ -1,0 +1,25 @@
+{
+  "study_id": "jci-zero-effect-refit-20261014",
+  "evidence_role": "POST_HOC_EXPOSED_ZERO_EFFECT_REFIT_METHOD_CHECK",
+  "parent_study": "jci-joint-policy-20261014",
+  "formal_claim_allowed": false,
+  "families": ["full", "target_factorized", "arm_mean"],
+  "ridge_penalties": [0.001, 0.01, 0.1, 1.0, 10.0],
+  "nonancestry_thresholds": [null, 0.5, 0.75, 0.875, 1.0],
+  "direct_null_z_thresholds": [0.0, 0.5, 1.0, 1.5, 2.0],
+  "calibration": "same independent CAL tasks and common training-only nuisance as parent; include baseline-only action for every method",
+  "graphical_oracle": "actual FCI on NetworkX d-separations in declared SCM DAG; time/JCI12/JCI123 share the exact same graphical independence information",
+  "pooling": "constraints identify zero assigned-context effects; retain all assigned tasks, set only the corresponding policy effect coefficients to zero, and refit the outcome regression; arm-mean version pools baseline and null-arm outcomes",
+  "primary_comparisons": ["jci123_minus_full", "jci123_minus_direct_null", "jci123_minus_direct_ci", "jci123_minus_direct_envelope", "jci123_minus_time", "jci123_minus_jci12"],
+  "oracle_comparisons": ["oracle_jci123_minus_oracle_time", "oracle_jci123_minus_oracle_jci12", "oracle_jci123_minus_full"],
+  "estimation_metric": "mean squared marginal assigned-arm ITT error of a fixed arm-mean estimator, with no CAL selection; compare ordinary reference, zero reference, empirical variance shrinkage and exact graphical-JCI123 zero constraints",
+  "direct_ci": "query Ci independent of Y conditional on all other assignment indicators, using the identical task samples, fixed-margin test and query stream; exact graphical-CI version is also reported",
+  "invariants": [
+    "Reuse all parent observations and estimated graphs; zero new random observations and zero model calls",
+    "Keep graphical-oracle results separate from finite-sample estimated-graph results",
+    "Non-ancestry frequency is a regularization proposal, not a confidence guarantee",
+    "All methods retain the same task denominator and complete reference candidate",
+    "Report all sparse, signed and dense configurations, including zero and harmful changes",
+    "The parent historical-code analysis retains its original consumer and endpoint identity"
+  ]
+}

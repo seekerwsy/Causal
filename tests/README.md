@@ -1,95 +1,110 @@
 # Scientific test suite
 
-Use Python 3.12 with the repository's `dev,selectors,languages` extras:
+Use Python 3.12 from the repository root:
 
 ```text
+python -m pip install -e ".[dev,selectors,languages]"
 python -m pytest -q
 ```
 
-The default suite contains **104 cases in 80 test functions**. Its end-to-end
-smoke executes all seven stages with offline model responses and a real FCI fit
-on synthetic observations. It also runs the independent saved-result verifier.
-These checks make no paid provider calls and cannot establish real-model TSG or
-Oracle accuracy.
+The default suite exercises current scientific stages and invariants. Its
+seven-stage smoke measures bundled offline responses, runs real FCI and invokes
+the independent saved-result verifier. All outputs retain a non-claim identity.
 
-| Boundary | Retained check |
+| Boundary | Checks |
 | --- | --- |
-| Source and task unit | Input identity, deduplication, source lineage, outcome-blind roles and protected-task separation |
-| TSG and candidates | Requirement/target/condition/scope bindings, Atomic ADD/REMOVE and unknown distinct from absence |
-| Discovery | FCI execution and failure, Full/RD-only comparability, fixed slots and shared dispatch |
-| Assignment | Frozen task/arm/seed coordinates, replay and total accounting |
-| Measurement | Code validity, secure/insecure/unknown, functionality and blinded evidence |
-| Inference | Task-unit ITT, bootstrap, multiplicity and non-evaluable effects |
-| Independent replay | Tamper detection and full offline smoke result |
+| Source and task unit | Exact identity, deduplication, lineage, outcome-blind roles and protected-task separation |
+| Representation and candidates | Source locations, requirement/target/condition/scope bindings, Atomic ADD/REMOVE and explicit uncertainty |
+| Prioritization | Shared candidates/folds, FCI admission, fixed slots, unique dispatch, signed gain, threshold and baseline abstention |
+| Assignment | Task/arm/seed binding, replay and complete accounting |
+| Measurement | Validity, secure/insecure/unknown, blinded functionality and separate endpoints |
+| Inference | Task-unit ITT, realization weights, bootstrap, multiplicity and non-evaluable effects |
+| Artifact reconstruction | Exact fields/types, tamper rejection and independent result replay |
 
-Source-input tests read fixed synthetic v4/v5 bundles from
-`fixtures/task-unit-bundles.json`, then tamper with their task partitions and
-source evidence while updating hashes. The verifier must still reject them.
-The fixture contains three invented tasks, captured from the former compiler's
-passing test at `6b0e8b220`; it is neither natural evaluation data nor a scientific
-result. Tests no longer rebuild a historical curation pipeline to check inputs.
+Mathematical fixtures test declared estimators and constraints. Offline response
+fixtures test component execution and retain their synthetic identity. These
+checks establish implemented behavior; scientific effects require executed,
+independently verified research evidence.
 
-Task-bound security tests retain unknown assignments and independent functionality
-when permission targets or credential meaning are unavailable. Qualification tests
-preserve separately valid profiles when another lacks support. Mocked proposal
-calls exercise the real configurable evaluator boundary without network access.
+Exposed-development regression checks have a separate command and dependency:
 
-TSG tests distinguish structural acceptance from semantic correctness: overlapping
-source spans and a deliberately incorrect but structurally valid interpretation
-are accepted, while dangling references and invalid locations are rejected.
-Model-reported uncertainty remains explicit. Domain/role inference tests have
-been replaced with direct model-assessment tests; the independent semantic
-qualification test still fails an incomplete representation. The bounded revision
-test exercises extraction, source review and a full-record correction while saving
-both versions; dangling references and explicit unknown coverage remain checked.
-Authored graph fixtures use a strict test-only constructor, not the removed
-production graph-response recovery adapter.
+```text
+python -m pip install -e ".[dev,analysis]"
+python -m pytest tests/development/test_controlled_repair.py -q --basetemp=.tmp/NEW_DEVELOPMENT_TEST_DIRECTORY
+```
 
-Source contracts and candidate assessments are tested separately. Failed scope
-calls retain successful source extraction, absent assessments remain unknown,
-and a state table cannot attach to a different source contract. Independent
-qualification replays the saved source and assessment outputs; these changes
-reuse the existing scientific scenarios without increasing the test case count.
-Python test code totals 5,700 lines.
+These checks use saved complete preparation/review submissions and independently
+reconstruct 168 real probes and 400 decisions. Their original observations stay
+at `results/controlled-repair-20261007`; their inputs stay at
+`data/method/controlled-repair-20261007`. The evidence remains
+`POST_HOC_EXPOSED_METHOD_CHECK`.
 
-Run the affected test file while editing. Before a reviewer-path change is
-declared complete, use the installed package to run the default suite and the
-independent verifier once. The 2026-09-25 framework contraction was validated in
-a fresh Python 3.12.13 environment, installed with `dev,selectors,languages`:
-**104 passed in 31.67 seconds**. The slowest checks were numerical power replay
-(13.21 s), temporal non-ancestry (9.11 s) and exact qualification error bounds
-(4.33 s). Focused checks are sufficient between changes.
+Historical study tests use the matching implementation in the verified archive.
+The [archive guide](../docs/archive-reproduction.md) gives the isolated
+environment and frozen-report commands. Run focused current tests while editing;
+validate an affected reviewer path in a clean supported environment and replay
+the frozen scientific outputs it affects.
 
-Four tests of retired qualification/budget/freeze receipts were removed. Their
-scientific boundaries now exercise the direct configuration in the existing smoke:
-call ceilings, confirmation membership, task/arm/seed replay, rejection of formal
-activation, and raw-request tampering even after bundle hashes are regenerated.
-Numerical power and independent effect estimation tests are retained.
+The JCI sharing development checks use the executed computational study:
 
-Reference comparison against `8e9241d2d` found:
+```text
+python -m pytest tests/development/test_jci_sharing.py -q --basetemp=.test-tmp/NEW_JCI_CHECK_DIRECTORY
+python -m prompt_mechanism_study study verify-jci-sharing results/jci-sharing-20261014
+```
 
-- `shared_evidence_record.json` and `target_selector_yield_result.json` remain
-  byte-identical; all four scientific RQ row collections are unchanged.
-- RQ metadata drops the unused null formal-authorization field; the table ID
-  changes accordingly. Old packages are not rewritten or accepted as new packages.
-- Source `contracts.json` and `factor-states.json` remain byte-identical on the
-  extraction reference. Compiling the source record reproduces the old saved
-  graph exactly. The viewer and candidate path no longer depend on a graph cache.
+They check complete task accounting, identical-input zero effects, independent
+Ridge solutions, finite-state policy values, and calibration of the deployed
+shared component. Set `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1` for the
+independent verifier's many small matrix operations.
 
-Reproduction environment and output for this local check:
-`C:/Users/WuSiyu/AppData/Local/Temp/causal-contraction-review-20260925/venv`
-and `C:/Users/WuSiyu/AppData/Local/Temp/causal-contraction-review-20260925/tests`.
-The portable command remains `python -m pytest -q`; no API calls were made.
+The joint-context and constrained-estimation checks additionally use:
 
-Earlier suite reductions and frozen result replays remain on
-`codex/pre-artifact-scope-20260923` at `f1cd0011`. The implementation and tests
-before the module-boundary refactor are on
-`codex/pre-module-boundaries-20260925` at `570219573`.
+```text
+python -m pytest tests/development/test_jci_policy.py tests/development/test_jci_refit.py -q --basetemp=.test-tmp/NEW_JCI_JOINT_CHECKS
+python -m prompt_mechanism_study study verify-jci-sharing results/jci-joint-policy-20261014-ancestry --joint-policies
+python -m prompt_mechanism_study study verify-jci-sharing results/jci-joint-policy-20261014-ancestry --joint-policies --zero-effect-refit
+```
 
-The current-wire candidate fixture now includes explicit applicability bindings.
-An old four-field response is rejected rather than silently assigned a background.
-Existing scope/requirement expectations remain checked; no historical format
-compatibility test is needed in the production path.
+These checks run the real pcalg JCI methods and independently reconstruct the
+randomized outcome fits, constrained coefficients, calibration decisions, exact
+policy values, marginal estimation errors and pooled-baseline variances. Known
+graphical information and observed-data results remain separate evidence.
 
-The immediately preceding implementation and package reader are preserved on
-`codex/pre-framework-contraction-20260925` at `8e9241d2d`.
+The exposed direction comparison uses fixed physical requests across eight
+outcome-blind training/CAL splits. Its dedicated checks are:
+
+```text
+python -m pytest tests/development/test_jci_direction.py -q --basetemp=.test-tmp/NEW_JCI_DIRECTION_CHECKS
+python -m prompt_mechanism_study study verify-jci-sharing results/jci-direction-comparison-20261014 --joint-policies
+```
+
+These checks bind every split to the original requests and effects, independently
+reconstruct the equal-budget consumers and replay the task-unit bootstrap.
+All split descendants move with their evaluation task. The results retain
+`POST_HOC_EXPOSED_DIRECTION_COMPARISON` identity.
+
+The finite-regularization JCI consumer uses a separate real-FCI count-outcome
+canary and independent numerical verification:
+
+```text
+python -m pytest tests/development/test_jci_reliability.py -q --basetemp=.test-tmp/NEW_JCI_RELIABILITY_CHECKS
+python -m prompt_mechanism_study study verify-jci-reliability results/jci-reliability-20261014/experiment --workers 4
+```
+
+These checks protect integer count outcomes, mutually exclusive Atomic
+assignments, exact cancellation examples, positive finite penalties, independent
+effect solutions, separated CAL roles, policy values and simultaneous intervals.
+The method study retains its bounded SCM evidence identity.
+
+The exposed limited-budget candidate replay uses:
+
+```text
+python -m pytest tests/development/test_jci_replay.py -q --basetemp=.test-tmp/NEW_JCI_BUDGET_CHECKS
+python -m prompt_mechanism_study study verify-jci-sharing results/jci-budget-replay-20261014 --joint-policies
+```
+
+These checks use real original request outcomes. They protect disjoint discovery,
+confirmation and test task roles; nested physical-request budgets; task-weighted
+cross-fitting and AIPW; requirement-ancestry prioritization; fixed selection slots;
+confirmation costs; and independent final deployment values. Replay permutations
+and nested budgets retain their shared task dependencies.

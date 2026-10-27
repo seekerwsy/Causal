@@ -32,7 +32,6 @@ from prompt_mechanism_study.discovery.prioritization import (
     SlotStatus,
     freeze_confirmation_dispatch,
     freeze_fixed_slot_ledger,
-    freeze_shared_confirmation_union,
 )
 from prompt_mechanism_study.experiment.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
@@ -174,7 +173,7 @@ def test_draft_result_cannot_grant_itself_formal_authorization():
     evidence = estimate_target_itt(ledger, plan, evidence_level=EvidenceLevel.EXECUTED)
     yields = build_target_selector_yields(evidence)
     with pytest.raises(ValueError, match="SPECIFIED_DRAFT"):
-        build_target_rq_tables(evidence, yields, verification={})
+        build_target_rq_tables(evidence, yields)
 
 
 @pytest.mark.parametrize("code,source_status,verdict", [
@@ -263,21 +262,20 @@ def _target_v3_fixture(policy_keys=("atomic-policy-v3",)):
         tuple(SelectorSlot(i + 1, SlotStatus.FILLED, record.policy_key, None) for i, record in enumerate(records)),
         records) for selector in ("atomic_full", "atomic_rd_only"))
     ledger = freeze_fixed_slot_ledger("phase-context-policy-v3", "3.0", sources)
-    union = freeze_shared_confirmation_union(ledger)
-    dispatch = freeze_confirmation_dispatch(union, {r.candidate_record_id: "atomic-protocol-record-v3" for r in records})
+    dispatch = freeze_confirmation_dispatch(ledger, {r.candidate_record_id: "atomic-protocol-record-v3" for r in records})
     dispatch_by_candidate = {item.candidate_record_id: item for item in dispatch.records}
     assignments = []
     outcomes = []
-    for entry in union.entries:
+    for candidate in ledger.selected_candidates:
         track, arms = PolicyTrack.ATOMIC, ATOMIC_CONFIRMATORY_ARMS
-        dispatched = dispatch_by_candidate[entry.candidate_record_id]
+        dispatched = dispatch_by_candidate[candidate.candidate_record_id]
         for index in range(12):
             for request_slot, arm in enumerate(arms):
                 assignment = AssignedArmITTRecord(
-                    entry.candidate_record_id,
-                    entry.effect_coordinate_id,
-                    entry.candidate.policy_key,
-                    entry.candidate.discovery_model_id,
+                    candidate.candidate_record_id,
+                    candidate.effect_coordinate.effect_coordinate_id,
+                    candidate.policy_key,
+                    candidate.discovery_model_id,
                     track,
                     f"{track.value}-unit-{index:02d}",
                     f"{track.value}-task-{index:02d}",
@@ -337,7 +335,7 @@ def test_shared_itt_reporting_and_independent_replay() -> None:
     assert verification["status"] == "TARGET_SHARED_EVIDENCE_VERIFIED"
 
     # Report the same frozen estimate; keep fixed slots and claim limits.
-    report = build_target_rq_tables(result, yields, verification=verify_target_shared_evidence(result, yields))
+    report = build_target_rq_tables(result, yields)
     verification = verify_target_rq_tables(result, yields, report)
     assert report["report_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert report["scientific_claim_allowed"] is False
@@ -432,12 +430,12 @@ def test_target_v3_missing_assigned_outcome_invalidates_only_its_frozen_family()
 
 def test_target_v3_protocolization_failure_keeps_slots_but_creates_no_test() -> None:
     evidence, plan = _target_v3_fixture()
-    entry = evidence.dispatch.union.entries[0]
+    candidate = evidence.dispatch.ledger.selected_candidates[0]
     dispatch = freeze_confirmation_dispatch(
-        evidence.dispatch.union,
+        evidence.dispatch.ledger,
         {},
         failures={
-            entry.candidate_record_id: (BridgeStatus.PROTOCOLIZATION_FAILED, "synthetic failure")
+            candidate.candidate_record_id: (BridgeStatus.PROTOCOLIZATION_FAILED, "synthetic failure")
         },
     )
     empty = freeze_assigned_arm_evidence(dispatch, (), ())
@@ -517,7 +515,7 @@ def test_policy_limits_stay_local_and_unknown_is_a_warning():
     yields = build_target_selector_yields(result)
     assert all(y.top_k == 4 for y in yields.selectors)
     verify_target_shared_evidence(result, yields)
-    report = build_target_rq_tables(result, yields, verification=verify_target_shared_evidence(result, yields))
+    report = build_target_rq_tables(result, yields)
     verify_target_rq_tables(result, yields, report)
 
 

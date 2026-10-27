@@ -40,7 +40,8 @@ def verify_target_shared_evidence(
     for item in ledger.assignments:
         assignments_by_candidate[item.candidate_record_id].append(item)
     track_by_candidate = {
-        item.candidate_record_id: item.track for item in ledger.dispatch.union.entries
+        item.candidate_record_id: item.track for item in ledger.dispatch.ledger.slots
+        if item.candidate_record_id is not None
     }
     work = {}
     for dispatch in ledger.dispatch.records:
@@ -60,7 +61,7 @@ def verify_target_shared_evidence(
             for candidate_id, value in work.items()
             if value["track"] is family.track
         }
-        expected = _v3_family(family.track, family_work, plan, family_size=len(ledger.dispatch.union.entries))
+        expected = _v3_family(family.track, family_work, plan, family_size=len(ledger.dispatch.records))
         if family.status is not expected["family_status"]:
             raise ValueError("target family status does not independently recompute")
         _v3_same(family.simultaneous_critical_value, expected["critical"], "critical value")
@@ -498,7 +499,7 @@ def _v3_check_arm_summaries(reported, expected):
 def _v3_verify_yields(evidence, yields, statuses):
     dispatch = {item.candidate_record_id: item for item in evidence.ledger.dispatch.records}
     reported = {item.slot_id: item for item in yields.slots}
-    ledger_slots = evidence.ledger.dispatch.union.ledger.slots
+    ledger_slots = evidence.ledger.dispatch.ledger.slots
     if set(reported) != {item.slot_id for item in ledger_slots}:
         raise ValueError("target yield slots do not match the fixed ledger")
     expected_counts = defaultdict(int)

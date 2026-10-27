@@ -1,0 +1,7 @@
+flowchart LR
+    P["P: requirement retained"] --> PY["4/4 pass finite safety checks"]
+    N["N: requirement removed"] --> NY["4/4 show unsafe DOM features"]
+    classDef positive fill:#edf5f1,stroke:#39725a,stroke-width:1.5px;
+    classDef negative fill:#fbf0ed,stroke:#a45b45,stroke-width:1.5px;
+    class P,PY positive;
+    class N,NY negative;
