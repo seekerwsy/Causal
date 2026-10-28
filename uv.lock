@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -474,16 +474,13 @@ source = { editable = "." }
 dependencies = [
     { name = "cattrs" },
     { name = "jsonschema" },
-    { name = "numpy" },
-]
-
-[package.optional-dependencies]
-analysis = [
     { name = "networkx" },
     { name = "numpy" },
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
+
+[package.optional-dependencies]
 dev = [
     { name = "markdown-it-py" },
     { name = "pytest" },
@@ -518,14 +515,13 @@ requires-dist = [
     { name = "causal-learn", marker = "extra == 'selectors'", specifier = "==0.1.4.7" },
     { name = "jsonschema", specifier = ">=4.26,<5" },
     { name = "markdown-it-py", marker = "extra == 'dev'", specifier = ">=4,<5" },
-    { name = "networkx", marker = "extra == 'analysis'", specifier = "==3.7" },
-    { name = "numpy", specifier = ">=2,<3" },
-    { name = "numpy", marker = "extra == 'analysis'", specifier = "==2.5.1" },
+    { name = "networkx", specifier = "==3.7" },
+    { name = "numpy", specifier = "==2.5.1" },
     { name = "numpy", marker = "extra == 'selectors'", specifier = ">=2,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "requests", marker = "extra == 'source-acquisition'", specifier = "==2.34.2" },
-    { name = "scikit-learn", marker = "extra == 'analysis'", specifier = "==1.9.0" },
-    { name = "scipy", marker = "extra == 'analysis'", specifier = "==1.18.0" },
+    { name = "scikit-learn", specifier = "==1.9.0" },
+    { name = "scipy", specifier = "==1.18.0" },
     { name = "tiktoken", marker = "extra == 'preparation'", specifier = "==0.14.0" },
     { name = "tree-sitter", marker = "extra == 'languages'", specifier = "==0.25.2" },
     { name = "tree-sitter-c", marker = "extra == 'languages'", specifier = "==0.24.1" },

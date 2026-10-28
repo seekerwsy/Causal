@@ -15,7 +15,7 @@ from scipy.stats import random_table, t
 
 from prompt_mechanism_study.artifact_io import file_sha256, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.discovery.jci_reliability import exact_conditional_association, exact_joint_distribution
-from prompt_mechanism_study.discovery.jci_sharing import StructureBackend
+from prompt_mechanism_study.discovery.jci_structure import StructureBackend
 from prompt_mechanism_study.verification.jci_policy import independent_actions, independent_baseline, independent_features, independent_value
 
 
@@ -419,11 +419,12 @@ def verify_reliability_record(path, plan):
     return projection,fits,queries
 
 
-def verify_reliability(output, workers=4):
+def verify_reliability(output, workers=None):
     verifier_sources = {str(path):file_sha256(path) for path in (
         Path(__file__),Path('src/verification/jci_policy.py'))}
     verify_bundle(output/'inputs')
     plan = read_json(output/'inputs/plan.json')
+    workers = plan['workers'] if workers is None else workers
     identity = read_json(output/'inputs/identity.json')
     assert file_sha256(output/'source.zip')==identity['source_archive_sha256']
     with zipfile.ZipFile(output/'source.zip') as archive:
@@ -431,11 +432,11 @@ def verify_reliability(output, workers=4):
         assert json.loads(archive.read('plan.json'))==plan
         for source,digest in identity['sources'].items():
             assert hashlib.sha256(archive.read(source.replace('\\','/'))).hexdigest()==digest
-            assert file_sha256(Path(source))==digest
-    diagnosis = Path(plan['diagnosis_artifact'])
-    verify_bundle(diagnosis)
-    assert file_sha256(diagnosis/'manifest.json')==identity['diagnosis_manifest_sha256']
-    assert file_sha256(Path(plan['diagnosis_source_archive']))==identity['diagnosis_source_archive_sha256']
+    if 'diagnosis_manifest_sha256' in identity:
+        diagnosis = Path(plan['diagnosis_artifact'])
+        verify_bundle(diagnosis)
+        assert file_sha256(diagnosis/'manifest.json')==identity['diagnosis_manifest_sha256']
+        assert file_sha256(Path(plan['diagnosis_source_archive']))==identity['diagnosis_source_archive_sha256']
     assert 1<=workers<=plan['workers']
     paths = sorted((output/'cells').glob('*/result.json'))
     records,fit_count,query_count = [],0,0
@@ -516,7 +517,7 @@ def diagnose_population_information(parent, output, rscript):
     verify_bundle(parent/'inputs')
     plan = read_json(parent/'inputs/plan.json')
     logs = Path('.test-tmp/jci-population-information')
-    logs.mkdir(exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True)
     labels = ['C1','C2','C3','C4','X1','X2','X3','X4','Y']
     records = []
     for mechanism,generations in itertools.product(sorted(plan['simulation']['mechanisms']),

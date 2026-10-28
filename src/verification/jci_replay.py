@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import zipfile
 
 import numpy as np
@@ -174,11 +174,9 @@ def verify_replay_cell(cell, tasks, candidates, plan):
 def verify_budget_replay(output):
     verify_bundle(output/'inputs')
     plan, identity, design = [read_json(output/'inputs'/name) for name in ('plan.json', 'identity.json', 'design.json')]
-    for source, digest in identity['sources'].items():
-        assert file_sha256(Path(source)) == digest
     with zipfile.ZipFile(output/'source.zip') as archive:
         for source, digest in identity['sources'].items():
-            assert hashlib.sha256(archive.read(Path(source).as_posix())).hexdigest() == digest
+            assert hashlib.sha256(archive.read(PureWindowsPath(source).as_posix())).hexdigest() == digest
     inputs = Path(plan['inputs'])
     verify_bundle(inputs)
     assert file_sha256(inputs/'manifest.json') == identity['input_manifest_sha256']

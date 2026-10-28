@@ -1,100 +1,46 @@
-# Reviewer guide
+# JCI reviewer guide
 
-The [Atomic protocol](protocol.md), `phase-context-policy-v3`, is
-`SPECIFIED_DRAFT`. The reviewer entry is `prompt-mechanism-study study smoke`.
-It runs the seven scientific stages using synthetic tasks, offline responses
-and a real FCI fit, then saves an independently verifiable
-`NON_CLAIM_TEST_ARTIFACT`.
+The active specification is [the JCI method](jci-method.md). The entry point is
+`python -m prompt_mechanism_study study smoke OUTPUT --rscript PATH_TO_RSCRIPT`.
+Use Python 3.12 with `pip install -e ".[dev]"`, R with pcalg 2.7.12 and jsonlite,
+and `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`. Run from the repository root.
 
-## Reproduction
+The declared SCM reproduction executes four learning repetitions with real
+conservative FCI. Verify with `study verify-jci-reliability OUTPUT --workers 2`.
+Run the default suite with `python -m pytest -q --rscript=PATH_TO_RSCRIPT`.
+The result remains `NON_CLAIM_METHOD_REPRODUCTION`.
 
-Use Python 3.12 from the repository root:
+## Stage records
 
-```text
-python -m pip install -e ".[dev,selectors,languages]"
-python -m pytest -q
-prompt-mechanism-study study smoke NEW_OUTPUT_DIRECTORY
-prompt-mechanism-study study verify-result NEW_OUTPUT_DIRECTORY
-```
-
-Choose a new output directory. The default suite includes the end-to-end smoke,
-independent result reconstruction and scientific boundary checks. It makes zero
-paid provider calls and consumes zero protected evaluation tasks.
-
-## Stage inputs and outputs
-
-| Stage | Input | Output |
+| Stage | SCM records | Real-outcome replay records |
 | --- | --- | --- |
-| Representation | Original prompt and frozen source records | Bound requirements, objects, conditions and Atomic candidates |
-| Prioritization | Task-unit states, scope, shared folds and discovery observations | Full/RD-only decisions with fixed K slots |
-| Hypothesis freeze | Slots, models, populations, policies, call limit and analysis | Prospective study configuration and selected-policy dispatch |
-| Intervention/randomization | Frozen task-policy variants and arms | Replayable task/arm/seed assignments |
-| Measurement | Generated code and blinded evaluators | Code validity, security and functionality evidence |
-| Outcome assembly | Every assignment and measurement/failure | Complete assigned-arm outcome ledger |
-| Inference/reporting | Frozen task-unit ledger and analysis | ITT effects, status, uncertainty and independently checked tables |
+| Representation | `training` and `calibration` source/task/count fields | `inputs/design.json` and original prompt metadata |
+| Prioritization | `structure` graphs, CI queries and guarded penalties | `learned` effects, family graphs and rankings |
+| Hypothesis freeze | `inputs/plan.json`, `identity.json`, `source.zip` | Frozen plan, design, original input hashes and `source.zip` |
+| Intervention/randomization | Exact task/role/assignment replay | Budgeted original physical request identities |
+| Measurement | Integer success counts and response proportions | Original terminal outcomes, unknowns and finite-function checks |
+| Outcome assembly | All fit candidates, CAL roles, choices and exact values | Fixed slots, separate confirmation and final test records |
+| Inference/reporting | `summary/result.json`, `verification/result.json` | Task-level summary and independent verification |
 
-## Scientific invariants
+Each cell and summary is a canonical, exact-byte verified bundle. Source archives
+bind execution implementation; independent verifiers retain their own identity.
+Existing frozen results keep their evidence scope and are verified independently
+of the current source layout. Reproduction writes a new output directory.
 
-- One complete editable requirement defines an Atomic policy.
-- Prompt TSG expresses source semantics. Generated code supplies independent
-  security and functionality outcomes.
-- The deduplicated task unit is the independent analysis unit; prompt variants,
-  repeated seeds and arms retain their parent task identity.
-- Every assigned task remains in the primary denominator. Compliance, code
-  validity and non-target drift remain diagnostics.
-- Security-unknown, terminal code and infrastructure failure remain explicit.
-  Secure-code yield, Oracle evaluability, functionality and joint success have
-  separate fields.
-- Fixed selector slots retain empty and failed positions. A shared model effect
-  is dispatched once and contributes to each selecting slot.
-- Formal evidence levels are rejected under this draft. Context inference
-  remains blocked until its prospective rules are frozen.
+## Core reading order
 
-## Reading order
+1. `docs/jci-method.md`: variables, seven stages and evidence boundaries.
+2. `src/cli.py`: explicit commands.
+3. `src/discovery/jci_structure.py`: shared CI and backend.
+4. `src/discovery/jci_reliability.R`: actual conservative FCI and JCI constraints.
+5. `src/discovery/jci_reliability.py`: randomized counts, effect fits and CAL choices.
+6. `src/discovery/policy_value.py`: common features, baseline actions and exact values.
+7. `src/experiment/jci_reliability.py`: frozen execution and simultaneous comparisons.
+8. `src/verification/jci_reliability.py`: independent numerical reconstruction.
+9. `src/experiment/jci_replay.py`: real-outcome discovery, confirmation and testing.
+10. `src/verification/jci_replay.py`: independent real-outcome replay verification.
 
-1. [Protocol](protocol.md): scientific decisions and formal gates.
-2. [Workflow](../src/target_workflow.py): linear stage execution.
-3. [Source representation](../src/tsg/prompt_contract.py): requirement bindings.
-4. [Candidate construction](../src/tsg/candidate_construction.py): Atomic scope.
-5. [Prioritization](../src/discovery/prioritization.py): folds, scores and fixed slots.
-6. [Study design](../src/experiment/study_design.py): prospective inputs.
-7. [Assignment](../src/experiment/randomization.py): task/arm/seed replay.
-8. [Measurement](../src/measurement/evaluate.py): independent endpoints.
-9. [Inference](../src/experiment/inference.py): task-unit ITT.
-10. [Independent verifier](../src/verification/verifier.py): saved-result reconstruction.
-
-## Saved package
-
-| File | Contents |
-| --- | --- |
-| `study_config.json` | Role manifest, population, selection inputs, model scope, K, call limit and analysis |
-| `confirmation_inputs.json` | Dispatch bound directly to its fixed-slot ledger, variants, randomization and measurement contract |
-| `measurement_records.json` | Exact requests, raw code/responses, measured labels and functional review evidence |
-| `shared_evidence_record.json` | All assignments, outcomes and task-unit inference |
-| `target_selector_yield_result.json` | Fixed-slot yield including empty and failed slots |
-| `rq_tables.json` | Reported rows independently rebuilt by the verifier |
-| `manifest.json` | Exact-byte file integrity |
-
-The workflow writes this package before invoking its independent readback
-verifier. The verifier reconstructs assignment and inference independently of
-the production randomizer and estimator. Measurement replay uses the declared
-security implementation and retained evaluator responses. Oracle accuracy and
-model quality require separate empirical qualification.
-
-Source extraction saves `contracts.json`, separately bound `factor-states.json`
-and retained `responses.json`. Graphs are compiled from the authoritative source
-records. Current source-contract, graph and concept-catalog schemas are 4, 3 and
-2 respectively. Saved records require exact fields and primitive types.
-
-## Exposed development and frozen evidence
-
-The [current development check](experiments/2026-10-07-controlled-repair.md)
-documents prompt submissions, safety-gain selection and native target-access
-measurement. Its independent replay is available through `study verify-repair`;
-the [test guide](../tests/README.md) provides its separate test command.
-
-Completed studies use the matching source archive and the
-[archive reproduction guide](archive-reproduction.md). Their scripts, historical
-tests and frozen formats remain in that isolated reproduction environment.
-Source curation, historical administration and model-server operation are outside
-the reviewer smoke.
+The 2026-10-14 full study remains a bounded computational method check; its 384
+simultaneous intervals all include zero. The real-outcome budget replay remains
+post-hoc. Archived Atomic studies and their original commands are reproduced with
+the matching source at `main` commit `d304d4ec` or their frozen source archive.

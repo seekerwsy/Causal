@@ -5,7 +5,7 @@ import hashlib
 import numpy as np
 from sklearn.linear_model import Ridge
 
-from prompt_mechanism_study.discovery.jci_sharing import ConditionalPermutation
+from prompt_mechanism_study.discovery.jci_structure import ConditionalPermutation
 
 
 def source_hash(seed, value):

@@ -13,8 +13,8 @@ import sklearn
 
 from prompt_mechanism_study.artifact_io import file_sha256, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.discovery import jci_replay as method
-from prompt_mechanism_study.discovery.jci_policy import random_stream
-from prompt_mechanism_study.discovery.jci_sharing import StructureBackend
+from prompt_mechanism_study.discovery.policy_value import random_stream
+from prompt_mechanism_study.discovery.jci_structure import StructureBackend
 
 
 def prepare_design(tasks, requests, plan):
@@ -217,8 +217,8 @@ def run_budget_replay(plan_path, output, rscript, limit=None):
             if member['flow'] == 'TSG':
                 confirmation_request_ids.setdefault((request['task_unit_id'], member['condition']), set()).add(request['request_id'])
     design = prepare_design(tasks_list, training_requests, plan)
-    sources = [Path(__file__), Path(method.__file__), Path('src/discovery/jci_sharing.py'),
-        Path('src/discovery/jci_policy.py'), Path('src/discovery/jci_reliability.R'), Path('src/artifact_io.py'),
+    sources = [Path(__file__), Path(method.__file__), Path('src/discovery/jci_structure.py'),
+        Path('src/discovery/policy_value.py'), Path('src/discovery/jci_reliability.R'), Path('src/artifact_io.py'),
         Path('src/verification/jci_replay.py')]
     identity = dict(plan_sha256=file_sha256(plan_path), input_manifest_sha256=file_sha256(inputs/'manifest.json'),
         evaluation_manifest_sha256=file_sha256(Path(plan['evaluation_report'])/'manifest.json'),

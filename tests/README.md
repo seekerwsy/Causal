@@ -1,110 +1,52 @@
-# Scientific test suite
+# JCI scientific checks
 
-Use Python 3.12 from the repository root:
-
-```text
-python -m pip install -e ".[dev,selectors,languages]"
-python -m pytest -q
-```
-
-The default suite exercises current scientific stages and invariants. Its
-seven-stage smoke measures bundled offline responses, runs real FCI and invokes
-the independent saved-result verifier. All outputs retain a non-claim identity.
-
-| Boundary | Checks |
-| --- | --- |
-| Source and task unit | Exact identity, deduplication, lineage, outcome-blind roles and protected-task separation |
-| Representation and candidates | Source locations, requirement/target/condition/scope bindings, Atomic ADD/REMOVE and explicit uncertainty |
-| Prioritization | Shared candidates/folds, FCI admission, fixed slots, unique dispatch, signed gain, threshold and baseline abstention |
-| Assignment | Task/arm/seed binding, replay and complete accounting |
-| Measurement | Validity, secure/insecure/unknown, blinded functionality and separate endpoints |
-| Inference | Task-unit ITT, realization weights, bootstrap, multiplicity and non-evaluable effects |
-| Artifact reconstruction | Exact fields/types, tamper rejection and independent result replay |
-
-Mathematical fixtures test declared estimators and constraints. Offline response
-fixtures test component execution and retain their synthetic identity. These
-checks establish implemented behavior; scientific effects require executed,
-independently verified research evidence.
-
-Exposed-development regression checks have a separate command and dependency:
+Install the project with Python 3.12 and `python -m pip install -e ".[dev]"`.
+Set `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1`. R must provide pcalg 2.7.12
+and jsonlite. The complete default suite is:
 
 ```text
-python -m pip install -e ".[dev,analysis]"
-python -m pytest tests/development/test_controlled_repair.py -q --basetemp=.tmp/NEW_DEVELOPMENT_TEST_DIRECTORY
+python -m pytest -q --rscript=PATH_TO_RSCRIPT
 ```
 
-These checks use saved complete preparation/review submissions and independently
-reconstruct 168 real probes and 400 decisions. Their original observations stay
-at `results/controlled-repair-20261007`; their inputs stay at
-`data/method/controlled-repair-20261007`. The evidence remains
-`POST_HOC_EXPOSED_METHOD_CHECK`.
+`RSCRIPT` can also supply the executable. Intermediate files stay under the
+ignored `.test-tmp` directory. The default suite uses `tests/jci`:
 
-Historical study tests use the matching implementation in the verified archive.
-The [archive guide](../docs/archive-reproduction.md) gives the isolated
-environment and frozen-report commands. Run focused current tests while editing;
-validate an affected reviewer path in a clean supported environment and replay
-the frozen scientific outputs it affects.
+- `test_numerics.py` checks mutually exclusive assignments, disjoint task roles,
+  integer count outcomes, exact population cancellation, independent penalized
+  least-squares solutions, baseline abstention and exact policy values.
+- `test_contracts.py` rejects formal-claim identities, nonconservative structure,
+  zero penalties, repeated batch seeds and invalid execution budgets before work.
+- `test_workflow.py` executes the declared SCM with real R/pcalg FCI, fits the
+  complete policy consumers, assembles simultaneous comparisons, independently
+  verifies the saved result and resumes the identical execution.
 
-The JCI sharing development checks use the executed computational study:
+The probability models are declared computational research mechanisms; their
+results retain `NON_CLAIM_METHOD_REPRODUCTION`. They do not supply real-model,
+natural-task or confirmatory evidence. Frozen real-outcome replay is checked with
+`study verify-jci-replay SAVED_REPLAY` and its original required input artifacts.
 
-```text
-python -m pytest tests/development/test_jci_sharing.py -q --basetemp=.test-tmp/NEW_JCI_CHECK_DIRECTORY
-python -m prompt_mechanism_study study verify-jci-sharing results/jci-sharing-20261014
-```
+Earlier default tests and `tests/development` retain their research context at
+`main` commit `d304d4ec`; their old CLI and source hashes belong to that revision.
 
-They check complete task accounting, identical-input zero effects, independent
-Ridge solutions, finite-state policy values, and calibration of the deployed
-shared component. Set `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1` for the
-independent verifier's many small matrix operations.
+## Executed branch checks
 
-The joint-context and constrained-estimation checks additionally use:
+On 2026-10-28, the isolated Python 3.12.13 environment passed all 13 default
+checks with NumPy 2.5.1, SciPy 1.18.0, scikit-learn 1.9.0 and pcalg 2.7.12
+under R 4.1.2. The command-line SCM reproduction completed four repetitions and
+twelve FCI searches; its independent verification reconstructed 696 effect models,
+2,365 CI statistics and sixteen direct randomization tests.
 
-```text
-python -m pytest tests/development/test_jci_policy.py tests/development/test_jci_refit.py -q --basetemp=.test-tmp/NEW_JCI_JOINT_CHECKS
-python -m prompt_mechanism_study study verify-jci-sharing results/jci-joint-policy-20261014-ancestry --joint-policies
-python -m prompt_mechanism_study study verify-jci-sharing results/jci-joint-policy-20261014-ancestry --joint-policies --zero-effect-refit
-```
+Frozen scientific-output reproduction reassembled all 3,072 saved reliability
+repetitions, 48 conditions and 384 comparison intervals with matching results.
+One original repetition was also rerun with real FCI; its graph, task data,
+selected actions and values matched. This check did not generate 3,072 new repeats.
 
-These checks run the real pcalg JCI methods and independently reconstruct the
-randomized outcome fits, constrained coefficients, calibration decisions, exact
-policy values, marginal estimation errors and pooled-baseline variances. Known
-graphical information and observed-data results remain separate evidence.
+The real-outcome replay check refitted and independently checked all 24 saved
+cells and 480 models, checked 12,097 CI records, and reproduced selection and
+the six final descriptive intervals for 200 test task units. Twelve real FCI
+searches reproduced the representative replay's four family graphs.
 
-The exposed direction comparison uses fixed physical requests across eight
-outcome-blind training/CAL splits. Its dedicated checks are:
-
-```text
-python -m pytest tests/development/test_jci_direction.py -q --basetemp=.test-tmp/NEW_JCI_DIRECTION_CHECKS
-python -m prompt_mechanism_study study verify-jci-sharing results/jci-direction-comparison-20261014 --joint-policies
-```
-
-These checks bind every split to the original requests and effects, independently
-reconstruct the equal-budget consumers and replay the task-unit bootstrap.
-All split descendants move with their evaluation task. The results retain
-`POST_HOC_EXPOSED_DIRECTION_COMPARISON` identity.
-
-The finite-regularization JCI consumer uses a separate real-FCI count-outcome
-canary and independent numerical verification:
-
-```text
-python -m pytest tests/development/test_jci_reliability.py -q --basetemp=.test-tmp/NEW_JCI_RELIABILITY_CHECKS
-python -m prompt_mechanism_study study verify-jci-reliability results/jci-reliability-20261014/experiment --workers 4
-```
-
-These checks protect integer count outcomes, mutually exclusive Atomic
-assignments, exact cancellation examples, positive finite penalties, independent
-effect solutions, separated CAL roles, policy values and simultaneous intervals.
-The method study retains its bounded SCM evidence identity.
-
-The exposed limited-budget candidate replay uses:
-
-```text
-python -m pytest tests/development/test_jci_replay.py -q --basetemp=.test-tmp/NEW_JCI_BUDGET_CHECKS
-python -m prompt_mechanism_study study verify-jci-sharing results/jci-budget-replay-20261014 --joint-policies
-```
-
-These checks use real original request outcomes. They protect disjoint discovery,
-confirmation and test task roles; nested physical-request budgets; task-weighted
-cross-fitting and AIPW; requirement-ancestry prioritization; fixed selection slots;
-confirmation costs; and independent final deployment values. Replay permutations
-and nested budgets retain their shared task dependencies.
+These checks made zero model requests. Validation records are retained in the
+ignored `.test-tmp/validation` directory. The explicit command-line SCM result
+is stored on the server at
+`/home/wsy/work/prompt-mechanism-study/results/jci-framework-reproduction-20261028`.

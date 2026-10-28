@@ -6,8 +6,8 @@ import numpy as np
 from scipy.stats import binom
 from sklearn.linear_model import ElasticNet, Ridge
 
-from prompt_mechanism_study.discovery.jci_policy import contrast_features, full_basis, random_stream, select_actions
-from prompt_mechanism_study.discovery.jci_sharing import ConditionalPermutation
+from prompt_mechanism_study.discovery.policy_value import contrast_features, full_basis, random_stream, select_actions
+from prompt_mechanism_study.discovery.jci_structure import ConditionalPermutation
 
 
 def exact_joint_distribution(beta, plan, generations):

@@ -7,10 +7,16 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+
 from prompt_mechanism_study.records import canonical_json
 
 
 MANIFEST = "manifest.json"
+
+
+def packed(data):
+    return {key: value.tolist() if isinstance(value, np.ndarray) else value for key, value in data.items()}
 
 
 def write_json_new(path: Path, value: Any) -> Path:

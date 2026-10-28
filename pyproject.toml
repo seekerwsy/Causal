@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prompt-mechanism-study"
 version = "1.6.0"
-description = "Auditable task-unit experiments for frozen prompt-mechanism policies."
+description = "JCI requirement-policy learning with independent task-unit evaluation."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["cattrs>=26.2,<27", "jsonschema>=4.26,<5", "numpy>=2,<3"]
+dependencies = [
+  "cattrs>=26.2,<27", "jsonschema>=4.26,<5", "numpy==2.5.1",
+  "scipy==1.18.0", "scikit-learn==1.9.0", "networkx==3.7",
+]
 
 [project.scripts]
 prompt-mechanism-study = "prompt_mechanism_study.cli:main"
@@ -18,12 +21,7 @@ dev = ["pytest>=8", "markdown-it-py>=4,<5"]
 selectors = ["causal-learn==0.1.4.7", "numpy>=2,<3"]
 preparation = ["tiktoken==0.14.0"]
 source-acquisition = ["requests==2.34.2", "beautifulsoup4==4.15.0"]
-analysis = [
-  "networkx==3.7",
-  "numpy==2.5.1",
-  "scipy==1.18.0",
-  "scikit-learn==1.9.0",
-]
+analysis = []
 languages = [
   "tree-sitter==0.25.2",
   "tree-sitter-c==0.24.1",
@@ -54,7 +52,8 @@ prompt_mechanism_study = ["fixtures/*.json", "fixtures/*.html", "fixtures/*.js"]
 "prompt_mechanism_study.verification" = ["*.R"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/jci"]
+addopts = "--basetemp=.test-tmp/pytest"
 norecursedirs = ["development"]
 markers = [
   "milestone: minimal end-to-end reproduction checks",

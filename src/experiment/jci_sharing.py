@@ -11,12 +11,8 @@ import numpy as np
 import scipy
 import sklearn
 
-from prompt_mechanism_study.artifact_io import file_sha256, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, packed, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.discovery import jci_sharing as method
-
-
-def packed(data):
-    return {key: value.tolist() if isinstance(value, np.ndarray) else value for key, value in data.items()}
 
 
 def structures(training, view, plan, backend, seed):

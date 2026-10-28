@@ -14,11 +14,10 @@ import scipy
 from scipy.stats import t
 import sklearn
 
-from prompt_mechanism_study.artifact_io import file_sha256, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import file_sha256, packed, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.discovery import jci_reliability as method
-from prompt_mechanism_study.discovery.jci_policy import exact_policy_value
-from prompt_mechanism_study.discovery.jci_sharing import StructureBackend
-from prompt_mechanism_study.experiment.jci_sharing import packed
+from prompt_mechanism_study.discovery.policy_value import exact_policy_value
+from prompt_mechanism_study.discovery.jci_structure import StructureBackend
 
 
 def cell_name(coordinates):
@@ -34,13 +33,46 @@ def planned_coordinates(plan):
             plan['simulation']['generations_per_assigned_prompt'])]
 
 
+def validate_reliability_plan(plan):
+    if (plan['evidence_role'] not in ('AUTHORIZED_BOUNDED_PROSPECTIVE_SCM_METHOD_CHECK', 'NON_CLAIM_METHOD_REPRODUCTION')
+            or plan['formal_claim_allowed'] is not False):
+        raise ValueError('策略可靠性研究需要明确的开发证据身份')
+    if plan['structural_methods'] != ['time', 'jci12', 'jci123'] or plan['conservative_colliders'] is not True:
+        raise ValueError('结构比较必须保留三种方法和保守碰撞处理')
+    if plan['primary_method'] != 'jci123' or plan['primary_comparators'] != [
+            'ridge', 'elastic_net', 'direct_score', 'direct_ci', 'direct_envelope', 'adjacency', 'time', 'jci12']:
+        raise ValueError('主要比较必须保留全部直接方法与结构消融')
+    for key, minimum in (('workers', 1), ('repetitions_per_batch', 2), ('ci_draws', 99), ('nuisance_folds', 2)):
+        if type(plan[key]) is not int or plan[key] < minimum:
+            raise ValueError(f'研究数量无效：{key}')
+    seeds = plan['batch_seeds']
+    if len(seeds) < 2 or len(set(seeds)) != len(seeds) or any(type(seed) is not int for seed in seeds):
+        raise ValueError('可靠性比较需要至少两个独立种子批次')
+    if not 0 < plan['calibration_fit_fraction'] < 1 or not 0 < plan['alpha'] < 1 or not 0 < plan['ci_alpha'] < 1:
+        raise ValueError('校准角色比例或错误率无效')
+    for key in ('ridge_penalties', 'direct_penalties'):
+        values = np.asarray(plan[key], dtype=float)
+        if not len(values) or not np.isfinite(values).all() or np.any(values <= 0):
+            raise ValueError('正则化参数必须保持正的有限值')
+    strengths = np.asarray(plan['prior_strengths'], dtype=float)
+    if not len(strengths) or not np.isfinite(strengths).all() or np.any((strengths < 0) | (strengths >= 1)):
+        raise ValueError('结构信息不能将政策系数固定为零')
+    specification = plan['simulation']
+    if not specification['mechanisms'] or any(len(beta) != 4 for beta in specification['mechanisms'].values()):
+        raise ValueError('本方法需要四项完整 Atomic 政策')
+    for key, minimum in (('tasks_per_role', 4), ('generations_per_assigned_prompt', 1)):
+        values = specification[key]
+        if not values or len(set(values)) != len(values) or any(type(value) is not int or value < minimum for value in values):
+            raise ValueError(f'任务或结果次数无效：{key}')
+
+
 def execute_reliability_cell(plan, coordinates, rscript, logs):
     mechanism,size,generations,batch,repetition = coordinates
     training,beta = method.draw_reliability_tasks(plan,*coordinates,'D')
     calibration,other = method.draw_reliability_tasks(plan,*coordinates,'CAL')
     np.testing.assert_array_equal(beta,other)
     backend = StructureBackend(rscript,logs/f'{cell_name(coordinates)}-{time.time_ns()}.log',
-                               Path('src/discovery/jci_reliability.R'))
+                               Path(method.__file__).with_suffix('.R'))
     try:
         structure = method.discover_reliable_contexts(training,plan,backend,coordinates)
     finally:
@@ -119,18 +151,19 @@ def summarize_reliability(records, plan):
 
 def run_reliability(plan_path, output, rscript, limit=None, workers=None):
     plan = read_json(plan_path)
-    if plan['study_id']!='jci-policy-reliability-20261014' or plan['formal_claim_allowed'] is not False:
-        raise ValueError('策略可靠性研究的冻结身份不同')
+    validate_reliability_plan(plan)
+    count = plan['workers'] if workers is None else workers
+    if type(count) is not int or not 1 <= count <= plan['workers']:
+        raise ValueError('计算并发数量超出预定范围')
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError('部分复现数量必须是正整数')
     sources = [Path('src/discovery/jci_reliability.py'),Path('src/discovery/jci_reliability.R'),Path(__file__),
-        Path('src/discovery/jci_policy.py'),Path('src/discovery/jci_sharing.py'),Path('src/experiment/jci_sharing.py'),
+        Path('src/discovery/policy_value.py'),Path('src/discovery/jci_structure.py'),
         Path('src/artifact_io.py'),Path('src/records.py')]
     hashes = {str(source.relative_to(Path.cwd())) if source.is_absolute() else str(source):file_sha256(source) for source in sources}
     identity = dict(plan_sha256=file_sha256(plan_path),sources=hashes,python=platform.python_version(),
         numpy=np.__version__,scipy=scipy.__version__,sklearn=sklearn.__version__,rscript=str(rscript),
         openblas_threads=os.environ.get('OPENBLAS_NUM_THREADS'),omp_threads=os.environ.get('OMP_NUM_THREADS'),new_model_requests=0)
-    verify_bundle(Path(plan['diagnosis_artifact']))
-    identity['diagnosis_manifest_sha256'] = file_sha256(Path(plan['diagnosis_artifact'])/'manifest.json')
-    identity['diagnosis_source_archive_sha256'] = file_sha256(Path(plan['diagnosis_source_archive']))
     if (output/'inputs').exists():
         identity['source_archive_sha256'] = file_sha256(output/'source.zip')
         verify_bundle(output/'inputs')
@@ -156,9 +189,6 @@ def run_reliability(plan_path, output, rscript, limit=None, workers=None):
             remaining.append(coordinates)
     if limit is not None:
         remaining = remaining[:limit]
-    count = plan['workers'] if workers is None else workers
-    if count<1 or count>plan['workers']:
-        raise ValueError('计算并发数量超出预定范围')
     with ProcessPoolExecutor(max_workers=count) as executor:
         for start in range(0,len(remaining),count):
             block = remaining[start:start+count]

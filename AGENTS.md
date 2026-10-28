@@ -1,5 +1,16 @@
 # Project-Level Agent Instructions
 
+## JCI branch scope (owner decision, 2026-10-28)
+
+On `codex/jci-framework`, the active method is the finite-regularization JCI
+policy workflow documented in `docs/jci-method.md`. The owner explicitly selected
+this research direction and authorized refactoring its implementation. The CLI,
+reviewer guide and default suite serve this method and its real-outcome budget
+replay. Earlier Atomic source-preparation and study implementations are research
+history available at `main` commit `d304d4ec`; their frozen artifacts retain their
+original protocols and evidence identities. JCI remains bounded method research;
+this branch decision does not authorize formal claims or new provider spending.
+
 ## Scope and Precedence
 
 These instructions apply to the entire repository. Descendant `AGENTS.md`
