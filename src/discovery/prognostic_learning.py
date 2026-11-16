@@ -158,7 +158,9 @@ def draw_merged_attributes(rng, size, environment, scenario, plan, permutation, 
     return output
 
 
-def attribute_direction_checks(graph):
+def attribute_direction_checks(graph, *, n_contexts=2, n_attributes=None):
+    if n_contexts < 1 or (n_attributes is not None and n_attributes < 1):
+        raise ValueError('Invalid context or attribute dimension')
     if graph['status'] != 'evaluated':
         return dict(
             status='unavailable',
@@ -168,22 +170,25 @@ def attribute_direction_checks(graph):
             context_conflicts=[],
         )
     pag = np.asarray(graph['pag'])
+    total = pag.shape[0] if n_attributes is None else n_contexts + n_attributes
     if (
-        pag.shape != (66, 66)
+        pag.ndim != 2
+        or pag.shape != (total, total)
+        or total <= n_contexts
         or np.any(~np.isin(pag, [0, 1, 2, 3]))
         or np.any((pag != 0) != (pag.T != 0))
         or np.any(np.diag(pag))
     ):
         raise ValueError('Invalid PAG matrix dimensions or endpoint marks')
     directed = nx.DiGraph()
-    directed.add_nodes_from(range(66))
+    directed.add_nodes_from(range(total))
     directed.add_edges_from((int(a), int(b)) for a, b in np.argwhere((pag == 2) & (pag.T == 3)))
     components = sorted(
         sorted(component) for component in nx.strongly_connected_components(directed) if len(component) > 1
     )
     conflicts = [(int(a), int(b)) for a, b in np.argwhere(pag == 2) if nx.has_path(directed, int(b), int(a))]
-    context_conflicts = np.argwhere(pag[:, :2] == 2).tolist()
-    eligible = not components and not conflicts and not context_conflicts and pag[0, 1] == 0
+    context_conflicts = np.argwhere(pag[:, :n_contexts] == 2).tolist()
+    eligible = not components and not conflicts and not context_conflicts and not np.any(pag[:n_contexts, :n_contexts])
     return dict(
         status='passed' if eligible else 'invalid',
         eligible=bool(eligible),
@@ -193,43 +198,47 @@ def attribute_direction_checks(graph):
     )
 
 
-def pag_role_groups(graph):
+def pag_role_groups(graph, *, n_contexts=2, n_attributes=None):
     """Decompose context-reachable attributes into canonical JCI entry/exit roles."""
     if graph['status'] != 'evaluated':
+        total = n_contexts + (64 if n_attributes is None else n_attributes)
+        all_attrs = list(range(n_contexts, total))
         return dict(
             eligible=False,
-            leaves=list(range(2, 66)),
+            leaves=all_attrs,
             root=[],
             terminal=[],
             upstream=[],
-            other=list(range(2, 66)),
+            other=all_attrs,
             reachable=[],
         )
     pag = np.asarray(graph['pag'])
-    if pag.shape != (66, 66) or np.any((pag != 0) != (pag.T != 0)) or np.any(np.diag(pag)):
+    total = pag.shape[0] if n_attributes is None else n_contexts + n_attributes
+    if pag.shape != (total, total) or total <= n_contexts or np.any((pag != 0) != (pag.T != 0)) or np.any(np.diag(pag)):
         raise ValueError('Invalid PAG adjacency matrix')
     skeleton = nx.from_numpy_array((pag != 0).astype(int))
-    connected = nx.node_connected_component(skeleton, 0) | nx.node_connected_component(skeleton, 1)
-    leaves = sorted(node for node in connected if node >= 2 and skeleton.degree(node) == 1)
-    if not attribute_direction_checks(graph)['eligible']:
+    connected = set().union(*(nx.node_connected_component(skeleton, ctx) for ctx in range(n_contexts)))
+    leaves = sorted(node for node in connected if node >= n_contexts and skeleton.degree(node) == 1)
+    if not attribute_direction_checks(graph, n_contexts=n_contexts, n_attributes=n_attributes)['eligible']:
         return dict(
             eligible=False,
             leaves=leaves,
             root=[],
             terminal=[],
             upstream=[],
-            other=list(range(2, 66)),
+            other=list(range(n_contexts, total)),
             reachable=[],
         )
     directed = nx.DiGraph()
-    directed.add_nodes_from(range(66))
+    directed.add_nodes_from(range(total))
     directed.add_edges_from((int(left), int(right)) for left, right in np.argwhere((pag == 2) & (pag.T == 3)))
-    root = sorted((set(directed.successors(0)) | set(directed.successors(1))) - {0, 1})
-    reachable = sorted((nx.descendants(directed, 0) | nx.descendants(directed, 1)) - {0, 1})
+    ctx_nodes = set(range(n_contexts))
+    root = sorted(set().union(*(set(directed.successors(ctx)) for ctx in range(n_contexts))) - ctx_nodes)
+    reachable = sorted(set().union(*(nx.descendants(directed, ctx) for ctx in range(n_contexts))) - ctx_nodes)
     reachable_set = set(reachable)
     terminal = sorted(node for node in reachable if not (set(directed.successors(node)) & reachable_set))
     upstream = sorted(reachable_set - set(terminal))
-    other = sorted(set(range(2, 66)) - reachable_set)
+    other = sorted(set(range(n_contexts, total)) - reachable_set)
     return dict(
         eligible=True,
         leaves=leaves,
@@ -241,9 +250,14 @@ def pag_role_groups(graph):
     )
 
 
-def role_weight_profiles(roles, strengths):
+def role_weight_profiles(roles, strengths, *, n_contexts=2, n_attributes=None):
     """Build role-grouped penalty weight vectors (uniform fallback + root/upstream/downstream/reachable)."""
-    profiles = [dict(profile='uniform', strength=0.0, kept=list(range(2, 66)), weights=[1.0] * 66)]
+    known_attrs = set(roles.get('reachable', [])) | set(roles.get('other', []))
+    if n_attributes is None:
+        n_attributes = len(known_attrs) if known_attrs else 64
+    total = n_contexts + n_attributes
+    all_attrs = list(range(n_contexts, total))
+    profiles = [dict(profile='uniform', strength=0.0, kept=all_attrs, weights=[1.0] * total)]
     if not roles['reachable']:
         return profiles
     role_sets = [
@@ -258,26 +272,29 @@ def role_weight_profiles(roles, strengths):
         seen_kept = set()
         for name, kept in role_sets:
             kept_tuple = tuple(kept)
-            if not kept_tuple or len(kept_tuple) == 64 or kept_tuple in seen_kept:
+            if not kept_tuple or len(kept_tuple) == n_attributes or kept_tuple in seen_kept:
                 continue
             seen_kept.add(kept_tuple)
             kept_set = set(kept_tuple)
-            weights = [1.0 if idx < 2 or idx in kept_set else 1.0 + float(strength) for idx in range(66)]
+            weights = [1.0 if idx < n_contexts or idx in kept_set else 1.0 + float(strength) for idx in range(total)]
             profiles.append(dict(profile=name, strength=float(strength), kept=list(kept_tuple), weights=weights))
     return profiles
 
 
-def attribute_geometry_shapes(graph, context, context_strength):
+def attribute_geometry_shapes(graph, context, context_strength, *, n_contexts=2, n_attributes=None):
     if graph['status'] != 'evaluated':
-        complete = list(range(2, 66))
+        total = n_contexts + (64 if n_attributes is None else n_attributes)
+        complete = list(range(n_contexts, total))
         return dict(background=complete, skeleton=[complete for _ in range(6)], propagated=[complete for _ in range(10)])
-    adjacency = np.asarray(graph['pag']) != 0
+    pag = np.asarray(graph['pag'])
+    total = pag.shape[0]
+    adjacency = pag != 0
     network = nx.from_numpy_array(adjacency)
-    distances = [nx.single_source_shortest_path_length(network, root) for root in (0, 1)]
-    members = sorted(set().union(*(set(values) for values in distances)) - {0, 1})
+    distances = [nx.single_source_shortest_path_length(network, root) for root in range(n_contexts)]
+    members = sorted(set().union(*(set(values) for values in distances)) - set(range(n_contexts)))
     responsive = sorted(set(members) & set(context))
     degrees = adjacency.sum(axis=1)
-    distance = {index: min(values.get(index, 67) for values in distances) for index in members}
+    distance = {index: min(values.get(index, total + 1) for values in distances) for index in members}
     median = float(np.median([distance[index] for index in responsive])) if responsive else None
     geometry = [
         members,
@@ -288,12 +305,13 @@ def attribute_geometry_shapes(graph, context, context_strength):
         [index for index in responsive if distance[index] <= median] if responsive else [],
     ]
     transition = adjacency / np.maximum(1, degrees[:, None])
-    strength = np.r_[1.0, 1.0, np.asarray(context_strength)]
+    strength = np.r_[np.ones(n_contexts, dtype=float), np.asarray(context_strength, dtype=float)]
     propagated = list(geometry)
+    top_counts = sorted({min(count, len(members)) for count in (8, 16) if len(members) > 0})
     for alpha in (0.5, 0.9):
-        score = np.linalg.solve(np.eye(66) - alpha * transition, (1 - alpha) * strength)
+        score = np.linalg.solve(np.eye(total) - alpha * transition, (1 - alpha) * strength)
         ranked = sorted(members, key=lambda index: (-score[index], index))
-        propagated.extend(sorted(ranked[:count]) for count in (8, 16))
+        propagated.extend(sorted(ranked[:count]) for count in top_counts)
     return dict(background=members, skeleton=geometry, propagated=propagated)
 
 
@@ -423,7 +441,8 @@ def _fit_weighted_profiles(x, y, folds, profiles, plan):
         fitted.append(model)
     losses = [-float(np.asarray(group['cv_scores']).mean(axis=0).max()) for group in groups]
     selected = min(range(len(groups)), key=lambda index: (losses[index], index))
-    return (fitted[selected], list(range(66))), dict(
+    full = list(range(x.shape[1]))
+    return (fitted[selected], full), dict(
         kind='weighted_logit',
         groups=groups,
         losses=losses,
@@ -431,18 +450,19 @@ def _fit_weighted_profiles(x, y, folds, profiles, plan):
         selected_profile=groups[selected]['profile'],
         selected_strength=groups[selected]['strength'],
         coefficients=groups[selected]['coefficients'],
-        features=list(range(66)),
+        features=full,
     )
 
 
-def _shape_list_to_profiles(shapes, strengths):
-    profiles = [dict(profile='uniform', strength=0.0, kept=list(range(2, 66)), weights=[1.0] * 66)]
+def _shape_list_to_profiles(shapes, strengths, *, n_contexts=2, n_attributes=64):
+    total = n_contexts + n_attributes
+    profiles = [dict(profile='uniform', strength=0.0, kept=list(range(n_contexts, total)), weights=[1.0] * total)]
     for shape_idx, kept in enumerate(shapes):
         kept_set = set(kept)
         for strength in strengths:
             if strength <= 0:
                 continue
-            weights = [1.0 if idx < 2 or idx in kept_set else 1.0 + float(strength) for idx in range(66)]
+            weights = [1.0 if idx < n_contexts or idx in kept_set else 1.0 + float(strength) for idx in range(total)]
             profiles.append(
                 dict(profile=f'shape_{shape_idx}', strength=float(strength), kept=list(kept), weights=weights)
             )
@@ -460,11 +480,17 @@ def fit_source_learners(
     true_roles,
     plan,
     seed,
+    *,
+    n_contexts=2,
 ):
     x, y = 2 * np.asarray(source['x']) - 1, np.asarray(source['y'])
+    d = x.shape[1]
+    n_attributes = d - n_contexts
+    if n_attributes < 1:
+        raise ValueError('Source covariate matrix must contain at least one structural attribute column')
     folds = list(StratifiedKFold(plan['source_cv_folds'], shuffle=True, random_state=seed).split(x, y))
     models, records = {}, {}
-    full = list(range(66))
+    full = list(range(d))
     full_model = LogisticRegressionCV(
         Cs=plan['inverse_penalties'],
         l1_ratios=[0.0],
@@ -506,19 +532,23 @@ def fit_source_learners(
         cv_ratios=list(plan['l1_ratios']),
     )
 
+    screen_sizes = sorted({min(int(k), d) for k in plan['screen_sizes'] if int(k) >= 1})
     pipeline = Pipeline(
         [
             ('screen', SelectKBest(f_classif)),
             ('model', LogisticRegression(l1_ratio=0.0, solver='lbfgs', max_iter=10000, tol=1e-8, random_state=seed)),
         ]
     )
-    search = GridSearchCV(
-        pipeline,
-        {'screen__k': plan['screen_sizes'], 'model__C': plan['screen_inverse_penalties']},
-        cv=folds,
-        scoring='neg_brier_score',
-        error_score='raise',
-    ).fit(x, y)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, module='sklearn.feature_selection')
+        warnings.filterwarnings('ignore', category=RuntimeWarning, module='sklearn.feature_selection')
+        search = GridSearchCV(
+            pipeline,
+            {'screen__k': screen_sizes, 'model__C': plan['screen_inverse_penalties']},
+            cv=folds,
+            scoring='neg_brier_score',
+            error_score='raise',
+        ).fit(x, y)
     selected = search.best_estimator_
     fitted = selected.named_steps['model']
     models['screened_logit'] = (selected, full)
@@ -556,7 +586,9 @@ def fit_source_learners(
     )
 
     aux_x = 2 * np.asarray(auxiliary['x']) - 1
-    transforms = [FrozenEstimator(PCA(n_components=dim, svd_solver='full').fit(aux_x)) for dim in plan['pca_dimensions']]
+    max_pca = min(aux_x.shape[0], d)
+    pca_dims = sorted({min(int(dim), max_pca) for dim in plan['pca_dimensions'] if int(dim) >= 1})
+    transforms = [FrozenEstimator(PCA(n_components=dim, svd_solver='full').fit(aux_x)) for dim in pca_dims]
     pca_pipe = Pipeline(
         [
             ('basis', transforms[0]),
@@ -595,21 +627,40 @@ def fit_source_learners(
     shuffled_roles = dict(
         eligible=roles['eligible'],
         reachable=list(roles['reachable']),
-        root=sorted(2 + int(shuffle_perm[idx - 2]) for idx in roles['root']),
-        terminal=sorted(2 + int(shuffle_perm[idx - 2]) for idx in roles['terminal']),
-        upstream=sorted(2 + int(shuffle_perm[idx - 2]) for idx in roles['upstream']),
+        root=sorted(n_contexts + int(shuffle_perm[idx - n_contexts]) for idx in roles['root']),
+        terminal=sorted(n_contexts + int(shuffle_perm[idx - n_contexts]) for idx in roles['terminal']),
+        upstream=sorted(n_contexts + int(shuffle_perm[idx - n_contexts]) for idx in roles['upstream']),
     )
-    geometry = attribute_geometry_shapes(graph, context_attributes, context_strength)
+    geometry = attribute_geometry_shapes(
+        graph, context_attributes, context_strength, n_contexts=n_contexts, n_attributes=n_attributes
+    )
     strengths = plan['structure_strengths']
     weighted_specs = {
-        'jci': role_weight_profiles(roles, strengths),
-        'oracle': role_weight_profiles(true_roles, strengths),
-        'shuffled': role_weight_profiles(shuffled_roles, strengths),
-        'skeleton_background': _shape_list_to_profiles(geometry['skeleton'], strengths),
-        'propagated_skeleton': _shape_list_to_profiles(geometry['propagated'], strengths),
-        'direct_context': _shape_list_to_profiles([context_attributes], strengths),
-        'direct_uniform': _shape_list_to_profiles([], strengths),
+        'jci': role_weight_profiles(roles, strengths, n_contexts=n_contexts, n_attributes=n_attributes),
     }
+    if true_roles is not None:
+        weighted_specs['oracle'] = role_weight_profiles(
+            true_roles, strengths, n_contexts=n_contexts, n_attributes=n_attributes
+        )
+    weighted_specs.update(
+        {
+            'shuffled': role_weight_profiles(
+                shuffled_roles, strengths, n_contexts=n_contexts, n_attributes=n_attributes
+            ),
+            'skeleton_background': _shape_list_to_profiles(
+                geometry['skeleton'], strengths, n_contexts=n_contexts, n_attributes=n_attributes
+            ),
+            'propagated_skeleton': _shape_list_to_profiles(
+                geometry['propagated'], strengths, n_contexts=n_contexts, n_attributes=n_attributes
+            ),
+            'direct_context': _shape_list_to_profiles(
+                [context_attributes], strengths, n_contexts=n_contexts, n_attributes=n_attributes
+            ),
+            'direct_uniform': _shape_list_to_profiles(
+                [], strengths, n_contexts=n_contexts, n_attributes=n_attributes
+            ),
+        }
+    )
     for key, profiles in weighted_specs.items():
         models[key], records[key] = _fit_weighted_profiles(x, y, folds, profiles, plan)
 
@@ -649,7 +700,8 @@ def cross_fit_target_effects(source_models, target_data, plan):
         raise ValueError('Target correction penalties must be strictly positive and finite')
 
     source_preds = {name: predict_source_model(model, x_obs) for name, model in source_models.items()}
-    all_methods = ['jci', 'oracle', *PRIMARY_COMPARATORS, *STRUCTURAL_COMPARATORS, 'target_only']
+    ordered = ['jci'] + (['oracle'] if 'oracle' in source_models else []) + [*PRIMARY_COMPARATORS, *STRUCTURAL_COMPARATORS]
+    all_methods = [name for name in ordered if name in source_models] + ['target_only']
     results = {}
 
     for method in all_methods:
@@ -716,6 +768,140 @@ def cross_fit_target_effects(source_models, target_data, plan):
             fallback_folds=sum(1 for row in fold_records if row['selected_base'] == 'full_logit' and method != 'full_logit'),
         )
     return results
+
+
+def _discover_pag_and_roles(
+    aux_x,
+    labels,
+    plan,
+    ci_seed,
+    *,
+    n_contexts,
+    rscript=None,
+    log_path=None,
+    on_insufficient_ci='abort',
+):
+    context_names = tuple(labels[:n_contexts])
+    n_attributes = len(labels) - n_contexts
+    ci = ConditionalPermutation(aux_x, labels, plan['ci_draws'], ci_seed)
+    backend = StructureBackend(rscript, log_path, Path('src/discovery/jci_context.R'))
+    try:
+        graph = backend.search(
+            labels,
+            plan.get('structure_method', 'attribute_majority_merged'),
+            ci,
+            plan['ci_alpha'],
+            max_order=plan['maximum_skeleton_conditioning_order'],
+            context_vars=context_names,
+            on_insufficient_ci=on_insufficient_ci,
+        )
+    finally:
+        backend.close()
+
+    nonconstant = {idx for idx in range(len(labels)) if np.any(aux_x[:, idx] != aux_x[0, idx])}
+    context_attributes, context_strength = [], []
+    for index in range(n_contexts, n_contexts + n_attributes):
+        if on_insufficient_ci == 'conservative' and index not in nonconstant:
+            values = [None for _ in range(n_contexts)]
+        else:
+            values = [
+                ci.query(labels[root], labels[index], [])
+                if (on_insufficient_ci != 'conservative' or root in nonconstant)
+                else None
+                for root in range(n_contexts)
+            ]
+        has_edge = (
+            any(value is not None and value < plan['ci_alpha'] for value in values)
+            if on_insufficient_ci == 'conservative'
+            else any(value is None or value < plan['ci_alpha'] for value in values)
+        )
+        if has_edge:
+            context_attributes.append(index)
+        context_strength.append(
+            max([0.0, *[-np.log10(max(value, 1.0 / (plan['ci_draws'] + 1)) / plan['ci_alpha']) for value in values if value is not None]])
+        )
+
+    direction_checks = attribute_direction_checks(graph, n_contexts=n_contexts, n_attributes=n_attributes)
+    roles = pag_role_groups(graph, n_contexts=n_contexts, n_attributes=n_attributes)
+    return ci, graph, context_attributes, context_strength, direction_checks, roles
+
+
+def discover_and_fit_stage2(
+    auxiliary_x,
+    source_data,
+    target_data,
+    plan,
+    *,
+    context_names,
+    attribute_names,
+    ci_seed,
+    fit_seed,
+    shuffle_seed,
+    rscript=None,
+    log_path=None,
+):
+    """Run exogenous-context JCI-12 PAG discovery and cross-fitted learning on general binary matrices."""
+    ctx_names = tuple(context_names)
+    attr_names = tuple(attribute_names)
+    n_contexts, n_attributes = len(ctx_names), len(attr_names)
+    if n_contexts < 1 or n_attributes < 1:
+        raise ValueError('Stage II requires at least one context variable and one attribute')
+    aux_arr = np.asarray(auxiliary_x, dtype=int)
+    src_x = np.asarray(source_data['x'], dtype=int)
+    tgt_x = np.asarray(target_data['x'], dtype=int)
+    total_cols = n_contexts + n_attributes
+    if aux_arr.ndim != 2 or aux_arr.shape[1] != total_cols:
+        raise ValueError(f'auxiliary_x must have {total_cols} columns')
+    if src_x.ndim != 2 or src_x.shape[1] != total_cols or tgt_x.ndim != 2 or tgt_x.shape[1] != total_cols:
+        raise ValueError(f'source and target covariate matrices must have {total_cols} columns')
+
+    labels = [*ctx_names, *attr_names]
+    ci, graph, context_attributes, context_strength, direction_checks, roles = _discover_pag_and_roles(
+        aux_arr,
+        labels,
+        plan,
+        ci_seed,
+        n_contexts=n_contexts,
+        rscript=rscript,
+        log_path=log_path,
+        on_insufficient_ci='conservative',
+    )
+    shuffle = np.random.default_rng(shuffle_seed).permutation(n_attributes)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', ConvergenceWarning)
+        source_models, source_record = fit_source_learners(
+            dict(x=aux_arr),
+            dict(x=src_x, y=np.asarray(source_data['y'], dtype=int)),
+            roles,
+            graph,
+            context_attributes,
+            context_strength,
+            shuffle,
+            None,
+            plan,
+            fit_seed,
+            n_contexts=n_contexts,
+        )
+    cross_fit = cross_fit_target_effects(source_models, target_data, plan)
+    return dict(
+        context_names=list(ctx_names),
+        attribute_names=list(attr_names),
+        n_contexts=n_contexts,
+        n_attributes=n_attributes,
+        labels=labels,
+        graph=graph,
+        direction_checks=direction_checks,
+        roles=roles,
+        ci_seed=ci_seed,
+        fit_seed=fit_seed,
+        shuffle_seed=shuffle_seed,
+        queries=list(ci.cache.values()),
+        context_attributes=context_attributes,
+        context_strength=context_strength,
+        shuffle=shuffle.tolist(),
+        source=source_record,
+        cross_fit=cross_fit,
+    )
 
 
 def integrate_cross_fitted_risk(source_models, cross_fit, scenario, plan, seed, permutation):
@@ -839,31 +1025,16 @@ def _execute_cell(arguments):
 
     cell_name = f'{scenario}-b{batch}-r{repetition:02d}'
     labels = ['C1', 'C2', *[f'X{index:02d}' for index in range(64)]]
-    ci = ConditionalPermutation(data['auxiliary']['x'], labels, plan['ci_draws'], seed(20))
     log_name = f'{cell_name}.structure.json' if rscript is None else f'{cell_name}.R.log'
-    backend = StructureBackend(rscript, output / log_name, Path('src/discovery/jci_context.R'))
-    try:
-        graph = backend.search(
-            labels,
-            plan.get('structure_method', 'attribute_majority_merged'),
-            ci,
-            plan['ci_alpha'],
-            max_order=plan['maximum_skeleton_conditioning_order'],
-        )
-    finally:
-        backend.close()
-
-    context_attributes, context_strength = [], []
-    for index in range(2, 66):
-        values = [ci.query(labels[root], labels[index], []) for root in (0, 1)]
-        if any(value is None or value < plan['ci_alpha'] for value in values):
-            context_attributes.append(index)
-        context_strength.append(
-            max([0.0, *[-np.log10(max(value, 1.0 / (plan['ci_draws'] + 1)) / plan['ci_alpha']) for value in values if value is not None]])
-        )
-
-    direction_checks = attribute_direction_checks(graph)
-    roles = pag_role_groups(graph)
+    ci, graph, context_attributes, context_strength, direction_checks, roles = _discover_pag_and_roles(
+        data['auxiliary']['x'],
+        labels,
+        plan,
+        seed(20),
+        n_contexts=2,
+        rscript=rscript,
+        log_path=output / log_name,
+    )
     true_graph = merged_attribute_graph(plan, permutation)
     true_roles = pag_role_groups(true_graph)
     shuffle = np.random.default_rng(seed(21)).permutation(64)

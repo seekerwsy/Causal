@@ -1,6 +1,7 @@
 import argparse
 import ast
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import subprocess
 import sys
@@ -483,6 +484,108 @@ def extract_assigned_code(plan_path,output):
             response_sha256=file_sha256(output/f'{key}-response.json')))
     write_json_new(output/'extraction.json',dict(assigned=plan['request_limit'],rows=rows,plan_sha256=file_sha256(plan_path)))
     print(dict(status='CODE_EXTRACTION_FINISHED',assigned=plan['request_limit'],parseable=sum(row['usable'] for row in rows)),flush=True)
+
+
+def extract_single_code_block(response_text: str, *, language: str = 'python') -> tuple[str | None, str | None]:
+    """Extract at most one fenced/bare code block without repairing diff patches or multi-block replies."""
+    if not isinstance(response_text, str) or not response_text.strip():
+        return None, 'empty_response'
+    tokens = MarkdownIt('commonmark').parse(response_text)
+    blocks = [token for token in tokens if token.type in ('fence', 'code_block')]
+    if len(blocks) > 1:
+        return None, 'ambiguous_code_blocks'
+    if blocks:
+        lang = language.lower()
+        allowed = ('', lang, 'py' if lang == 'python' else lang)
+        if blocks[0].type == 'fence' and blocks[0].info.strip().lower() not in allowed:
+            return None, 'mismatched_code_block_language'
+        code = blocks[0].content
+    else:
+        code = response_text
+    if code.lstrip().startswith(('diff --git ', '--- a/', '*** Begin Patch')):
+        return None, 'patch_output_rejected'
+    if not code.strip():
+        return None, 'empty_code_block'
+    return code, None
+
+
+def _symbol_line_bounds(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[int, int]:
+    start = min([node.lineno, *(dec.lineno for dec in node.decorator_list)]) - 1
+    assert node.end_lineno is not None
+    return start, node.end_lineno
+
+
+def splice_target_unit_code(
+    scaffold_code: str,
+    response_text: str,
+    *,
+    target_symbol: str | None = None,
+    language: str = 'python',
+) -> dict[str, object]:
+    """Deterministically splice a generated function or module into a fixed scaffold."""
+    code, reason = extract_single_code_block(response_text, language=language)
+    if code is None:
+        status = 'no_code' if reason in {'empty_response', 'empty_code_block'} else 'invalid'
+        return dict(code_status=status, spliced_code=None, code_sha256=None, terminal_reason=reason)
+
+    normalized_code = code.replace('\r\n', '\n').replace('\r', '\n')
+    if language == 'python':
+        try:
+            cand_tree = ast.parse(normalized_code)
+        except SyntaxError as err:
+            return dict(
+                code_status='invalid',
+                spliced_code=None,
+                code_sha256=None,
+                terminal_reason=f'syntax_error: {err.msg}',
+            )
+        if target_symbol is not None:
+            scaf_norm = scaffold_code.replace('\r\n', '\n').replace('\r', '\n')
+            scaf_tree = ast.parse(scaf_norm)
+            scaf_matches = [
+                node for node in scaf_tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == target_symbol
+            ]
+            if len(scaf_matches) != 1:
+                raise ValueError(f'Scaffold must define unique top-level symbol: {target_symbol}')
+            cand_matches = [
+                node for node in cand_tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == target_symbol
+            ]
+            if len(cand_matches) != 1:
+                return dict(
+                    code_status='invalid',
+                    spliced_code=None,
+                    code_sha256=None,
+                    terminal_reason='missing_or_duplicate_target_symbol',
+                )
+            s_start, s_end = _symbol_line_bounds(scaf_matches[0])
+            c_start, c_end = _symbol_line_bounds(cand_matches[0])
+            scaf_lines = scaf_norm.splitlines()
+            cand_lines = normalized_code.splitlines()
+            spliced_lines = [*scaf_lines[:s_start], *cand_lines[c_start:c_end], *scaf_lines[s_end:]]
+            spliced_code = '\n'.join(spliced_lines).rstrip('\n') + '\n'
+            try:
+                ast.parse(spliced_code)
+            except SyntaxError as err:
+                return dict(
+                    code_status='invalid',
+                    spliced_code=None,
+                    code_sha256=None,
+                    terminal_reason=f'syntax_error: {err.msg}',
+                )
+        else:
+            spliced_code = normalized_code.rstrip('\n') + '\n'
+    else:
+        spliced_code = normalized_code.rstrip('\n') + '\n'
+
+    digest = hashlib.sha256(spliced_code.encode('utf-8')).hexdigest()
+    return dict(
+        code_status='valid',
+        spliced_code=spliced_code,
+        code_sha256=digest,
+        terminal_reason=None,
+    )
 
 
 if __name__ == '__main__':

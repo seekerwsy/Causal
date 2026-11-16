@@ -25,8 +25,12 @@ python -m prompt_mechanism_study study inspect-tsg src/fixtures/object-participa
 # 3. Run the 8-cell (4 scenarios x 2 seeds) directional JCI cross-fitting smoke check
 python -m prompt_mechanism_study study smoke .artifacts/smoke-check --workers 2
 
-# 4. Independently reconstruct and verify all RNG streams, CI queries, KKT residuals, and scores
+# 4. Run the offline natural-task end-to-end smoke check (Stage I 16-predicate bridge -> D1 -> splice -> Oracle -> Stage II)
+python -m prompt_mechanism_study study natural-smoke .artifacts/natural-smoke-check
+
+# 5. Independently reconstruct and verify all RNG streams, CI queries, KKT residuals, and scores
 python -m prompt_mechanism_study study verify .artifacts/smoke-check --workers 2
+python -m prompt_mechanism_study study verify .artifacts/natural-smoke-check
 ```
 
 ---
@@ -36,9 +40,10 @@ python -m prompt_mechanism_study study verify .artifacts/smoke-check --workers 2
 | Command | Operation |
 | --- | --- |
 | `smoke OUTPUT [--rscript PATH] [--workers N]` | Execute 8-cell smoke run (4 scenarios incl. `misaligned_signal` negative control) using `configs/jci-directional-grouped-smoke.json` |
-| `run OUTPUT --plan PLAN [--rscript PATH] [--workers N]` | Execute a declared directional JCI cross-fitting study plan |
-| `verify OUTPUT [--workers N]` | Independently reconstruct inputs, CI queries, PAG roles, fits, and intervals |
-| `inspect-tsg INPUT OUTPUT` | Compile `PromptTSG` source record and emit Stage I -> Stage II structural attributes |
+| `natural-smoke OUTPUT [--rscript PATH]` | Execute offline natural-task end-to-end smoke check using `configs/jci-natural-task-smoke.json` |
+| `run OUTPUT --plan PLAN [--rscript PATH] [--workers N]` | Execute a declared directional JCI or natural-task (`study_mode: "natural_task"`) study plan |
+| `verify OUTPUT [--workers N]` | Independently reconstruct inputs, TSG/Oracle records, CI queries, PAG roles, fits, and intervals |
+| `inspect-tsg INPUT OUTPUT` | Compile `PromptTSG` source record and emit Stage I -> Stage II structural attributes (7-dim summary + 16 binary predicates) |
 
 Superseded multi-track prototypes and plans are preserved in [archive/legacy_jci_20261116/](archive/legacy_jci_20261116/) and `configs/archive/legacy_jci_20261116/`. The superseded schema-3 selector pipeline (prioritization, schema-3 randomization and inference, reviewer workflow, frozen-data verifiers) is preserved in [archive/legacy_pipeline_20261116/](archive/legacy_pipeline_20261116/README.md). `src/` keeps only the two contributions and the natural-task substrate: Stage I extraction, fold-nested assignment (D1), generation, and Oracle/functional measurement.
 
@@ -60,5 +65,5 @@ Superseded multi-track prototypes and plans are preserved in [archive/legacy_jci
 - [docs/jci-method.md](docs/jci-method.md): Normative specification of the active two-stage method.
 - [docs/reviewer-guide.md](docs/reviewer-guide.md): Stage invariants, reproduction instructions, and 10-file core reading order.
 - [tests/README.md](tests/README.md): Scientific invariant test suite documentation.
-- [docs/experiments/historical-development-ledger-202610-202611.md](docs/experiments/historical-development-ledger-202610-202611.md): Consolidated Oct鈥揘ov 2026 development chronology and frozen SHA-256 pointers.
+- [docs/experiments/historical-development-ledger-202610-202611.md](docs/experiments/historical-development-ledger-202610-202611.md): Consolidated Oct–Nov 2026 development chronology and frozen SHA-256 pointers.
 - [paper/fse2027/](paper/fse2027/README.md): Anonymous ACM TOSEM manuscript draft (`SPECIFIED_DRAFT`).

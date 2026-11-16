@@ -1,7 +1,8 @@
 from itertools import groupby
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import networkx as nx
+import numpy as np
 
 from prompt_mechanism_study.records import canonical_json, content_hash
 from prompt_mechanism_study.tsg.prompt_contract import compile_source_propositions
@@ -13,6 +14,25 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
     source_proposition_measurement,
     source_requirement_inventory,
     validate_prompt_tsg,
+)
+
+TSG_BINARY_ATTRIBUTE_NAMES: tuple[str, ...] = (
+    "multi_operation_task",
+    "high_operation_fanout",
+    "multi_operation_shared_object",
+    "has_component_ownership",
+    "deep_component_ownership",
+    "has_explicit_condition",
+    "has_composite_logic",
+    "has_branching_or_negation",
+    "has_safety_proposition",
+    "has_constraint_proposition",
+    "target_op_multi_input",
+    "target_op_produces_output",
+    "has_reference_edge",
+    "has_unbound_proposition",
+    "local_binding_complete",
+    "has_local_unresolved",
 )
 
 
@@ -242,6 +262,26 @@ def extract_tsg_structural_attributes(
     unresolved_relations_count = len(graph.unresolved_relations)
     local_unresolved_count = unresolved_semantics_count + unresolved_relations_count
 
+    active_ops = scope_ops or set(operation_ids)
+    binary_predicates = (
+        operation_count >= 2,
+        operation_count >= 4,
+        multi_operation_shared_object,
+        max_component_path_depth >= 1,
+        max_component_path_depth >= 2,
+        has_condition_edge,
+        has_composite_structure,
+        any(structures.get(pid, "atom") in {"or", "not", "opaque"} for pid in scope_props),
+        any(nodes[pid].node_type == "safety_requirement" for pid in scope_props),
+        any(nodes[pid].node_type == "constraint" for pid in scope_props),
+        any(sum(1 for obj in comp_dag.nodes if (obj, "used_by", op) in links) >= 2 for op in active_ops),
+        any((op, "produces", obj) in links for op in active_ops for obj in comp_dag.nodes),
+        any(kind == "refers_to" for _, kind, _ in links),
+        len(unbound_proposition_ids) >= 1,
+        local_binding_complete,
+        local_unresolved_count >= 1,
+    )
+
     return {
         "tsg_id": graph.tsg_id,
         "task_id": graph.task_id,
@@ -269,4 +309,48 @@ def extract_tsg_structural_attributes(
             int(local_binding_complete),
             local_unresolved_count,
         ],
+        "binary_attribute_names": list(TSG_BINARY_ATTRIBUTE_NAMES),
+        "binary_structural_vector": [int(bool(value)) for value in binary_predicates],
+    }
+
+
+def evaluate_binary_attribute_reliability(
+    reference_vectors: Sequence[Sequence[int]],
+    candidate_vectors: Sequence[Sequence[int]],
+    *,
+    attribute_names: Sequence[str] = TSG_BINARY_ATTRIBUTE_NAMES,
+    max_median_flip_rate: float = 0.05,
+    max_attribute_flip_rate: float = 0.10,
+) -> dict[str, Any]:
+    """Measure binary attribute flip rates prior to Stage II without reading outcomes."""
+    names = tuple(attribute_names)
+    ref = np.asarray(reference_vectors, dtype=int)
+    cand = np.asarray(candidate_vectors, dtype=int)
+    if ref.ndim != 2 or cand.ndim != 2 or ref.shape != cand.shape:
+        raise ValueError("Reference and candidate attribute matrices must have identical 2D shape")
+    if ref.shape[0] < 1 or ref.shape[1] != len(names):
+        raise ValueError("Attribute matrices must have >= 1 row and match attribute_names length")
+    if not np.all((ref == 0) | (ref == 1)) or not np.all((cand == 0) | (cand == 1)):
+        raise ValueError("Binary attribute matrices must contain only 0/1 entries")
+    if not 0.0 <= max_median_flip_rate <= 1.0 or not 0.0 <= max_attribute_flip_rate <= 1.0:
+        raise ValueError("Flip rate thresholds must lie in [0, 1]")
+
+    rates = np.mean(ref != cand, axis=0)
+    flip_rates = [float(rate) for rate in rates]
+    median_flip_rate = float(np.median(rates))
+    max_flip_rate = float(np.max(rates))
+    stable_attribute_indices = [idx for idx, rate in enumerate(flip_rates) if rate <= max_attribute_flip_rate]
+    stable_attribute_names = [names[idx] for idx in stable_attribute_indices]
+    return {
+        "n_tasks": int(ref.shape[0]),
+        "n_attributes": len(names),
+        "attribute_names": list(names),
+        "flip_rates": flip_rates,
+        "median_flip_rate": median_flip_rate,
+        "max_flip_rate": max_flip_rate,
+        "max_median_flip_rate": float(max_median_flip_rate),
+        "max_attribute_flip_rate": float(max_attribute_flip_rate),
+        "stable_attribute_indices": stable_attribute_indices,
+        "stable_attribute_names": stable_attribute_names,
+        "gate_passed": bool(median_flip_rate <= max_median_flip_rate and len(stable_attribute_indices) >= 1),
     }

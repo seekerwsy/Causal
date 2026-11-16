@@ -11,6 +11,8 @@ python -m pytest -q
 python -m prompt_mechanism_study study inspect-tsg src/fixtures/object-participation.json .artifacts/tsg-inspect
 python -m prompt_mechanism_study study smoke .artifacts/smoke-check --workers 2
 python -m prompt_mechanism_study study verify .artifacts/smoke-check --workers 2
+python -m prompt_mechanism_study study natural-smoke .artifacts/natural-smoke-check
+python -m prompt_mechanism_study study verify .artifacts/natural-smoke-check
 ```
 
 To reproduce the complete 48-cell bounded simulation validation (`configs/jci-directional-grouped-validation.json`):
@@ -51,10 +53,10 @@ When reproducing archived packages on a Linux compute host, keep all inputs, out
 1. [README.md](../README.md): Project entry point, quickstart, and evidence status.
 2. [AGENTS.md](../AGENTS.md): Project-wide scientific invariants and governance rules.
 3. [docs/jci-method.md](jci-method.md): Normative specification of the active two-stage method.
-4. [src/cli.py](../src/cli.py): Single 4-command CLI (`smoke`, `run`, `verify`, `inspect-tsg`).
+4. [src/cli.py](../src/cli.py): Single 5-command CLI (`smoke`, `natural-smoke`, `run`, `verify`, `inspect-tsg`).
 5. [src/tsg/prompt_tsg.py](../src/tsg/prompt_tsg.py): Canonical `Prompt TSG` schema, `part_of` ownership paths, and scoped binding readouts.
-6. [src/tsg/source_representation.py](../src/tsg/source_representation.py): Stage I -> Stage II structural attribute bridge (`extract_tsg_structural_attributes`).
+6. [src/tsg/source_representation.py](../src/tsg/source_representation.py): Stage I -> Stage II structural attribute bridge (`extract_tsg_structural_attributes`, 16-predicate binary vector, reliability gate).
 7. [src/discovery/jci_structure.py](../src/discovery/jci_structure.py): `ConditionalPermutation` and native Python JCI-12 PAG discovery (`discover_jci_pag`).
-8. [src/discovery/prognostic_learning.py](../src/discovery/prognostic_learning.py): PAG role decomposition `(V_root, V_up, V_term, V_other)`, role-grouped shrinkage, K-fold cross-fitting, and the four simulation regimes, including the `misaligned_signal` negative control.
-9. [src/verification/prognostic_learning.py](../src/verification/prognostic_learning.py): Independent numerical verifier that recomputes all summary verdicts. Design condition D1 is implemented in [src/experiment/assignment.py](../src/experiment/assignment.py) and replayed independently in [src/verification/assignment.py](../src/verification/assignment.py).
+8. [src/discovery/prognostic_learning.py](../src/discovery/prognostic_learning.py): General-dimension PAG role decomposition `(V_root, V_up, V_term, V_other)`, role-grouped shrinkage, K-fold cross-fitting, and the four simulation regimes, including `misaligned_signal`.
+9. [src/verification/prognostic_learning.py](../src/verification/prognostic_learning.py): Independent numerical verifier (paired with [src/experiment/natural_study.py](../src/experiment/natural_study.py) and [src/verification/natural_study.py](../src/verification/natural_study.py) for end-to-end natural tasks).
 10. [docs/experiments/2026-11-16-negative-control-and-measurement-noise.md](experiments/2026-11-16-negative-control-and-measurement-noise.md): Latest formative stress tests (negative control, 10% attribute noise). The earlier 48-cell validation is in [2026-11-16-jci-grouped-crossfit-results.md](experiments/2026-11-16-jci-grouped-crossfit-results.md).

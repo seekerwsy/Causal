@@ -120,27 +120,32 @@ def _verify_ci_queries(queries, data, labels, draws, seed):
         assert query['p'] == ((exceedances + 1) / (draws + 1) if informative else None)
 
 
-def _independent_roles(graph):
+def _independent_roles(graph, *, n_contexts=2, n_attributes=None):
     if graph['status'] != 'evaluated':
-        return dict(eligible=False, root=[], terminal=[], upstream=[], other=list(range(2, 66)), reachable=[])
+        total = n_contexts + (64 if n_attributes is None else n_attributes)
+        all_attrs = list(range(n_contexts, total))
+        return dict(eligible=False, root=[], terminal=[], upstream=[], other=all_attrs, reachable=[])
     pag = np.asarray(graph['pag'])
-    assert pag.shape == (66, 66) and np.all(np.isin(pag, [0, 1, 2, 3]))
+    total = pag.shape[0] if n_attributes is None else n_contexts + n_attributes
+    assert pag.ndim == 2 and pag.shape == (total, total) and total > n_contexts
+    assert np.all(np.isin(pag, [0, 1, 2, 3]))
     assert np.all((pag != 0) == (pag.T != 0)) and not np.any(np.diag(pag))
     directed = nx.DiGraph()
-    directed.add_nodes_from(range(66))
+    directed.add_nodes_from(range(total))
     directed.add_edges_from((int(u), int(v)) for u, v in np.argwhere((pag == 2) & (pag.T == 3)))
     cycles = any(len(c) > 1 for c in nx.strongly_connected_components(directed))
     conflicts = any(nx.has_path(directed, int(b), int(a)) for a, b in np.argwhere(pag == 2))
-    ctx_bad = bool(np.any(pag[:, :2] == 2)) or pag[0, 1] != 0
+    ctx_bad = bool(np.any(pag[:, :n_contexts] == 2)) or bool(np.any(pag[:n_contexts, :n_contexts]))
     eligible = not cycles and not conflicts and not ctx_bad
     if not eligible:
-        return dict(eligible=False, root=[], terminal=[], upstream=[], other=list(range(2, 66)), reachable=[])
-    root = sorted((set(directed.successors(0)) | set(directed.successors(1))) - {0, 1})
-    reach = sorted((nx.descendants(directed, 0) | nx.descendants(directed, 1)) - {0, 1})
+        return dict(eligible=False, root=[], terminal=[], upstream=[], other=list(range(n_contexts, total)), reachable=[])
+    ctx_nodes = set(range(n_contexts))
+    root = sorted(set().union(*(set(directed.successors(ctx)) for ctx in range(n_contexts))) - ctx_nodes)
+    reach = sorted(set().union(*(nx.descendants(directed, ctx) for ctx in range(n_contexts))) - ctx_nodes)
     reach_set = set(reach)
     term = sorted(node for node in reach if not (set(directed.successors(node)) & reach_set))
     up = sorted(reach_set - set(term))
-    other = sorted(set(range(2, 66)) - reach_set)
+    other = sorted(set(range(n_contexts, total)) - reach_set)
     return dict(eligible=True, root=root, terminal=term, upstream=up, other=other, reachable=reach)
 
 
@@ -157,6 +162,102 @@ def _independent_true_roles(plan, permutation):
 
 def _ridge_solve(x, y, penalty):
     return np.linalg.solve(x.T @ x + penalty * np.eye(x.shape[1]), x.T @ y)
+
+
+def verify_source_and_cross_fit_records(
+    src_models,
+    cross_fit,
+    *,
+    src_x,
+    src_y,
+    tgt_x,
+    tgt_a,
+    tgt_y,
+    fit_seed,
+    k_folds,
+):
+    """Independently verify source KKT optimality, Ridge normal equations, OOF predictions, and scores."""
+    z_src = 2 * np.asarray(src_x) - 1
+    y_src = np.asarray(src_y, dtype=float)
+    for rec in src_models.values():
+        if rec['kind'] == 'weighted_logit':
+            chosen_idx = rec['selected']
+            assert chosen_idx == min(range(len(rec['losses'])), key=lambda i: (rec['losses'][i], i))
+            for grp in rec['groups']:
+                coef = np.asarray(grp['coefficients'])
+                w = np.asarray(grp['weights'])
+                prob = expit(coef[0] + z_src @ coef[1:])
+                grad = z_src.T @ (prob - y_src) + w / grp['C'] * coef[1:]
+                kkt = max(float(abs(grad).max()), float(abs(np.sum(prob - y_src))))
+                assert kkt <= 1e-3
+        elif rec['kind'] == 'logit':
+            coef = np.asarray(rec['coefficients'])
+            feats = rec['features']
+            ratio = float(rec['l1_ratio'])
+            prob = expit(coef[0] + z_src[:, feats] @ coef[1:])
+            grad = z_src[:, feats].T @ (prob - y_src) + (1.0 - ratio) / rec['C'] * coef[1:]
+            nz = coef[1:] != 0
+            grad[nz] += ratio / rec['C'] * np.sign(coef[1:][nz])
+            viol = np.abs(grad)
+            viol[~nz] = np.maximum(viol[~nz] - ratio / rec['C'], 0.0)
+            kkt = max(float(viol.max()), float(abs(np.sum(prob - y_src))))
+            assert kkt <= 1e-3
+
+    boosted_params = src_models['boosted']['parameters']
+    boosted_fit = HistGradientBoostingClassifier(
+        learning_rate=0.1,
+        min_samples_leaf=10,
+        l2_regularization=1.0,
+        early_stopping=False,
+        random_state=fit_seed,
+        **boosted_params,
+    ).fit(z_src, y_src)
+
+    def indep_predict(name, x_raw):
+        rec = src_models[name]
+        z = 2 * np.asarray(x_raw) - 1
+        if rec['kind'] == 'boosted':
+            return boosted_fit.predict_proba(z)[:, 1]
+        coef = np.asarray(rec['coefficients'])
+        return expit(coef[0] + z[:, rec['features']] @ coef[1:])
+
+    x_tgt = np.asarray(tgt_x)
+    a_tgt = np.asarray(tgt_a)
+    y_tgt = np.asarray(tgt_y, dtype=float)
+    n_tgt = len(y_tgt)
+    outer_fold = np.arange(n_tgt) % k_folds
+    design = np.column_stack((np.ones(n_tgt), 2 * x_tgt - 1))
+    tgt_base_preds = {name: indep_predict(name, x_tgt) for name in src_models}
+
+    for cf in cross_fit.values():
+        oof = np.empty(n_tgt, dtype=float)
+        for f_idx, fold_rec in enumerate(cf['folds']):
+            assert fold_rec['fold'] == f_idx
+            held = outer_fold == f_idx
+            train = ~held
+            bname = fold_rec['selected_base']
+            pen = fold_rec['selected_penalty']
+            x_tr, y_tr = design[train], y_tgt[train]
+            base_tr = np.zeros(len(y_tr)) if bname == 'target_only' else tgt_base_preds[bname][train]
+            base_te = np.zeros(int(held.sum())) if bname == 'target_only' else tgt_base_preds[bname][held]
+            inner_fold = np.arange(len(y_tr)) % (k_folds - 1)
+            sq_errs = []
+            for inf in range(k_folds - 1):
+                in_val = inner_fold == inf
+                in_trn = ~in_val
+                d_in = _ridge_solve(x_tr[in_trn], y_tr[in_trn] - base_tr[in_trn], pen)
+                p_in = np.clip(base_tr[in_val] + x_tr[in_val] @ d_in, 0.0, 1.0)
+                sq_errs.extend(((y_tr[in_val] - p_in) ** 2).tolist())
+            np.testing.assert_allclose(fold_rec['inner_cv_loss'], float(np.mean(sq_errs)), atol=1e-10)
+            delta = _ridge_solve(x_tr, y_tr - base_tr, pen)
+            np.testing.assert_allclose(fold_rec['coefficients'], delta, atol=1e-9)
+            oof[held] = np.clip(base_te + design[held] @ delta, 0.0, 1.0)
+        np.testing.assert_allclose(cf['oof_predictions'], oof, atol=1e-12)
+        scores = 2.0 * (2.0 * a_tgt - 1.0) * (y_tgt - oof)
+        np.testing.assert_allclose(cf['scores'], scores, atol=1e-12)
+        np.testing.assert_allclose(cf['effect'], float(scores.mean()), atol=1e-12)
+        np.testing.assert_allclose(cf['standard_error'], float(scores.std(ddof=1) / np.sqrt(n_tgt)), atol=1e-12)
+    return indep_predict
 
 
 def _verify_cell(arguments):
@@ -188,7 +289,7 @@ def _verify_cell(arguments):
     ]
     assert cell['context_attributes'] == expected_ctx
 
-    roles = _independent_roles(cell['graph'])
+    roles = _independent_roles(cell['graph'], n_contexts=2, n_attributes=plan['attributes'])
     assert cell['roles']['eligible'] == roles['eligible']
     assert cell['roles']['root'] == roles['root']
     assert cell['roles']['terminal'] == roles['terminal']
@@ -199,93 +300,27 @@ def _verify_cell(arguments):
     assert cell['true_roles']['terminal'] == true_roles['terminal']
     assert cell['true_roles']['upstream'] == true_roles['upstream']
 
-    src_x = 2 * np.asarray(cell['data']['source']['x']) - 1
+    src_x = np.asarray(cell['data']['source']['x'])
     src_y = np.asarray(cell['data']['source']['y'], dtype=float)
-    src_models = cell['source']['models']
-    for name, rec in src_models.items():
-        if rec['kind'] == 'weighted_logit':
-            chosen_idx = rec['selected']
-            assert chosen_idx == min(range(len(rec['losses'])), key=lambda i: (rec['losses'][i], i))
-            for grp in rec['groups']:
-                coef = np.asarray(grp['coefficients'])
-                w = np.asarray(grp['weights'])
-                prob = expit(coef[0] + src_x @ coef[1:])
-                grad = src_x.T @ (prob - src_y) + w / grp['C'] * coef[1:]
-                kkt = max(float(abs(grad).max()), float(abs(np.sum(prob - src_y))))
-                assert kkt <= 1e-3
-        elif rec['kind'] == 'logit':
-            coef = np.asarray(rec['coefficients'])
-            feats = rec['features']
-            ratio = float(rec['l1_ratio'])
-            prob = expit(coef[0] + src_x[:, feats] @ coef[1:])
-            grad = src_x[:, feats].T @ (prob - src_y) + (1.0 - ratio) / rec['C'] * coef[1:]
-            nz = coef[1:] != 0
-            grad[nz] += ratio / rec['C'] * np.sign(coef[1:][nz])
-            viol = np.abs(grad)
-            viol[~nz] = np.maximum(viol[~nz] - ratio / rec['C'], 0.0)
-            kkt = max(float(viol.max()), float(abs(np.sum(prob - src_y))))
-            assert kkt <= 1e-3
-
-    # Independent prediction helper using verified coefficients (and independent GBDT refit for boosted).
-    boosted_params = src_models['boosted']['parameters']
-    boosted_fit = HistGradientBoostingClassifier(
-        learning_rate=0.1,
-        min_samples_leaf=10,
-        l2_regularization=1.0,
-        early_stopping=False,
-        random_state=seed(10),
-        **boosted_params,
-    ).fit(src_x, src_y)
-
-    def indep_predict(name, x_raw):
-        rec = src_models[name]
-        z = 2 * np.asarray(x_raw) - 1
-        if rec['kind'] == 'boosted':
-            return boosted_fit.predict_proba(z)[:, 1]
-        coef = np.asarray(rec['coefficients'])
-        return expit(coef[0] + z[:, rec['features']] @ coef[1:])
-
     tgt_x = np.asarray(cell['data']['target']['x'])
     tgt_a = np.asarray(cell['data']['target']['a'])
     tgt_y = np.asarray(cell['data']['target']['y'], dtype=float)
-    n_tgt = len(tgt_y)
-    k_folds = plan['target_folds']
-    outer_fold = np.arange(n_tgt) % k_folds
-    design = np.column_stack((np.ones(n_tgt), 2 * tgt_x - 1))
-    tgt_base_preds = {name: indep_predict(name, tgt_x) for name in src_models}
-
-    for method, cf in cell['cross_fit'].items():
-        oof = np.empty(n_tgt, dtype=float)
-        for f_idx, fold_rec in enumerate(cf['folds']):
-            assert fold_rec['fold'] == f_idx
-            held = outer_fold == f_idx
-            train = ~held
-            bname = fold_rec['selected_base']
-            pen = fold_rec['selected_penalty']
-            x_tr, y_tr = design[train], tgt_y[train]
-            base_tr = np.zeros(len(y_tr)) if bname == 'target_only' else tgt_base_preds[bname][train]
-            base_te = np.zeros(int(held.sum())) if bname == 'target_only' else tgt_base_preds[bname][held]
-            # Verify inner CV loss for the selected (base, penalty).
-            inner_fold = np.arange(len(y_tr)) % (k_folds - 1)
-            sq_errs = []
-            for inf in range(k_folds - 1):
-                in_val = inner_fold == inf
-                in_trn = ~in_val
-                d_in = _ridge_solve(x_tr[in_trn], y_tr[in_trn] - base_tr[in_trn], pen)
-                p_in = np.clip(base_tr[in_val] + x_tr[in_val] @ d_in, 0.0, 1.0)
-                sq_errs.extend(((y_tr[in_val] - p_in) ** 2).tolist())
-            np.testing.assert_allclose(fold_rec['inner_cv_loss'], float(np.mean(sq_errs)), atol=1e-10)
-            # Verify final fold normal equations and OOF prediction.
-            delta = _ridge_solve(x_tr, y_tr - base_tr, pen)
-            np.testing.assert_allclose(fold_rec['coefficients'], delta, atol=1e-9)
-            oof[held] = np.clip(base_te + design[held] @ delta, 0.0, 1.0)
-        np.testing.assert_allclose(cf['oof_predictions'], oof, atol=1e-12)
-        scores = 2.0 * (2.0 * tgt_a - 1.0) * (tgt_y - oof)
-        np.testing.assert_allclose(cf['scores'], scores, atol=1e-12)
-        np.testing.assert_allclose(cf['effect'], float(scores.mean()), atol=1e-12)
-        np.testing.assert_allclose(cf['standard_error'], float(scores.std(ddof=1) / np.sqrt(n_tgt)), atol=1e-12)
+    src_models = cell['source']['models']
+    indep_predict = verify_source_and_cross_fit_records(
+        src_models,
+        cell['cross_fit'],
+        src_x=src_x,
+        src_y=src_y,
+        tgt_x=tgt_x,
+        tgt_a=tgt_a,
+        tgt_y=tgt_y,
+        fit_seed=seed(10),
+        k_folds=plan['target_folds'],
+    )
 
     # Independently replay risk integration.
+    n_tgt = len(tgt_y)
+    k_folds = plan['target_folds']
     test_rng = np.random.default_rng(seed(5))
     methods = list(cell['cross_fit'])
     sums = {name: 0.0 for name in methods}

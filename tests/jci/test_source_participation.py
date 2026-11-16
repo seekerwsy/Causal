@@ -9,7 +9,11 @@ from prompt_mechanism_study.tsg.prompt_contract import compile_source_propositio
 from prompt_mechanism_study.tsg.prompt_tsg import (
     PromptTSGError, source_participation_paths, source_proposition_readback,
 )
-from prompt_mechanism_study.tsg.source_representation import extract_tsg_structural_attributes
+from prompt_mechanism_study.tsg.source_representation import (
+    TSG_BINARY_ATTRIBUTE_NAMES,
+    evaluate_binary_attribute_reliability,
+    extract_tsg_structural_attributes,
+)
 
 
 SOURCE = read_json(Path('src/fixtures/object-participation.json'))
@@ -105,6 +109,13 @@ def test_stage1_to_stage2_structural_attributes_and_cli_inspect(tmp_path):
     assert attrs['local_binding_complete'] is True
     assert attrs['local_unresolved_count'] > 0
     assert len(attrs['structural_vector']) == 7
+    assert tuple(attrs['binary_attribute_names']) == TSG_BINARY_ATTRIBUTE_NAMES
+    assert len(attrs['binary_structural_vector']) == 16
+    assert set(attrs['binary_structural_vector']) <= {0, 1}
+    named = dict(zip(attrs['binary_attribute_names'], attrs['binary_structural_vector']))
+    assert named['multi_operation_task'] == 1 and named['high_operation_fanout'] == 1
+    assert named['multi_operation_shared_object'] == 1 and named['deep_component_ownership'] == 1
+    assert named['local_binding_complete'] == 1 and named['has_local_unresolved'] == 1
 
     out_dir = tmp_path / 'tsg-inspect'
     assert cli_main(['study', 'inspect-tsg', 'src/fixtures/object-participation.json', str(out_dir)]) == 0
@@ -113,3 +124,19 @@ def test_stage1_to_stage2_structural_attributes_and_cli_inspect(tmp_path):
     assert {k: v for k, v in saved['attributes'].items() if k != 'tsg_id'} == {
         k: v for k, v in attrs.items() if k != 'tsg_id'
     }
+
+
+def test_binary_attribute_reliability_gate():
+    base = [[1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0] for _ in range(10)]
+    near = [list(row) for row in base]
+    near[0][0] ^= 1
+    passed = evaluate_binary_attribute_reliability(base, near)
+    assert passed['gate_passed'] is True
+    assert passed['median_flip_rate'] == 0.0
+    assert passed['max_flip_rate'] == 0.1
+    assert len(passed['stable_attribute_indices']) == 16
+
+    noisy = [[bit ^ 1 for bit in row] for row in base]
+    failed = evaluate_binary_attribute_reliability(base, noisy)
+    assert failed['gate_passed'] is False
+    assert failed['median_flip_rate'] == 1.0 and failed['stable_attribute_indices'] == []

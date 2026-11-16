@@ -159,12 +159,15 @@ def discover_jci_pag(
     context_vars=('C1', 'C2'),
     max_order=3,
     majority_rule=True,
+    on_insufficient_ci='abort',
 ):
     """Native Python FCI + JCI-12 (exogenous context) PAG discovery.
 
     PAG endpoint convention matches pcalg: pag[i, j] stores the mark AT node j
     on edge (i, j), where 0=none, 1=circle, 2=arrowhead, 3=tail.
     """
+    if on_insufficient_ci not in ('abort', 'conservative'):
+        raise ValueError(f'Unsupported on_insufficient_ci policy: {on_insufficient_ci}')
     labels = list(labels)
     p = len(labels)
     if any(name not in labels for name in context_vars):
@@ -196,6 +199,16 @@ def discover_jci_pag(
             backend='python-jci12',
         )
 
+    ci_data = getattr(ci, 'data', None)
+    if on_insufficient_ci == 'conservative' and ci_data is not None:
+        arr = np.asarray(ci_data)
+        if any(len(np.unique(arr[:, r])) < 2 for r in roots):
+            return abort_insufficient()
+        for col in range(p):
+            if col not in root_set and len(np.unique(arr[:, col])) < 2:
+                adj[col, :] = False
+                adj[:, col] = False
+
     order = 0
     while order <= max_order:
         snap = {i: sorted(np.flatnonzero(adj[i]).tolist()) for i in range(p)}
@@ -216,7 +229,9 @@ def discover_jci_pag(
                     largest_conditioning = max(largest_conditioning, len(comb))
                     p_val = ci.query(labels[i], labels[j], [labels[idx] for idx in comb])
                     if p_val is None:
-                        return abort_insufficient()
+                        if on_insufficient_ci == 'abort':
+                            return abort_insufficient()
+                        continue
                     if p_val > alpha:
                         sepset[(i, j)] = comb
                         removals.append((i, j))
@@ -260,7 +275,9 @@ def discover_jci_pag(
                             largest_conditioning = max(largest_conditioning, len(comb))
                             p_val = ci.query(labels[pair[0]], labels[pair[1]], [labels[idx] for idx in comb])
                             if p_val is None:
-                                return abort_insufficient()
+                                if on_insufficient_ci == 'abort':
+                                    return abort_insufficient()
+                                continue
                             if p_val > alpha:
                                 sep_list.append(comb)
                     if not sep_list:
@@ -474,7 +491,17 @@ class StructureBackend:
                 env=environment,
             )
 
-    def search(self, labels, method, ci, alpha, *, max_order=3, context_vars=('C1', 'C2')):
+    def search(
+        self,
+        labels,
+        method,
+        ci,
+        alpha,
+        *,
+        max_order=3,
+        context_vars=('C1', 'C2'),
+        on_insufficient_ci='abort',
+    ):
         started = time.monotonic()
         if self.process is None:
             majority = method in ('attribute_majority', 'attribute_majority_merged', 'python-jci12', 'jci12')
@@ -485,6 +512,7 @@ class StructureBackend:
                 context_vars=context_vars,
                 max_order=max_order,
                 majority_rule=majority,
+                on_insufficient_ci=on_insufficient_ci,
             )
             answer['seconds'] = time.monotonic() - started
             if self.log is not None:

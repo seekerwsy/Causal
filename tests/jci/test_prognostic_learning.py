@@ -8,7 +8,12 @@ import pytest
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.discovery import prognostic_learning as method
 from prompt_mechanism_study.discovery.jci_structure import discover_jci_pag
-from prompt_mechanism_study.verification.prognostic_learning import verify_directional_study
+from prompt_mechanism_study.verification.prognostic_learning import (
+    _independent_roles,
+    _verify_ci_queries,
+    verify_directional_study,
+    verify_source_and_cross_fit_records,
+)
 
 
 def _true_merged_dag(plan, permutation):
@@ -120,6 +125,78 @@ def test_cross_fitting_is_fold_isolated_and_finite_sample_unbiased():
         res = method.cross_fit_target_effects(source_models, dict(x=base_sample['x'], a=a_draw, y=y_draw), plan)
         est_taus.append(res['jci']['effect'])
     assert abs(float(np.mean(est_taus)) - true_tau) < 0.025
+
+
+def test_stage2_generalizes_to_arbitrary_binary_dimensions(tmp_path):
+    rng = np.random.default_rng(2026111601)
+
+    def draw_small(n, p_c):
+        c = rng.binomial(1, p_c, size=(n, 2))
+        z = np.empty((n, 16), dtype=int)
+        z[:, 0] = rng.binomial(1, 0.1 + 0.6 * c[:, 0])
+        z[:, 1] = rng.binomial(1, 0.1 + 0.6 * c[:, 1])
+        z[:, 2] = rng.binomial(1, 0.1 + 0.7 * z[:, 0])
+        z[:, 3] = rng.binomial(1, 0.1 + 0.4 * z[:, 1] + 0.4 * z[:, 2])
+        for col in range(4, 15):
+            z[:, col] = rng.binomial(1, 0.45, size=n)
+        z[:, 15] = 0  # deliberate constant predicate (must isolate to V_other under conservative JCI)
+        x = np.column_stack((c, z))
+        a = rng.binomial(1, 0.5, size=n)
+        prob = np.clip(0.2 + 0.5 * z[:, 3] + 0.1 * (2 * a - 1), 0.05, 0.95)
+        y = rng.binomial(1, prob)
+        return x, a, y
+
+    aux_x, _, _ = draw_small(160, [0.5, 0.5])
+    src_x, src_a, src_y = draw_small(64, [0.5, 0.5])
+    tgt_x, tgt_a, tgt_y = draw_small(48, [0.8, 0.2])
+    plan = {
+        'structure_method': 'attribute_majority_merged',
+        'maximum_skeleton_conditioning_order': 2,
+        'ci_draws': 199,
+        'ci_alpha': 0.05,
+        'source_cv_folds': 3,
+        'target_folds': 4,
+        'inverse_penalties': [0.03, 0.1, 0.3, 1.0, 3.0],
+        'l1_ratios': [0.25, 0.75, 1.0],
+        'screen_sizes': [4, 8, 12, 18],
+        'screen_inverse_penalties': [0.1, 1.0, 10.0],
+        'boost_depths': [2],
+        'boost_iterations': [50],
+        'pca_dimensions': [4, 8, 12, 18],
+        'structure_strengths': [0.0, 8.0, 100.0],
+        'correction_penalties': [1.0, 10.0, 100.0],
+    }
+    ctx_names = ['ctx_a', 'ctx_b']
+    attr_names = [f'attr_{i:02d}' for i in range(16)]
+    res = method.discover_and_fit_stage2(
+        aux_x,
+        {'x': src_x, 'a': src_a, 'y': src_y},
+        {'x': tgt_x, 'a': tgt_a, 'y': tgt_y},
+        plan,
+        context_names=ctx_names,
+        attribute_names=attr_names,
+        ci_seed=11,
+        fit_seed=12,
+        shuffle_seed=13,
+        log_path=tmp_path / 'stage2.json',
+    )
+    assert np.asarray(res['graph']['pag']).shape == (18, 18)
+    assert 17 in res['roles']['other'] and 17 not in res['roles']['reachable']
+    assert 'oracle' not in res['source']['models']
+    assert 'oracle' not in res['cross_fit'] and 'jci' in res['cross_fit']
+    _verify_ci_queries(res['queries'], aux_x, [*ctx_names, *attr_names], plan['ci_draws'], 11)
+    assert _independent_roles(res['graph'], n_contexts=2, n_attributes=16)['terminal'] == res['roles']['terminal']
+    verify_source_and_cross_fit_records(
+        res['source']['models'],
+        res['cross_fit'],
+        src_x=src_x,
+        src_y=src_y,
+        tgt_x=tgt_x,
+        tgt_a=tgt_a,
+        tgt_y=tgt_y,
+        fit_seed=12,
+        k_folds=4,
+    )
 
 
 def test_misaligned_negative_control_loads_only_on_unreachable_attributes():

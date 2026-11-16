@@ -23,13 +23,21 @@ def _build_parser():
     smoke.add_argument('--workers', type=int, default=1)
     smoke.set_defaults(plan=Path('configs/jci-directional-grouped-smoke.json'))
 
-    run = actions.add_parser('run', help='execute a directional JCI cross-fitting study plan')
+    natural_smoke = actions.add_parser(
+        'natural-smoke',
+        help='run bounded offline natural-task Stage I -> Stage II end-to-end smoke check',
+    )
+    natural_smoke.add_argument('output', type=Path)
+    natural_smoke.add_argument('--rscript', type=Path, default=None)
+    natural_smoke.set_defaults(plan=Path('configs/jci-natural-task-smoke.json'))
+
+    run = actions.add_parser('run', help='execute a directional JCI or natural-task study plan')
     run.add_argument('output', type=Path)
     run.add_argument('--plan', type=Path, required=True)
     run.add_argument('--rscript', type=Path, default=None)
     run.add_argument('--workers', type=int, default=1)
 
-    verify = actions.add_parser('verify', help='independently verify saved directional JCI results')
+    verify = actions.add_parser('verify', help='independently verify saved directional JCI or natural-task results')
     verify.add_argument('output', type=Path)
     verify.add_argument('--workers', type=int, default=1)
 
@@ -76,15 +84,33 @@ def _run_inspect_tsg(input_path: Path, output_dir: Path) -> dict:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prompt_mechanism_study.artifact_io import read_json
+
     args = _build_parser().parse_args(argv)
-    if args.action in ('smoke', 'run'):
-        from prompt_mechanism_study.discovery.prognostic_learning import run_directional_study
+    if args.action == 'natural-smoke':
+        from prompt_mechanism_study.experiment.natural_study import run_natural_study
 
-        result = run_directional_study(args.plan, args.output, rscript=args.rscript, workers=args.workers)
+        result = run_natural_study(args.plan, args.output, rscript=args.rscript)
+    elif args.action in ('smoke', 'run'):
+        plan = read_json(args.plan)
+        if plan.get('study_mode') == 'natural_task':
+            from prompt_mechanism_study.experiment.natural_study import run_natural_study
+
+            result = run_natural_study(args.plan, args.output, rscript=args.rscript)
+        else:
+            from prompt_mechanism_study.discovery.prognostic_learning import run_directional_study
+
+            result = run_directional_study(args.plan, args.output, rscript=args.rscript, workers=args.workers)
     elif args.action == 'verify':
-        from prompt_mechanism_study.verification.prognostic_learning import verify_directional_study
+        plan = read_json(args.output / 'inputs' / 'plan.json')
+        if plan.get('study_mode') == 'natural_task':
+            from prompt_mechanism_study.verification.natural_study import verify_natural_study
 
-        result = verify_directional_study(args.output, workers=args.workers)
+            result = verify_natural_study(args.output)
+        else:
+            from prompt_mechanism_study.verification.prognostic_learning import verify_directional_study
+
+            result = verify_directional_study(args.output, workers=args.workers)
     elif args.action == 'inspect-tsg':
         result = _run_inspect_tsg(args.input, args.output)
     else:
