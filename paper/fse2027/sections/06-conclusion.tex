@@ -1,17 +1,22 @@
 \section{Conclusion}
 
-\model unifies task-grounded graph representation with context-anchored
-directional causal learning to evaluate single-requirement prompt interventions
-in LLM code generation. In Stage~I, \prompttsg resolves multi-operation
-requirement scope, component ownership paths, and logical guards while
-preserving local \texttt{unresolved} boundaries, decoupling semantic representation
-from target-unit code splicing, and projecting graph-topological covariates
-$Z = q(G_P, r)$. In Stage~II, JCI-12 Partial Ancestral Graph discovery over
-exogenous contexts partitions attributes into directional entry, precursor,
-confluence, and latent-confounded roles $(V_{\rm root},V_{\rm up},V_{\rm
-term},V_{\rm other})$ to guide role-grouped shrinkage, while task-unit
-$K$-fold cross-fitting with unweighted fallback ensures finite-sample
-unbiasedness and mitigates negative transfer across shifted mechanisms.
-Together with assigned-arm ITT accounting and scoped evidence reporting,
-\model provides a principled, inspectable foundation for requirement-level
-prompt security guidance.
+\model unifies task-grounded semantic graph interventions (\prompttsg) with
+temporal-sink Joint Causal Inference (JCI-12) and within-task paired
+counterfactual evaluation to turn prompt-level security edits into inspectable,
+contract-safe engineering guidance. In Stage~I, \prompttsg recovers spans
+tolerantly with local \texttt{unresolved} degradation, extracts an audited
+eight-predicate orthogonal mechanism vector, renders sibling-preserving
+scoped interventions ($\operatorname{Do}_{\mathrm{TSG}}$), splices target code
+deterministically by AST symbol, and aligns static security evaluation to the
+governed target operation's call closure. In Stage~II, JCI discovery on a
+strictly disjoint $D_{\mathrm{disc}}$ split separates genuine causal security
+drivers from environment- and latent-confounded proxies while abstaining
+100\% on spurious negative controls and detecting unscoped scope-bleed hazards;
+held-out paired ITT contrasts on $D_{\mathrm{eval}}$ then validate both
+security yield and sibling functionality without post-hoc filtering. Independently
+verified multi-regime validations (48 cells, 4,538 CI tests) and live
+\texttt{Qwen2.5-Coder-32B-Instruct} multi-operation evaluations (96
+generations across 24 tasks and six CWE families, reaching 91.7\% joint
+success versus 0.0\%--29.2\% baselines and 12.5\% unscoped causal prompts)
+demonstrate that causal deconfounding and operation-scoped prompt grounding are
+both indispensable for safe multi-operation code hardening.

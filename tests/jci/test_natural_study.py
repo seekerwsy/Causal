@@ -10,9 +10,51 @@ from prompt_mechanism_study.artifact_io import read_json, write_bundle, write_js
 from prompt_mechanism_study.cli import main as cli_main
 from prompt_mechanism_study.experiment import natural_study
 from prompt_mechanism_study.llm import ProviderError
+from prompt_mechanism_study.measurement.security_profiles import evaluate_security_profile
 from prompt_mechanism_study.measurement.unit_test_oracle import evaluate_python_unit_tests
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.verification.natural_study import verify_natural_study
+
+
+def test_target_function_scoped_security_profile():
+    scoped_safe_code = (
+        "import random, secrets, string\n\n"
+        "def issue_invite_code(opts):\n"
+        "    alpha = string.ascii_letters + string.digits\n"
+        "    return ''.join(secrets.choice(alpha) for _ in range(opts['length']))\n\n"
+        "def deterministic_tiebreak_order(candidates, opts):\n"
+        "    random.seed(opts['seed'])\n"
+        "    return random.sample(candidates, len(candidates))\n"
+    )
+    scoped_res = evaluate_security_profile(
+        scoped_safe_code,
+        "python.cwe338.security_randomness.v1",
+        target_function="issue_invite_code",
+    )
+    assert scoped_res["security_label"] == "secure"
+    assert scoped_res["decision"]["trace"]["target_function"] == "issue_invite_code"
+
+    helper_tainted_code = (
+        "import random, string\n\n"
+        "def _weak_pick(alpha):\n"
+        "    return random.choice(alpha)\n\n"
+        "def issue_invite_code(opts):\n"
+        "    alpha = string.ascii_letters + string.digits\n"
+        "    return ''.join(_weak_pick(alpha) for _ in range(opts['length']))\n"
+    )
+    helper_res = evaluate_security_profile(
+        helper_tainted_code,
+        "python.cwe338.security_randomness.v1",
+        target_function="issue_invite_code",
+    )
+    assert helper_res["security_label"] == "insecure"
+
+    missing_res = evaluate_security_profile(
+        scoped_safe_code,
+        "python.cwe338.security_randomness.v1",
+        target_function="missing_fn",
+    )
+    assert missing_res["security_label"] == "unknown"
 
 
 def test_unit_test_oracle_pass_fail_and_timeout():
@@ -34,8 +76,8 @@ def test_natural_task_multiop_smoke_and_independent_verification(tmp_path):
     assert summary["study_mode"] == "natural_task"
     assert summary["formal_claim_allowed"] is False
     assert summary["new_provider_calls"] == 0
-    assert summary["n_eval_tasks"] == 12
-    assert summary["n_total_measurements"] == 48
+    assert summary["n_eval_tasks"] == 24
+    assert summary["n_total_measurements"] == 96
     assert summary["reliability_gate_passed"] is True
     assert summary["jci_selected_mechanisms"] == ["Z_cau"]
     assert summary["corr_selected_mechanisms"] == ["Z_lat"]

@@ -95,14 +95,52 @@ _XML_CALLS = frozenset(
 )
 
 
-def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
+def _scope_tree_to_target_function(tree: ast.Module, target_function: str) -> ast.Module:
+    """Restrict module AST to target_function, intra-module helpers it references, and module setup."""
+    func_map: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            func_map.setdefault(stmt.name, []).append(stmt)
+    if target_function in func_map:
+        reachable: set[str] = {target_function}
+        queue = [target_function]
+        while queue:
+            fn_name = queue.pop(0)
+            for fn_node in func_map.get(fn_name, ()):
+                for sub in ast.walk(fn_node):
+                    if (
+                        isinstance(sub, ast.Name)
+                        and isinstance(sub.ctx, ast.Load)
+                        and sub.id in func_map
+                        and sub.id not in reachable
+                    ):
+                        reachable.add(sub.id)
+                        queue.append(sub.id)
+    else:
+        reachable = set()
+    scoped_body = [
+        stmt
+        for stmt in tree.body
+        if isinstance(stmt, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign))
+        or (isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name in reachable)
+    ]
+    return ast.Module(body=scoped_body, type_ignores=[])
+
+
+def evaluate_security_profile(
+    code: str,
+    profile_id: str,
+    *,
+    target_function: str | None = None,
+) -> dict[str, Any]:
     """Evaluate one bounded profile; absent or ambiguous evidence stays unknown."""
 
     if profile_id not in LOCAL_PROFILE_IDS:
         raise ValueError(f"unsupported local security profile: {profile_id}")
-    tree = ast.parse(code)
+    full_tree = ast.parse(code)
     if profile_id in TASK_BOUND_PROFILE_IDS:
-        return _decision(profile_id, [])
+        return _decision(profile_id, [], target_function=target_function)
+    tree = _scope_tree_to_target_function(full_tree, target_function) if target_function else full_tree
     aliases = _aliases(tree)
     if profile_id.endswith("tls_certificate_validation.v1"):
         facts = _tls_certificate_facts(tree, aliases)
@@ -135,7 +173,7 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
     elif profile_id.endswith("outbound_url.v1"):
         facts = _url_facts(tree, aliases)
 
-    return _decision(profile_id, facts)
+    return _decision(profile_id, facts, target_function=target_function)
 
 
 def security_profile_producer_sha256() -> str:
@@ -1022,7 +1060,12 @@ def _url_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
     return facts
 
 
-def _decision(profile_id: str, facts: list[dict[str, Any]]) -> dict[str, Any]:
+def _decision(
+    profile_id: str,
+    facts: list[dict[str, Any]],
+    *,
+    target_function: str | None = None,
+) -> dict[str, Any]:
     states = {fact["state"] for fact in facts}
     if profile_id in TASK_BOUND_PROFILE_IDS:
         label, evaluability, reason = "unknown", "unknown_coverage", "task_bound_endpoint_required"
@@ -1042,12 +1085,14 @@ def _decision(profile_id: str, facts: list[dict[str, Any]]) -> dict[str, Any]:
             "evaluable",
             "all_relevant_sinks_proved_safe",
         )
-    trace = {
+    trace: dict[str, Any] = {
         "schema_version": "3.0",
         "extractor_version": "prompt-mechanism-local-ast-target-v1",
         "profile_id": profile_id,
         "facts": sorted(facts, key=lambda item: (item["line"], item["sink_kind"])),
     }
+    if target_function is not None:
+        trace["target_function"] = target_function
     decision = {
         "schema_version": "3.0",
         "decision_version": "prompt-mechanism-local-profile-target-v1",

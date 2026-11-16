@@ -1,15 +1,15 @@
 # CausalGuide ACM TOSEM Manuscript
 
-This directory contains the anonymous **ACM TOSEM** manuscript draft (`\acmJournal{TOSEM}`, `SPECIFIED_DRAFT`).
+This directory contains the anonymous **ACM TOSEM** manuscript draft (`\acmJournal{TOSEM}`, Direction 1 revision; prospective multi-model confirmatory cells remain `\pendingresult`).
 
 ## Main Files
 
-- `main.tex`: Anonymous manuscript entry point (`acmart`, `manuscript,screen,review,anonymous`).
-- `sections/01-introduction.tex`: Problem framing around multi-operation scope ambiguity and confounded structural attributes, plus twofold contributions (`Prompt TSG` + Directional Cross-Fitted `JCI`).
-- `sections/02-problem-formulation.tex`: Motivating multi-operation example, task-unit ITT estimand, and endpoint separation (`Y = Y_C Y_E I{secure}`).
-- `sections/03-method.tex`: Two-stage normative specification (`Stage I: Task-Grounded Graph Representation` + `Stage II: Directional JCI Discovery and Cross-Fitted Effect Learning`, including `Scoped Evidence Output`).
-- `sections/04-evaluation.tex`: Focused 3-RQ evaluation design (RQ1: `Prompt TSG` representation & binding; RQ2: Directional JCI & cross-fitting precision; RQ3: End-to-end positive security hardening vs. adverse warnings). Formal natural-task tables remain `\pendingresult` (`\textit{TBD}`) until prospectively frozen and executed.
-- `figures/method-overview.tex`: Two-stage TikZ architecture diagram and core scientific operations table.
+- `main.tex`: Anonymous manuscript entry point (`acmart`, `manuscript,screen,review,anonymous`) with synchronized title and abstract.
+- `sections/01-introduction.tex`: Problem framing around multi-operation compositional scope bleed and confounded observational prompt signals, plus twofold contributions (`Prompt TSG` + Temporal-Sink JCI discovery & paired ITT evaluation).
+- `sections/02-problem-formulation.tex`: Multi-operation scope disambiguation, strict split isolation ($D_{\mathrm{disc}} \cap D_{\mathrm{eval}} = \emptyset$), endpoint separation ($Y_C, Y_E, Y_{\mathrm{sec}}, Y_{\mathrm{func}}, Y_{\mathrm{joint}}$), and within-task paired counterfactual ITT contrasts.
+- `sections/03-method.tex`: Two-stage normative specification (`Stage I: Tolerant Prompt TSG, Orthogonal Mechanisms, and Scoped Realization` + `Stage II: Temporal-Sink JCI Discovery and Paired Counterfactual Evaluation`) paired with target-operation-scoped AST security auditing.
+- `sections/04-evaluation.tex`: Verified 3-RQ empirical evaluation (`RQ1`: 24-task / 96-generation live `Qwen2.5-Coder-32B-Instruct` scope protection vs.\ unscoped `flat`; `RQ2`: 48-cell multi-regime JCI deconfounding, `100%` null-control abstention, and `56.5%–82.9%` variance reduction; `RQ3`: 6-CWE endpoint decomposition and `\pendingresult` prospective confirmatory cells).
+- `figures/method-overview.tex`: Two-stage three-column TikZ architecture diagram and core scientific operations table.
 - `figures/method-example.tex`: Multi-operation scoping illustration (`fig2-task-grounded-intervention.png`).
 
 ## Compile

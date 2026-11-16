@@ -380,7 +380,12 @@ def verify_natural_study(output_dir: Path) -> dict[str, Any]:
             spliced_code = str(splice["spliced_code"])
             if splice["code_sha256"] != detail["code_sha256"] or spliced_code != detail["spliced_code"]:
                 raise ValueError(f"Spliced code digest mismatch for {aid}")
-            sec = evaluate_security_profile(spliced_code, task["oracle_profile_id"])
+            target_fn = (task.get("target") or {}).get("operation_local_id") or task.get("target_symbol")
+            sec = evaluate_security_profile(
+                spliced_code,
+                task["oracle_profile_id"],
+                target_function=target_fn,
+            )
             ut = evaluate_python_unit_tests(spliced_code, task["unit_test_script"], timeout_seconds=unit_timeout)
             if sec["security_label"] != detail["oracle_status"]:
                 raise ValueError(f"Security Oracle replay mismatch for {aid}")

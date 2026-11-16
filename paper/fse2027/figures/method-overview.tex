@@ -6,81 +6,82 @@
     node distance=5mm and 6mm,
     panel/.style={draw=black!55,rounded corners=4pt,fill=black!2,inner sep=4mm},
     box/.style={draw=black!75,rounded corners=2pt,fill=white,align=center,
-      minimum height=8.5mm,text width=35mm,inner sep=1.8mm},
+      minimum height=8.5mm,text width=37mm,inner sep=1.8mm},
     emphbox/.style={draw=black!85,thick,rounded corners=2pt,fill=blue!4,align=center,
-      minimum height=8.5mm,text width=36mm,inner sep=1.8mm},
+      minimum height=8.5mm,text width=38mm,inner sep=1.8mm},
     jciBox/.style={draw=black!85,thick,rounded corners=2pt,fill=orange!5,align=center,
-      minimum height=8.5mm,text width=40mm,inner sep=1.8mm},
+      minimum height=8.5mm,text width=41mm,inner sep=1.8mm},
     outBox/.style={draw=black!85,thick,rounded corners=2pt,fill=green!5,align=center,
-      minimum height=8.5mm,text width=36mm,inner sep=1.8mm},
+      minimum height=8.5mm,text width=38mm,inner sep=1.8mm},
     flow/.style={-{Latex[length=2mm]},semithick},
     note/.style={font=\sffamily\scriptsize,text=black!75,align=center}
   ]
     % Stage I column
-    \node[box] (task) {\textbf{Natural Task Input $P$}\\multi-operation prompt \& context};
-    \node[emphbox,below=5.5mm of task] (tsg) {\textbf{Prompt TSG $G_P$}\\operations, \texttt{part\_of} paths,\\conditions, local \texttt{unresolved}};
-    \node[box,below=5.5mm of tsg] (bridge) {\textbf{Bridge \& Interventions}\\$B_G(r)$, $\mathcal{I}_G(o)$, $Z=q(G_P,r)$\\$\mathcal{T}_r^+$ / $\mathcal{T}_r^-$ (decoupled splicing)};
+    \node[box] (task) {\textbf{Natural Task Input $P$}\\multi-op prompt \& context};
+    \node[emphbox,below=5.5mm of task] (tsg) {\textbf{Tolerant Prompt TSG $G_P$}\\operations, \texttt{part\_of} paths,\\guards, local \texttt{unresolved}};
+    \node[box,below=5.5mm of tsg] (bridge) {\textbf{Orthogonal Vector \& Scope}\\$Z=q(G_P,r)\in\{0,1\}^8$ (stable)\\$\operatorname{Do}_{\mathrm{TSG}}(G_P,\mathcal{M})$ + AST splice};
 
-    % Stage II column
-    \node[jciBox,right=14mm of task] (pag) {\textbf{JCI-12 PAG Discovery}\\outcome-free $\widehat{H}$ over $(C,Z)$\\with exogenous context roots $C$};
-    \node[jciBox,below=5.5mm of pag] (roles) {\textbf{PAG Role Decomposition}\\$(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm other})$\\+ role-grouped source shrinkage};
-    \node[jciBox,below=5.5mm of roles] (crossfit) {\textbf{Task-Unit $K$-Fold Cross-Fit}\\target adaptation $\widehat{g}_T^{(-k)}$ + fallback\\$R_i = 2(2A_i-1)[Y_i-\widehat{g}_T^{(-k(i))}(X_i)]$};
+    % Stage II Discovery column (D_disc)
+    \node[jciBox,right=14mm of task] (pag) {\textbf{JCI-12 PAG on $D_{\mathrm{disc}}$}\\roots $C=(C_{\mathrm{env}}, I)$, mechanisms $Z$,\\temporal outcome sinks $(Y_{\mathrm{sec}},Y_{\mathrm{func}})$};
+    \node[jciBox,below=5.5mm of pag] (roles) {\textbf{Mechanism Classification}\\causal drivers ($Z_m \to Y_{\mathrm{sec}}$) vs.\\env/latent proxies \& bleed hazards};
+    \node[jciBox,below=5.5mm of roles] (policy) {\textbf{Causal Policy Selection}\\deconfounded drivers $\mathcal{M}_{\mathrm{JCI}}$\\+ automatic null abstention};
 
-    % Confirmation & Guidance column
-    \node[box,right=18mm of pag] (measure) {\textbf{Independent Measurement}\\ITT outcomes $Y=Y_CY_E\mathbb{I}\{\text{sec}\}$\\+ functionality \& \texttt{unknown} rates};
-    \node[outBox,below=5.5mm of measure] (confirm) {\textbf{Simultaneous Confirmation}\\positive hardening vs.\ warning\\relative to practical margin $m_h$};
-    \node[outBox,below=5.5mm of confirm] (guidance) {\textbf{Scoped Evidence Output}\\tested edit, bound scope,\\effect interval, \& action status};
+    % Paired Evaluation & Verification column (D_eval, disjoint)
+    \node[box,right=16mm of pag] (measure) {\textbf{4-Arm Paired Gen.\ ($D_{\mathrm{eval}}$)}\\{\texttt{base}, \texttt{corr\_tsg}, \texttt{jci\_flat}, \texttt{jci\_tsg}}\\target-scoped AST + \texttt{python -I}};
+    \node[outBox,below=5.5mm of measure] (confirm) {\textbf{Paired ITT Confirmation}\\$d_i = Y_i(a) - Y_i(b)$ (full denom.),\\Bonferroni CI \& sign test ($m_h$)};
+    \node[outBox,below=5.5mm of confirm] (verify) {\textbf{Independent Replay Audit}\\deterministic \texttt{study verify}\\CI, PAG, AST, UT \& stats checks};
 
     % Outer stage panels
     \begin{scope}[on background layer]
-      \node[panel,fit=(task)(tsg)(bridge),label={[font=\sffamily\small\bfseries]above:Stage I: Task-Grounded Representation}] (s1) {};
-      \node[panel,fit=(pag)(roles)(crossfit)(measure)(confirm)(guidance),label={[font=\sffamily\small\bfseries]above:Stage II: Directional JCI, Cross-Fitting \& Scoped Guidance}] (s2) {};
+      \node[panel,fit=(task)(tsg)(bridge),label={[font=\sffamily\small\bfseries]above:Stage I: Prompt TSG \& Scoped Realization}] (s1) {};
+      \node[panel,fit=(pag)(roles)(policy),label={[font=\sffamily\small\bfseries]above:Stage II: JCI Discovery ($D_{\mathrm{disc}}$)}] (s2d) {};
+      \node[panel,fit=(measure)(confirm)(verify),label={[font=\sffamily\small\bfseries]above:Paired Evaluation ($D_{\mathrm{eval}}$) \& Audit}] (s2e) {};
     \end{scope}
 
     % Arrows
     \draw[flow] (task) -- (tsg);
     \draw[flow] (tsg) -- (bridge);
-    \draw[flow] (bridge.east) -- ++(5mm,0) |- node[note,pos=0.25,right=0.5mm] {$Z=q(G_P,r)$} (pag.west);
+    \draw[flow] (bridge.east) -- ++(5mm,0) |- node[note,pos=0.25,right=0.5mm] {$Z$,\,scope} (pag.west);
     \draw[flow] (pag) -- (roles);
-    \draw[flow] (roles) -- (crossfit);
-    \draw[flow] (crossfit.east) -- ++(4.5mm,0) |- node[note,pos=0.72,above] {ranking} (confirm.west);
-    \draw[flow] (bridge.south) -- ++(0,-6.5mm) -| ([xshift=11mm]crossfit.east) |- (measure.west);
+    \draw[flow] (roles) -- (policy);
+    \draw[flow] (policy.east) -- ++(5mm,0) |- node[note,pos=0.25,right=0.5mm] {$\mathcal{M}_{\mathrm{JCI}}$} (measure.west);
     \draw[flow] (measure) -- (confirm);
-    \draw[flow] (confirm) -- (guidance);
+    \draw[flow] (confirm) -- (verify);
   \end{tikzpicture}%
   }
-  \caption{Two-stage overview of \model. Stage~I builds an evidence-grounded
-  \prompttsg $G_P$, resolves operation-specific bindings while decoupling
-  representation from target-unit code splicing, and projects relational
-  attributes $Z=q(G_P,r)$. Stage~II discovers a JCI-12 Partial Ancestral Graph
-  over $(C,Z)$, partitions attributes into canonical directional roles
-  $(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm other})$ for role-grouped
-  shrinkage, estimates effects via task-unit $K$-fold cross-fitted randomized
-  residual scoring, and emits scoped evidence records. \prompttsg links encode
-  task semantics rather than causal edges.}
+  \caption{Two-stage \model architecture. Stage~I parses natural task prompts
+  into tolerant span-grounded \prompttsg graphs $G_P$, projects an
+  eight-predicate orthogonal mechanism vector $Z=q(G_P,r)$, and renders
+  operation-scoped interventions $\operatorname{Do}_{\mathrm{TSG}}(G_P,\mathcal{M})$
+  decoupled from deterministic AST splicing. Under strict split isolation
+  ($D_{\mathrm{disc}} \cap D_{\mathrm{eval}} = \emptyset$), Stage~II learns a
+  JCI-12 Partial Ancestral Graph with exogenous contexts $C$ and temporal
+  outcome sinks $(Y_{\mathrm{sec}},Y_{\mathrm{func}})$ on $D_{\mathrm{disc}}$,
+  and evaluates four matched arms per task unit on $D_{\mathrm{eval}}$ under
+  full paired ITT accounting and independent replay verification.}
   \label{fig:method-overview}
-  \Description{Two-stage pipeline diagram connecting Stage I Prompt TSG
-  representation and structural attribute extraction to Stage II JCI-12 PAG
-  discovery, directional role decomposition, task-unit K-fold cross-fitting,
-  independent measurement, confirmation, and scoped evidence output.}
+  \Description{Three-column two-stage pipeline showing Stage I Prompt TSG and
+  scoped realization, Stage II JCI-12 PAG discovery with temporal outcome sinks
+  on D_disc, and four-arm paired counterfactual evaluation and independent verify
+  replay on D_eval.}
 \end{figure}
 
 \begin{table}[htbp]
   \centering
-  \caption{Core scientific operations across the two-stage \model pipeline.}
+  \caption{Core scientific operations across the active \model pipeline.}
   \label{tab:method-stages}
   \small
   \begin{tabular}{>{\raggedright\arraybackslash}p{0.26\linewidth}
                   >{\raggedright\arraybackslash}p{0.66\linewidth}}
     \toprule
-    Operation & Stage and primary artifact \\
+    Operation & Stage and normative invariant \\
     \midrule
-    Source representation & Stage~I: \prompttsg $G_P$ with character spans, \texttt{part\_of} chains, and local \texttt{unresolved} states. \\
-    Scope \& attribute bridge & Stage~I: operation readouts $\mathcal I_G(o)$, unbound context $\mathcal U_G$, and pre-assignment attributes $Z=q(G_P,r)$. \\
-    Directional JCI discovery & Stage~II: outcome-free JCI-12 PAG $\widehat H$ on $(C,Z)$ and canonical roles $(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm other})$. \\
-    Cross-fitted effect learning & Stage~II: role-grouped source shrinkage, $K$-fold target adaptation with unweighted fallback, and residual scores $R_i$. \\
-    Randomization \& ITT measurement & Stage~II: balanced task-unit assignment $A_i$, independent security/functionality Oracles, and full ITT denominators. \\
-    Confirmation \& scoped guidance & Stage~II: simultaneous confirmation against margin $m_h$ and scoped Explanation + Suggested Action output. \\
+    Tolerant \prompttsg ($G_P$) & Stage~I: Evidence-grounded operations, \texttt{part\_of} chains, conditions, and graceful local \texttt{unresolved} degradation (\texttt{resolve\_evidence\_span}). \\
+    Orthogonal bridge \& reliability & Stage~I: 8-bit predicate vector $Z = q(G_P,r)$ audited outcome-blindly before Stage~II ($\text{\texttt{median\_flip\_rate}} \le 0.05$). \\
+    Scoped intervention \& splicing & Stage~I: $\operatorname{Do}_{\mathrm{TSG}}(G_P,\mathcal{M})$ binds targets and exempts siblings; deterministic single-block AST symbol splicing. \\
+    Temporal-sink JCI discovery & Stage~II ($D_{\mathrm{disc}}$): Native JCI-12 PAG over $(C_{\mathrm{env}},I,Z,Y_{\mathrm{sec}},Y_{\mathrm{func}})$ with root tails at $C$ and sink arrowheads at $(Y_{\mathrm{sec}},Y_{\mathrm{func}})$. \\
+    Causal mechanism policy & Stage~II ($D_{\mathrm{disc}}$): Selects confirmed causal drivers ($Z_m \to Y_{\mathrm{sec}}$), rejects confounded proxies, flags scope bleed, and abstains cleanly under null regimes. \\
+    Paired evaluation \& verify & Stage~II ($D_{\mathrm{eval}}$): Four matched arms (\texttt{baseline}, \texttt{corr\_tsg}, \texttt{jci\_flat}, \texttt{jci\_tsg}) judged via target-scoped AST Oracles + isolated \texttt{python -I} unit tests and independently replayed by \texttt{study verify}. \\
     \bottomrule
   \end{tabular}
 \end{table}

@@ -4,18 +4,18 @@
 Feature-attribution and concept-based methods relate neural predictions to
 tokens or high-level concepts~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
 while CodeQ~\cite{khati2026codeq}, VulFaith~\cite{wang2026vulfaith}, and
-NLPerturbator~\cite{chen2026nlperturbator} analyze token rationales, reasoning
+NLPerturbator~\cite{chen2026nlperturbator} examine token rationales, reasoning
 trace faithfulness, and prompt-perturbation robustness. Orthogonal causal
-frameworks—including Palacio et al.~\cite{palacio2024causation},
+frameworks---including Palacio et al.~\cite{palacio2024causation},
 Galeras~\cite{rodriguezcardenas2023benchmarking}, Ji et
 al.~\cite{ji2025causality}, Velasco et al.~\cite{velasco2026smells}, and
-CAM~\cite{lyu2026cam}—infer concept-to-code or agent-to-code causal relations.
-By contrast, \model anchors requirement-level edits in \prompttsg operation
-bindings and component ownership paths, separates input semantics from
-code-splicing mechanics, and uses Joint Causal Inference~\cite{mooij2020jci}
-with directional PAG roles $(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm
-other})$ to regularize cross-fitted target effect estimation rather than
-attributing post-hoc code samples.
+CAM~\cite{lyu2026cam}---infer observational or agent-level causal relations.
+By contrast, \model binds security mechanisms directly to multi-operation
+\prompttsg ownership paths (\texttt{part\_of}) to prevent sibling scope bleed, injects
+exogenous intervention probes alongside post-generation temporal outcome sinks
+inside JCI-12 PAG discovery~\cite{mooij2020jci,zhang2008ancestral} strictly on
+$D_{\mathrm{disc}}$, and evaluates policies on held-out tasks via matched
+paired counterfactuals.
 
 \paragraph{Hardening LLMs and Measuring Secure Code Generation.}
 Prompt-based hardening and automated prompt optimization
@@ -25,9 +25,8 @@ SecCoder, SVEN, CodeGuard+, and
 Thea~\cite{he2024safecoder,zhang2024seccoder,he2023sven,fu2024codeguard,elhusseini2026thea}.
 Executable security benchmarks including SecurityEval, LLMSecEval, CWEval,
 and BaxBench~\cite{siddiq2022securityeval,tony2023llmseceval,peng2025cweval,vero2025baxbench}
-demonstrate why security outcomes must be evaluated jointly with functionality
-and analyzer coverage~\cite{dai2026rethinking}. \model adopts independent
-security and functionality measurements under strict assigned-arm ITT
-denominators, keeping code validity, Oracle evaluability, and \texttt{unknown}
-states separate inside both statistical estimation and scoped
-guidance~\cite{miller2019explanation}.
+underscore why security and functionality must be evaluated jointly~\cite{dai2026rethinking}.
+\model extends this line with target-operation-scoped static security
+profiles matched to \prompttsg targets, isolated unit-test functionality checks,
+and complete assigned-arm paired ITT denominators verified end-to-end by an
+independent replay verifier~\cite{miller2019explanation}.

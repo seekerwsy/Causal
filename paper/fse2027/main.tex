@@ -26,8 +26,7 @@
 
 \begin{document}
 
-\title[CausalGuide: Explainable Security Guidance in LLM Code Generation]{\model: Causal Analysis for Explainable Security Guidance in LLM Code
-Generation}
+\title[CausalGuide: Scoped Causal Prompt Guidance for Secure LLM Code Generation]{\model: Task-Grounded Scoped Interventions and Joint Causal Mechanism Discovery for Secure LLM Code Generation}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -36,7 +35,48 @@ Generation}
 }
 
 \begin{abstract}
-% Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit.
+Prompt-level interventions can substantially reduce security vulnerabilities in
+LLM-generated code, yet turning prompt edits into reliable engineering
+guidance faces two coupled bottlenecks in multi-operation programs:
+(i)~\emph{confounded observational proxies}---surface cues such as audit
+docstrings or file headers correlate with secure outputs through latent or
+environment confounders while delivering zero causal gain under explicit
+intervention---and (ii)~\emph{multi-operation scope bleed}---applying even a
+verified security rule as a flat module-wide instruction corrupts sibling
+operations that share data objects or standard-library primitives.
+
+We introduce \model, a two-stage framework coupling Task-Grounded Semantic
+Graphs (\prompttsg) with Joint Causal Inference (JCI) mechanism discovery and
+within-task paired counterfactual evaluation. In Stage~I, \prompttsg builds a
+tolerant span-grounded representation over task operations, nested
+\texttt{part\_of} object ownership chains, logical conditions, and normative
+propositions while degrading unanchorable facts into explicit
+\texttt{unresolved} boundaries; extracts an 8-predicate orthogonal structural
+mechanism vector; and renders operation-scoped interventions decoupled from
+AST code splicing and paired with target-operation-scoped AST security
+auditing. In Stage~II, under strict split isolation
+($D_{\mathrm{disc}} \cap D_{\mathrm{eval}} = \emptyset$), \model discovers a
+JCI-12 Partial Ancestral Graph over exogenous environment/intervention contexts
+$C=(C_{\mathrm{env}}, I)$ and post-generation temporal outcome sinks
+$(Y_{\mathrm{sec}}, Y_{\mathrm{func}})$ to separate true causal security drivers
+from confounded proxies and unscoped scope-bleed hazards, evaluating policies on
+held-out tasks via within-task paired counterfactual intention-to-treat (ITT)
+contrasts.
+
+Across 48 independently verified multi-regime validation cells (4,538
+conditional independence tests), \model achieves 100\% abstention (0/12 false
+positives versus 12/12 for correlation selection) on spurious-only negative
+controls, improves joint secure-and-functional yield by +0.127 to +0.147 over
+correlation policies and +0.095 to +0.283 over unscoped flat rules, and cuts
+unpaired estimator variance by 56.5\%--82.9\%. In an independently verified
+formative evaluation over 24 multi-operation Python legacy-maintenance tasks (96
+live generations across six CWE families on \texttt{Qwen2.5-Coder-32B-Instruct}),
+\model attains 91.7\% (22/24) joint success (100\% security, 91.7\%
+functionality), outperforming unguided baseline generation (29.2\%,
+$\hat{\Delta}=+0.625$, $p=6.1\times 10^{-5}$), correlation-guided scoped prompts
+(0.0\%, $\hat{\Delta}=+0.917$, $p=4.8\times 10^{-7}$), and unscoped flat
+causal rules (12.5\%, $\hat{\Delta}=+0.792$, $p=3.8\times 10^{-6}$) with zero
+per-task regressions.
 \end{abstract}
 
 \begin{CCSXML}

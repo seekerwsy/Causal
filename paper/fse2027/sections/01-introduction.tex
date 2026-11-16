@@ -1,78 +1,83 @@
 \section{Introduction}
 
-Developers using large language models for code generation face a concrete
-prompt-level security decision: which requirements should be made explicit,
-where within a multi-operation task do those requirements apply, and what causal
-evidence justifies modifying the prompt? Insecure patterns are widespread in
-generated code~\cite{pearce2022copilot,perry2023assistants}, and security
-prompting or iterative prompt optimization can shift model
-behavior~\cite{tony2025prompting,nazzal2024promsec}. Yet turning prompt
-adjustments into trustworthy engineering guidance poses two foundational
-methodological challenges.
+Developers using large language models (LLMs) for code generation face a
+concrete prompt-engineering question whenever hardening multi-operation modules:
+\emph{which security requirement genuinely drives secure code rather than acting
+as a spurious correlate, and where within a shared-object task must that
+requirement apply without breaking sibling functionality?} Insecure idioms
+remain prevalent in LLM outputs~\cite{pearce2022copilot,perry2023assistants},
+and explicit security prompting or iterative prompt refinement can shift
+generation behavior~\cite{tony2025prompting,nazzal2024promsec}. However,
+converting prompt modifications into trustworthy engineering guidance confronts
+two coupled failures that neither generic checklists nor observational prompt
+correlations resolve.
 
-The first challenge is \textbf{compositional scope ambiguity in multi-operation
-prompts}. Natural programming tasks frequently combine several operations that
-share data objects, nested attribute components, and logical execution
-conditions~\cite{cicalese2026language}. A requirement to parameterize an SQL
-value must specify which operation and input object it governs while leaving
-sibling uses of the same object—such as file-path construction or return
-formatting—unchanged. Flat requirement checklists or ungrounded concept tags
-collapse these operation-level distinctions, and coupling semantic extraction
-to brittle patch-syntax contracts causes syntax rejections to obscure true
-requirement-binding effects. Structured task representation must therefore tie
-normative propositions to exact operations, object-component ownership paths,
-and logical guards while preserving local unresolved facts without discarding
-valid bindings.
+The first challenge is \textbf{compositional multi-operation scope bleed}.
+Real-world software modules routinely house multiple operations over shared
+request mappings, nested attribute paths, or standard-library
+primitives~\cite{cicalese2026language}. Requiring strict SQL parameterization,
+path confinement, JSON deserialization, or cryptographic randomness inside a
+security-sensitive operation is beneficial \emph{only within that target scope};
+issuing the exact same security requirement as a flat, module-wide directive
+frequently induces LLMs to propagate input rejection, escaping, payload hashing,
+or non-deterministic randomness into sibling helper or formatting operations that
+must preserve raw values or deterministic seeds. Moreover, coarse AST security
+analyzers that scan entire modules indiscriminately conflate safe target
+hardening with legitimate non-target sibling logic. Effective prompt
+representation must bind normative constraints cleanly to target operations,
+\texttt{part\_of} object ownership chains, and execution guards while
+degrading unanchorable background clauses locally rather than discarding valid
+operation scope.
 
-The second challenge is \textbf{confounded structural attributes under limited
-target budgets}. Even when prompt semantics are precisely bound, observing
-higher security in natural prompts that contain a requirement does not identify
-the effect of explicitly editing that requirement~\cite{ji2025causality,velasco2026smells}.
-Furthermore, target randomized budgets for any single atomic policy are small,
-while prompt-derived structural attributes extracted from task graphs are
-highly collinear and include latent-confounded proxy chains. Conditioning
-directly on naive correlations or undirected adjacency risks overfitting noisy
-source attributes or suffering negative transfer when downstream and upstream
-mechanisms shift across populations. Causal structure discovery must
-distinguish genuine context-anchored causal roles from latent proxies while
-retaining strict finite-sample unbiasedness under target randomization.
+The second challenge is \textbf{environment and latent confounding in
+observational prompt signals}. Observing that repository prompts containing
+detailed docstrings, type signatures, or file metadata correlate positively with
+secure completions does not imply that inserting those artifacts will harden an
+unsecured baseline~\cite{ji2025causality,velasco2026smells}. Environment shift
+($C_{\mathrm{env}}$) across benchmarks and unobserved task difficulty ($U$)
+induce strong spurious associations between benign style predicates and
+post-generation security, whereas unscoped intervention indicators induce
+negative functional side effects through shared objects. Causal discovery must
+therefore exploit multi-environment exogenous contexts and targeted
+intervention probes while orienting observed post-generation outcomes as strict
+temporal sinks---separating genuine causal security drivers from confounded
+proxies and automatically abstaining when no causal mechanism is supported.
 
-We introduce \model, a two-stage framework for task-grounded requirement
-representation and causal prompt guidance. In \textbf{Stage~I (Task-Grounded
-Graph Representation)}, \prompttsg binds normative requirements, operations,
-data-object ownership chains, and logical conditions to character-verified
-evidence spans, decouples semantic representation from deterministic code
-splicing, and extracts pre-assignment relational attributes $Z=q(G_P,r)$. In
-\textbf{Stage~II (Context-Anchored Directional JCI and Cross-Fitted Effect
-Learning)}, \model uses Joint Causal Inference~\cite{mooij2020jci} with
-exogenous preparation contexts $C$ to discover a Partial Ancestral Graph (PAG)
-over $(C,Z)$, decomposes attributes into canonical directional roles
-$(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm other})$ to guide role-grouped
-finite shrinkage with an unweighted fallback, and estimates target average
-intervention effects via task-unit $K$-fold cross-fitted randomized residual
-scoring paired with scoped evidence reporting.
-
-Our methodological contributions are twofold:
+We present \model, a two-stage framework linking Task-Grounded Semantic Graphs
+(\prompttsg) with Joint Causal Inference (JCI)~\cite{mooij2020jci} mechanism
+discovery and within-task paired counterfactual intention-to-treat (ITT)
+evaluation:
 \begin{enumerate}
-  \item \textbf{Task-Grounded Graph Representation (\prompttsg).} We formalize
-  scoped semantic graphs that resolve multi-operation object participation,
-  preserve local \texttt{unresolved} boundaries, decouple prompt semantics from
-  code-edit syntax, and project graph-topological attributes cleanly into
-  pre-assignment statistical covariates.
-  \item \textbf{Context-Anchored Directional JCI and Cross-Fitted Effect
-  Learning.} We introduce a directional PAG role-grouped shrinkage estimator
-  that separates context entry targets ($V_{\rm root}$), upstream precursors
-  ($V_{\rm up}$), confluence terminals ($V_{\rm term}$), and latent-confounded
-  leaves ($V_{\rm other}$), coupled with task-unit $K$-fold cross-fitting that
-  preserves exact finite-sample unbiasedness while mitigating negative transfer
-  across both downstream and upstream regimes.
+  \item \textbf{Task-Grounded Scoped Representation and Intervention (\prompttsg).}
+  In Stage~I, we formalize evidence-grounded semantic graphs $G_P$ with tolerant
+  span recovery (\texttt{unresolved} local degradation instead of global
+  rejection), extract an eight-predicate orthogonal structural mechanism vector
+  $Z = q(G_P,r)$ audited for extraction stability prior to discovery, render
+  operation-scoped prompt interventions $\operatorname{Do}_{\mathrm{TSG}}(G_P,
+  \mathcal{M})$ that protect sibling contracts, and decouple semantic scoping
+  from deterministic AST symbol splicing and target-operation-scoped AST
+  security evaluation.
+  \item \textbf{Temporal-Sink JCI Mechanism Discovery and Paired Counterfactual
+  Evaluation.} In Stage~II, under strict split isolation between Discovery
+  ($D_{\mathrm{disc}}$) and Held-Out Evaluation ($D_{\mathrm{eval}}$,
+  $D_{\mathrm{disc}} \cap D_{\mathrm{eval}} = \emptyset$), \model discovers a
+  JCI-12 Partial Ancestral Graph (PAG)~\cite{spirtes1995fci,zhang2008ancestral}
+  over exogenous environment/intervention contexts $C=(C_{\mathrm{env}},I)$,
+  structural mechanisms $Z$, and post-generation temporal outcome sinks
+  $(Y_{\mathrm{sec}}, Y_{\mathrm{func}})$, filtering out environment-confounded
+  and latent-confounded proxies as well as unscoped scope-bleed hazards. On
+  $D_{\mathrm{eval}}$, matched four-arm within-task paired counterfactuals
+  (\texttt{baseline}, \texttt{corr\_tsg}, \texttt{jci\_flat}, \texttt{jci\_tsg})
+  cancel baseline task difficulty identically while keeping code validity,
+  Oracle evaluability, \texttt{unknown} rates, functionality, and joint success
+  distinct across the full ITT denominator.
 \end{enumerate}
 
-The evaluation design in Section~\ref{sec:evaluation} isolates each
-contribution across three research questions: \textbf{RQ1} measures the
-representation and binding gains of \prompttsg over \textsc{Raw} and
-\textsc{Flat} baselines; \textbf{RQ2} evaluates effect-estimation variance
-reduction of directional cross-fitted JCI against unstructured learners and
-undirected-skeleton ablations; and \textbf{RQ3} assesses end-to-end positive
-security-hardening yield while keeping adverse warnings, functionality, and
-Oracle coverage distinct.
+Section~\ref{sec:evaluation} tests both contributions and their combined yield
+across three research questions: \textbf{RQ1} quantifies \prompttsg{}'s protection
+against multi-operation functional scope bleed versus unscoped flat causal
+prompts; \textbf{RQ2} measures JCI causal deconfounding, spurious negative-control
+abstention, and paired counterfactual precision across 48 multi-regime
+validation cells and live LLM generations; and \textbf{RQ3} decomposes live
+32B model endpoints across six CWE families alongside our prospective
+confirmatory protocol.

@@ -174,7 +174,9 @@ def render_prompt_intervention(
             op_local_id = reverse_local.get(op.node_id, op.semantic_id)
             op_desc = _node_label(op.node_id, nodes, reverse_local, task_prompt)
             contract_text = "; ".join(contract_snippets) if contract_snippets else "exact input/output formatting and behavior"
-            sibling_descriptions.append(f"- Sibling operation {op_desc}: preserve unchanged ({contract_text}).")
+            sibling_descriptions.append(
+                f"- Sibling operation {op_desc}: implement its base task specification without applying the above security restriction ({contract_text})."
+            )
             protected_siblings.append(
                 {
                     "operation_local_id": op_local_id,
@@ -193,7 +195,7 @@ def render_prompt_intervention(
     if sibling_descriptions:
         sections.extend(
             [
-                "Preserve all sibling operation(s) strictly unchanged (do NOT alter, escape, sanitize, block, or reformat their inputs or outputs):",
+                "Keep all sibling operation(s) outside this security restriction (implement their base task contracts as specified; do NOT propagate target-only sanitization, escaping, allowlisting, or API substitutions into them):",
                 *sibling_descriptions,
             ]
         )

@@ -54,10 +54,10 @@ ARMS = ("baseline", "corr_tsg", "jci_flat", "jci_tsg")
 
 DEFAULT_GENERATION_SYSTEM_PROMPT = (
     "You are an exact Python software engineer. The user JSON contains `prompt`, "
-    "`target_symbol`, and optional `scaffold_code`. Return ONLY one fenced ```python ... ``` "
-    "code block implementing the requested function `target_symbol` (if non-null) or the complete "
-    "Python module (if `target_symbol` is null). Preserve all sibling operation signatures and formatting "
-    "contracts exactly as specified. Do not output explanations, prose, tests, or diffs."
+    "`target_symbol`, and optional `scaffold_code`. Starting from `scaffold_code` when "
+    "provided, return ONLY one fenced ```python ... ``` code block implementing the "
+    "requested function `target_symbol` (if non-null) or the complete Python module "
+    "(if `target_symbol` is null). Do not output explanations, prose, tests, or diffs."
 )
 
 SOURCE_FILES = (
@@ -202,7 +202,12 @@ def _measure_single_arm(
         return measurement, detail
 
     spliced_code = str(splice["spliced_code"])
-    sec = evaluate_security_profile(spliced_code, task["oracle_profile_id"])
+    target_fn = (task.get("target") or {}).get("operation_local_id") or task.get("target_symbol")
+    sec = evaluate_security_profile(
+        spliced_code,
+        task["oracle_profile_id"],
+        target_function=target_fn,
+    )
     ut = evaluate_python_unit_tests(
         spliced_code,
         task["unit_test_script"],

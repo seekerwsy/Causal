@@ -1,244 +1,161 @@
 \section{Method}
 \label{sec:method}
 
-Figure~\ref{fig:method-overview} summarizes our two-stage \model pipeline, and
-Figure~\ref{fig:method-example} illustrates a scoped requirement intervention
-on a multi-operation upload-and-storage task.
+Figure~\ref{fig:method-overview} summarizes the two-stage \model pipeline, and
+Figure~\ref{fig:method-example} illustrates scoped binding on a multi-operation
+shared-object task. Stage~I encodes source-grounded operation scope and renders
+contract-preserving interventions, while Stage~II learns causal mechanisms with
+temporal outcome sinks on $D_{\mathrm{disc}}$ and confirms policy effects via
+matched within-task paired counterfactuals on disjoint $D_{\mathrm{eval}}$.
 
-\subsection{Stage I: Task-Grounded Graph Representation}
+\subsection{Stage I: Tolerant Prompt TSG, Orthogonal Mechanisms, and Scoped Realization}
 \label{sec:method-tsg}
 
-\subsubsection{Source-Grounded Typed Representation}
-For the complete model-visible task input $P$, including system directives,
-programming instructions, and supplied API or source context, define the
-\prompttsg:
+\subsubsection{Source-Grounded Graph with Tolerant Span Degradation}
+Given model-visible task text $P$ (instructions, API descriptions, and optional
+legacy scaffold context), define the Task-Grounded Semantic Graph (\prompttsg)
 \begin{equation}
   G_P = (V, E, \tau_V, \alpha, \epsilon),
-  \qquad E \subseteq V \times \mathcal{R} \times V.
+  \qquad E \subseteq V \times \mathcal{R} \times V,
   \label{eq:source-graph}
 \end{equation}
-Here $V$ partitions into typed nodes ($\tau_V$) representing the task root
-(\texttt{task}), operations (\texttt{task\_operation}), data objects and
-nested components (\texttt{data\_object}), logical guards
-(\texttt{condition}), and requirement propositions ($V_{\rm prop}$);
-$\mathcal{R}$ is the typed semantic relation vocabulary; $\alpha$ records
-concept identities, normative versus descriptive force, logical composition,
-and uncertainty; and $\epsilon$ anchors each source-grounded node to verified
-character spans in $P$~\cite{banarescu2013amr}. Typed edges bind semantic
-participants—for example, \texttt{used\_by} and \texttt{produces} link data
-objects to operations, \texttt{part\_of} traces component ownership hierarchies
-across nested fields, \texttt{about\_operation} binds propositions to governed
-operations, and \texttt{conditions} attaches execution guards.
+where typed nodes $\tau_V$ partition $V$ into task root (\texttt{task}),
+callable operations (\texttt{task\_operation}), data objects and nested fields
+(\texttt{data\_object}), execution guards (\texttt{condition}), and normative
+requirement propositions ($V_{\mathrm{prop}}$)~\cite{banarescu2013amr}. Typed
+semantic edges $\mathcal{R}$ link data objects to consumer operations
+(\texttt{used\_by}), trace nested component ownership hierarchies
+(\texttt{part\_of}, e.g., \texttt{payload\_role} $\xrightarrow{\texttt{part\_of}}$
+\texttt{payload}), attach propositions to governed operations
+(\texttt{about\_operation}), and bind guard conditions (\texttt{conditions}).
+\prompttsg edges record static source scope and never denote causal edges.
 
-Source preparation fixes the vocabulary and span-grounding checks
-independently of generated code. Importantly, \prompttsg preserves local
-\texttt{unresolved} facts explicitly: incomplete or ambiguous auxiliary facts
-remain flagged in unresolved sets without invalidating verified local
-bindings elsewhere in $G_P$. \prompttsg edges encode task-local semantic scope
-and never denote causal edges.
+To avoid brittle parser failures on natural prompts, compilation matches
+evidence spans deterministically first by exact substring lookup and then, when
+tolerant recovery is enabled, by whitespace-normalized and stripped-backtick
+alignment, rewriting anchored spans to exact character coordinates of $P$.
+Any fact or proposition whose evidence cannot be anchored degrades locally into
+dedicated \texttt{unresolved\_semantics} and \texttt{unresolved\_relations} sets
+rather than invalidating verified operation bindings elsewhere in $G_P$.
 
-\subsubsection{Requirement Binding, Operation Queries, and Code Realization}
-For a proposition $r \in V_{\rm prop}$, its complete binding readout is
+\subsubsection{Orthogonal Structural Mechanism Vector and Stability Gate}
+For proposition $r \in V_{\mathrm{prop}}$ and governed operation $o$, querying
+$G_P$ traverses \texttt{about\_operation} and \texttt{part\_of} chains to
+extract an eight-predicate orthogonal binary vector
 \begin{equation}
-  B_G(r) = \bigl(\psi_r, \mathcal{O}_r, \mathcal{D}_r,
-                 \mathcal{C}_r, \mathcal{S}_r, \epsilon_r\bigr),
-  \label{eq:requirement-binding}
-\end{equation}
-retaining the full logical expression $\psi_r$ (negation, disjunctions
-$c \Rightarrow (q_1 \lor q_2)$, quantifiers), governed operations
-$\mathcal{O}_r$, subject objects $\mathcal{D}_r$, owned conditions
-$\mathcal{C}_r$, scope $\mathcal{S}_r$, and character-verified spans
-$\epsilon_r$. Querying an operation $o$ retrieves its governed propositions:
-\begin{equation}
-  \mathcal{I}_G(o) =
-  \left\{(r, B_G(r)) \;\middle|\;
-  (r, \texttt{about\_operation}, o) \in E\right\},
-  \label{eq:operation-query}
-\end{equation}
-tracing \texttt{part\_of} ownership chains to actual operation participants
-without leaking bindings across distinct operations that merely share an
-object name. Propositions lacking an explicit operation attachment remain
-explicitly segregated in
-\begin{equation}
-  \mathcal{U}_G = \left\{r \in V_{\rm prop} \;\middle|\;
-    \nexists o : (r, \texttt{about\_operation}, o) \in E\right\},
-  \label{eq:unbound-propositions}
-\end{equation}
-preserving background obligations without fabricating global scope.
-
-To prevent output-syntax failures from masking semantic binding effects, \model
-decouples \emph{input semantic representation} from \emph{target-unit code
-realization}: $G_P$ governs requirement scoping and prompt construction, while
-candidate edits are synthesized at typed syntactic unit boundaries and spliced
-deterministically into the source repository for downstream measurement.
-
-\subsubsection{Intervention Construction and Structural Attribute Bridge}
-An atomic \emph{requirement intervention} fixes one complete requirement,
-governed operations and objects, execution guards, reference baseline, and
-non-target obligations to preserve. Requirement Introduction ($\mathcal{T}_r^+$)
-explicitly states an applicable requirement resolved as unexpressed in $P$;
-Requirement Withdrawal ($\mathcal{T}_r^-$) removes an expressed requirement
-without disturbing sibling obligations; and explicit policy restatement compares
-baseline source context against scoped restatement of the target rule.
-
-To connect Stage~I representation to Stage~II causal learning, deterministic
-pre-assignment queries extract a structured covariate vector from $G_P$:
-\begin{equation}
-  Z = q(G_P, r), \qquad Z_j \in \mathcal{D}_j \cup \{\texttt{unresolved}\}.
+  Z = q(G_P, r) \in \{0,1\}^8,
   \label{eq:attribute-query}
 \end{equation}
-Specifically, $q(G_P, r)$ extracts topological features inaccessible to flat
-checklists—including multi-operation count, shared-object participation across
-distinct operations, maximum \texttt{part\_of} component path depth,
-conditional or composite guard presence, unbound proposition count
-$|\mathcal{U}_G|$, local binding completeness, and local unresolved counts.
-Exogenous preparation contexts $C$ and pre-assignment attributes $Z$ are
-measured strictly prior to randomized intervention assignment $A$.
+encoding non-redundant topological properties: (1)~untrusted input reaching a
+sink, (2)~shared-object participation across multiple operations, (3)~nested
+\texttt{part\_of} component ownership chains, (4)~missing containment or
+allowlist guards, (5)~sibling format or deterministic return contracts,
+(6)~unscoped global restrictions, (7)~ambiguous or locally unresolved scope, and
+(8)~explicit exception or fallback branches. Prior to Stage~II, binary
+extraction stability is audited outcome-blindly against calibration
+perturbations using a strict gate ($\text{median flip rate} \le 0.05$).
+
+\subsubsection{Scope-Bounded Interventions, AST Splicing, and Target-Scoped Oracles}
+For any selected mechanism set $\mathcal{M}$, \texttt{render\_prompt\_intervention}
+constructs matched prompt realizations sharing base prompt $P$:
+\begin{itemize}
+  \item \textbf{\texttt{baseline}:} unchanged source prompt $P$.
+  \item \textbf{\texttt{flat} ($\operatorname{Do}_{\mathrm{flat}}$):} appends
+  each mechanism rule globally (``\emph{Apply uniformly across the entire module}'')
+  without resolving governed operations, ownership chains, or sibling exemptions.
+  \item \textbf{\texttt{tsg\_scoped} ($\operatorname{Do}_{\mathrm{TSG}}$):}
+  resolves each mechanism $m \in \mathcal{M}$ through $G_P$ to its target
+  \texttt{task\_operation} and \texttt{part\_of} ownership path while explicitly
+  enumerating all sibling operations and instructing the generator to implement
+  their base task contracts without propagating the target-only security
+  restriction.
+\end{itemize}
+Generated responses are extracted deterministically at single-fenced Python code
+boundaries (rejecting diff arrays or multi-block ambiguity) and spliced by AST
+symbol when a target symbol is declared. Crucially, to avoid false positives on
+legitimate sibling behavior (such as seeded deterministic permutation helpers in
+CWE-338 modules), AST static security evaluation restricts sink inspection to
+the declared \texttt{target\_function} plus intra-module helper call and load
+closures, while deterministic functional testing runs the full module inside an
+isolated subprocess (\texttt{python -I}).
 
 \input{figures/method-overview}
 \input{figures/method-example}
 
-\subsection{Stage II: Directional JCI Discovery and Cross-Fitted Effect Learning}
+\subsection{Stage II: Temporal-Sink JCI Discovery and Paired Counterfactual Evaluation}
 \label{sec:method-causal}
 
-\subsubsection{Target ITT Estimand and Outcome Measurement}
-For a fixed generator, target task population $T$, and intervention $h$, let
-$A_i \in \{0,1\}$ denote equal-probability binary randomization between target
-($A_i=1$) and reference ($A_i=0$) realizations on independent, deduplicated task
-units. The target average treatment effect is
-\begin{equation}
-  \tau_h = \mathbb{E}_T[Y_h(1) - Y_h(0)],
-  \label{eq:target-effect}
-\end{equation}
-where primary safety yield $Y = Y_C Y_E\,\mathbb{I}\{\text{Oracle label is
-secure}\}$ combines valid code ($Y_C$), arm-blind Oracle evaluability ($Y_E$),
-and secure classification~\cite{peng2025cweval,dai2026rethinking}. Generated
-code supplies measured endpoints only; it is never a PAG node or post-treatment
-filter, and every committed assignment stays in its ITT denominator alongside
-separate functionality and \texttt{unknown} measurements.
+\subsubsection{Discovery Split PAG with Exogenous Contexts and Temporal Sinks}
+On the disjoint Discovery split $D_{\mathrm{disc}} = D_{\mathrm{obs}} \cup
+D_{\mathrm{probe}}$, observations record exogenous preparation environments and
+randomized probe interventions
+$C = (C_{\mathrm{env}}, I_1,\dots,I_K,I_{\mathrm{flat}})$ alongside structural
+mechanisms $Z$ and independently measured post-generation outcome sinks
+$S = (Y_{\mathrm{sec}}, Y_{\mathrm{func}})$~\cite{mooij2020jci,peng2025cweval,dai2026rethinking}.
+Raw generated code ASTs never enter any causal graph; only outcome indicators
+enter strictly on $D_{\mathrm{disc}}$ as post-generation temporal sinks.
 
-\subsubsection{Context-Anchored JCI-12 PAG Discovery and Role Decomposition}
-Given outcome-free observations of $(C, Z)$ across exogenous preparation or
-source contexts $C$, Stage~II applies Joint Causal Inference~\cite{mooij2020jci}
-under JCI-12 assumptions (context variables $C$ are mutually independent
-exogenous roots with zero causal ancestors in $Z$). Majority-rule anytime FCI
-coupled with Zhang's orientation rules (R1--R4 and
-R8--R10)~\cite{spirtes1995fci,zhang2008ancestral} estimates a Partial Ancestral
-Graph $\widehat{H}$ over $(C, Z)$ allowing arbitrary latent confounding.
+Under JCI-12 assumptions paired with temporal sink orientation, anytime
+majority-rule FCI~\cite{spirtes1995fci,zhang2008ancestral} with Zhang's
+orientation rules enforces three structural constraints inside
+\texttt{discover\_jci\_pag}: (i)~exogenous roots $c \in C$ emit outgoing tails
+($c \to u$, zero arrowheads into $C$); (ii)~post-generation sinks $s \in S$
+accept only incoming arrowheads ($u \ast\!\!-\!\!\!> s$, forbidding
+sink-to-pre-generation tails $\widehat{H}[u,s]=3$); and (iii)~conditioning sets
+separating any two pre-generation variables never include post-generation
+collider sinks $s \in S$. A structural validity guard rejects any $\widehat{H}$
+violating acyclicity of its definite directed subgraph or context/sink
+orientation invariants.
 
-Before consuming directional information, a structural validity guard checks
-that the definite directed subgraph $G_{\rm dir}$ ($\widehat{H}[u,v]=2 \land
-\widehat{H}[v,u]=3$) is acyclic, contains no arrowhead-ancestry conflicts, and
-exhibits zero arrowheads into $C$. Whenever valid, let
-$\mathcal{R} = \operatorname{Desc}_{G_{\rm dir}}(C) \setminus C$ denote the
-context-reachable attribute cone. We partition the attribute coordinates of $Z$
-into four canonical JCI structural roles:
-\begin{equation}
-\begin{aligned}
-  V_{\rm root} &= \operatorname{Ch}_{G_{\rm dir}}(C) \setminus C, &
-  V_{\rm term} &= \bigl\{v \in \mathcal{R} :
-    \operatorname{Succ}_{G_{\rm dir}}(v) \cap \mathcal{R} = \emptyset\bigr\}, \\
-  V_{\rm up}   &= \mathcal{R} \setminus V_{\rm term}, &
-  V_{\rm other} &= Z \setminus \mathcal{R}.
-\end{aligned}
-\label{eq:pag-roles}
-\end{equation}
-Here $V_{\rm root}$ captures immediate context-intervention entry points,
-$V_{\rm term}$ isolates downstream confluence sinks, $V_{\rm up}$ captures
-context-reachable upstream precursors, and $V_{\rm other}$ isolates
-latent-confounded proxy chains or unreached noise attributes blocked by
-collider arrowheads. If $\widehat{H}$ fails the validity guard or has
-insufficient conditional-test support, the decomposition falls back to
-$V_{\rm other} = Z$.
+\subsubsection{Mechanism Classification and Policy Derivation}
+Evaluating both observational associations on $D_{\mathrm{obs}}$ and clean
+single-probe shifts alongside PAG adjacency yields an explicit four-way
+classification for each mechanism $Z_m$:
+\begin{itemize}
+  \item \textbf{Causal security driver:} definite directed path
+  $Z_m \to^+ Y_{\mathrm{sec}}$ in $\widehat{H}$ (e.g., via $I_m \to Z_m \to
+  Y_{\mathrm{sec}}$ when $I_m \perp Y_{\mathrm{sec}} \mid Z_m$) and positive
+  interventional shift $\Delta_{\mathrm{sec}}(I_m) > 0$.
+  \item \textbf{Latent-confounded proxy:} bidirected collider edge
+  $Z_k \leftrightarrow Y_{\mathrm{sec}}$ arising from $I_k \to Z_k \leftarrow U
+  \to Y_{\mathrm{sec}}$ with zero interventional probe effect ($I_k \perp Y_{\mathrm{sec}}$).
+  \item \textbf{Environment-confounded proxy:} observational association on
+  $D_{\mathrm{obs}}$ that vanishes given $C_{\mathrm{env}}$ with no directed path
+  to $Y_{\mathrm{sec}}$.
+  \item \textbf{Scope-bleed hazard:} directed negative path or significant
+  functional drop from $I_{\mathrm{flat}}$ or shared-object bleed $Z_{\mathrm{bleed}}$
+  onto $Y_{\mathrm{func}}$.
+\end{itemize}
+\model's causal policy $\mathcal{M}_{\mathrm{JCI}}$ retains only confirmed
+causal security drivers---abstaining completely (empty mechanism set) when all
+candidates are proxies or inactive---and recommends \texttt{tsg\_scoped}
+rendering whenever multi-operation scope bleed is detected. By contrast, a
+correlation baseline $\mathcal{M}_{\mathrm{corr}}$ selects top observational
+associates on $D_{\mathrm{obs}}$ using an equal mechanism budget.
 
-\subsubsection{Role-Grouped Shrinkage and Task-Unit $K$-Fold Cross-Fitting}
-The PAG is learned from outcome-free observations, so nothing guarantees that
-any single role carries the prognostic signal for $Y$; the roles are a small,
-structure-derived \emph{hypothesis menu} rather than an identified predictor
-set. Stage~II therefore avoids locking into one subset. On source data $D_S$
-(with covariates $X=(C,Z)$), stratified 3-fold
-cross-validation selects among weighted L2-penalized logistic predictors
-spanning the uniform baseline ($w \equiv 1$, $\gamma = 0$) and role-grouped
-profiles $V_{\rm active} \in \{V_{\rm term}, V_{\rm root}, V_{\rm up},
-V_{\rm term} \cup V_{\rm up}\}$ across finite strengths $\gamma > 0$:
+\subsubsection{Within-Task Paired Counterfactual ITT and Independent Verification}
+On the strictly held-out split $D_{\mathrm{eval}}$ ($D_{\mathrm{disc}} \cap
+D_{\mathrm{eval}} = \emptyset$), every task $i \in D_{\mathrm{eval}}$ is
+evaluated across all four arms (\texttt{baseline}, \texttt{corr\_tsg},
+\texttt{jci\_flat}, \texttt{jci\_tsg}) over full ITT denominators. Because all
+arms share the same task $i$, the paired estimator $\hat{\Delta}^{(a,b)} =
+\frac{1}{n}\sum_{i=1}^n d_i^{(a,b)}$ eliminates shared baseline variance:
 \begin{equation}
-  (\widehat{\beta}_{0},\widehat{\beta}) =
-  \arg\min_{\beta_0,\beta}\;
-  -\ell_{D_S}(\beta_0,\beta)
-  + \frac{1}{2C_{\rm reg}}\sum_{j} w_j\beta_j^2,
-  \qquad
-  w_j = \begin{cases}
-    1, & j \in C \cup V_{\rm active},\\
-    1+\gamma, & \text{otherwise.}
-  \end{cases}
-  \label{eq:role-shrinkage}
+  \operatorname{SE}_{\mathrm{paired}}^2(\hat{\Delta})
+  = \frac{\operatorname{Var}(Y(a)) + \operatorname{Var}(Y(b))
+    - 2\operatorname{Cov}(Y(a), Y(b))}{n}
+  < \operatorname{SE}_{\mathrm{unpaired}}^2,
+  \label{eq:paired-se}
 \end{equation}
-Let $\widehat{m}_{\rm JCI}(X)$ denote the selected source predictor and
-$\widehat{m}_{\rm full}(X)$ the unweighted full-feature source predictor.
-
-To utilize scarce target outcomes efficiently without incurring calibration
-noise or winner's-curse leakage, target units $D_T$ are partitioned
-deterministically by task-unit index into $K$ disjoint folds $I_0,\dots,I_{K-1}$
-(never stratified on $A$ or $Y$~\cite{egami2022texts}). On each complement
-$D_T^{(-k)} = D_T \setminus I_k$, inner $(K-1)$-fold cross-validation selects
-both the candidate base predictor $\widehat{m}_k \in \{\widehat{m}_{\rm JCI},
-\widehat{m}_{\rm full}\}$ (providing automatic unweighted fallback under severe
-target mechanism shifts) and the target Ridge deviation penalty $\eta > 0$:
-\begin{equation}
-  \widehat{\delta}_k = \arg\min_{\delta}
-  \sum_{i \in D_T^{(-k)}} \bigl[Y_i - \widehat{m}_k(X_i) - \tilde{X}_i^\top\delta\bigr]^2
-  + \eta\|\delta\|_2^2,
-  \qquad
-  \widehat{g}_T^{(-k)}(x) = \operatorname{clip}_{[0,1]}\!\bigl(
-    \widehat{m}_k(x) + \tilde{x}^\top\widehat{\delta}_k\bigr).
-  \label{eq:crossfit-target}
-\end{equation}
-Crucially, $A_i$ never enters $\widehat{g}_T^{(-k)}$. For each unit $i \in I_k$,
-we compute the out-of-fold randomized residual score:
-\begin{equation}
-  R_i = 2(2A_i - 1)\bigl[Y_i - \widehat{g}_T^{(-k(i))}(X_i)\bigr],
-  \qquad
-  \widehat{\tau}_h = \frac{1}{n_T}\sum_{i=1}^{n_T} R_i.
-  \label{eq:randomized-score}
-\end{equation}
-Assignment is either independent Bernoulli$(1/2)$ or completely randomized
-\emph{within} each fold, with the fold partition fixed before assignment, so
-that $A_i$ for $i \in I_k$ is independent of every quantity entering
-$\widehat{g}_T^{(-k)}$. (Completely randomizing across all $n_T$ units without
-nesting induces an $O(1/n_T)$ dependence between $A_i$ and out-of-fold outcomes
-and voids exactness.) Under this design condition, the score is exactly
-unbiased and its precision is governed by out-of-fold squared error:
-\begin{equation}
-  \mathbb{E}_T[R_i \mid X_i, \widehat{g}_T^{(-k(i))}]
-    = \mathbb{E}_T[Y_i(1) - Y_i(0) \mid X_i],
-  \qquad
-  \operatorname{Var}_T(R_i \mid \widehat{g}_T^{(-k)})
-    = 4\mathbb{E}_T\!\left[(Y - \widehat{g}_T^{(-k)}(X))^2 \mid \widehat{g}_T^{(-k)}\right] - \tau_h^2.
-  \label{eq:score-identity}
-\end{equation}
-Every source-assisted comparator uses the exact same cross-fitting and
-randomization estimator. Consequently, \emph{validity and efficiency separate}:
-unbiasedness and interval validity of $\widehat{\tau}_h$ hold for any PAG,
-including a wrong one, whereas the PAG role decomposition can only change the
-variance term in Eq.~\eqref{eq:score-identity}. A misleading structure can
-therefore cost precision but cannot bias the effect estimate, and the
-comparison isolates the efficiency contribution of the directional roles.
-
-\subsubsection{Candidate Confirmation and Scoped Evidence Output}
-\label{sec:method-guidance}
-Candidates ranked by $|\widehat{\tau}_h|$ are frozen before accessing held-out
-confirmation outcomes. Against a prespecified practical margin $m_h > 0$, a
-simultaneous confirmation interval entirely above $m_h$ establishes a
-positive-meaningful hardening finding, whereas one entirely below $-m_h$
-establishes an adverse-effect warning; intervals inside $[-m_h,m_h]$ are
-practically null, and remaining evaluable cases are inconclusive.
-
-Each evaluated policy produces a contrast-grounded~\cite{miller2019explanation}
-\emph{Explanation + Suggested Action} record pairing Stage~I bindings
-(requirement, governed operation, objects, conditions, and preserved
-obligations) with Stage~II evidence (tested realizations, generator,
-target population, effect interval, functionality, and Oracle coverage).
-Unconfirmed candidates remain labeled as options to test, confirmed adverse
-effects issue endpoint-specific warnings, and adoption recommendations are
-emitted only when both security hardening and declared task-preservation
-criteria are satisfied.
+achieving positive pairing variance reduction whenever baseline task outcomes
+correlate across counterfactual arms~\cite{egami2022texts}. We report both
+unadjusted 95\% Student-$t$ intervals and Bonferroni-simultaneous intervals
+across the three primary joint contrasts (\texttt{jci\_tsg} versus
+\texttt{baseline}, \texttt{corr\_tsg}, and \texttt{jci\_flat}) against
+practical margin $m_h = 0.05$, exact two-sided binomial sign-test $p$-values,
+and endpoint-separated rates ($Y_C, Y_E, \texttt{unknown}, Y_{\mathrm{sec}},
+Y_{\mathrm{func}}, Y_{\mathrm{joint}}$). Every saved bundle is audited by an
+independent \texttt{study verify} module that replays PRNG streams, permutation CI
+queries, PAG construction, mechanism classifications, \prompttsg compilations,
+AST splices, AST security profiles, isolated unit tests, and paired statistics
+without sharing production discovery or experiment code.
