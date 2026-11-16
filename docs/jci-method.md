@@ -1,6 +1,6 @@
 # Active Method Specification: Task-Grounded Prompt TSG and Directional Cross-Fitted JCI
 
-This document is the single normative specification of the active two-stage method on `codex/jci-framework`. Chronological development records and pre-consolidation run logs are archived in [the historical development ledger](experiments/historical-development-ledger-202610-202611.md).
+This document is the single normative specification of the active two-stage method on `main`. Chronological development records and pre-consolidation run logs are archived in [the historical development ledger](experiments/historical-development-ledger-202610-202611.md).
 
 ---
 
