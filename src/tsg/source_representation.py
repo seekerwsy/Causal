@@ -35,6 +35,17 @@ TSG_BINARY_ATTRIBUTE_NAMES: tuple[str, ...] = (
     "has_local_unresolved",
 )
 
+TSG_ORTHOGONAL_MECHANISM_NAMES: tuple[str, ...] = (
+    "untrusted_input_to_sink",
+    "shared_object_multi_op",
+    "component_ownership_chain",
+    "missing_containment_or_allowlist_guard",
+    "sibling_format_or_return_contract",
+    "unscoped_global_restriction",
+    "ambiguous_or_unresolved_scope",
+    "explicit_exception_or_fallback_branch",
+)
+
 
 def check_source_representation(source,record,method,*,character_limit=40000,record_limit=64,relation_limit=128):
     assert record['task_unit_id'] == source['task_unit_id']
@@ -282,6 +293,62 @@ def extract_tsg_structural_attributes(
         local_unresolved_count >= 1,
     )
 
+    def _op_has_safety(op_id: str) -> bool:
+        return any(
+            s in nodes and nodes[s].node_type == "safety_requirement" and k in {"about_operation", "constrains"}
+            for s, k, t in links if t == op_id
+        )
+
+    def _op_has_guard(op_id: str) -> bool:
+        if _op_has_safety(op_id):
+            return True
+        op_props = {
+            s for s, k, t in links
+            if k in {"about_operation", "constrains"} and t == op_id and s in nodes and nodes[s].node_type in REQUIREMENT_TYPES
+        }
+        return any(
+            (s in nodes and nodes[s].node_type == "condition" and k == "conditions" and t in (op_props | {op_id}))
+            or (s in op_props and k == "under_condition" and t in nodes and nodes[t].node_type == "condition")
+            for s, k, t in links
+        )
+
+    if operation_node_id is not None:
+        sibling_ops = set(operation_ids) - {operation_node_id}
+    elif requirement_node_id is not None:
+        sibling_ops = set(operation_ids) - scope_ops
+    else:
+        primary_ops = {op for op in operation_ids if _op_has_safety(op)}
+        if not primary_ops and len(operation_ids) >= 2:
+            primary_ops = {operation_ids[0]}
+        sibling_ops = set(operation_ids) - primary_ops
+
+    op_set = set(operation_ids)
+    orthogonal_predicates = (
+        bool(active_ops) and any(
+            any((obj, "used_by", op) in links for obj in comp_dag.nodes) and not _op_has_safety(op)
+            for op in active_ops
+        ),
+        multi_operation_shared_object,
+        max_component_path_depth >= 1,
+        bool(active_ops) and any(not _op_has_guard(op) for op in active_ops),
+        any(
+            s in nodes and nodes[s].node_type in {"task_requirement", "constraint", "presentation_control"}
+            and k in {"about_operation", "constrains"} and t in sibling_ops
+            for s, k, t in links
+        ),
+        any(
+            dict(nodes[pid].attributes).get("normative_force") is True
+            and not any(s == pid and k in {"about_operation", "constrains"} and t in op_set for s, k, t in links)
+            for pid in proposition_ids
+        ),
+        local_unresolved_count >= 1,
+        any(
+            (s in nodes and nodes[s].node_type == "condition" and k in {"conditions", "context_for"})
+            or k == "under_condition"
+            for s, k, _ in links
+        ),
+    )
+
     return {
         "tsg_id": graph.tsg_id,
         "task_id": graph.task_id,
@@ -311,6 +378,8 @@ def extract_tsg_structural_attributes(
         ],
         "binary_attribute_names": list(TSG_BINARY_ATTRIBUTE_NAMES),
         "binary_structural_vector": [int(bool(value)) for value in binary_predicates],
+        "orthogonal_mechanism_names": list(TSG_ORTHOGONAL_MECHANISM_NAMES),
+        "orthogonal_mechanism_vector": [int(bool(value)) for value in orthogonal_predicates],
     }
 
 

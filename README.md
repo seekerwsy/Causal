@@ -1,17 +1,17 @@
 # Prompt Mechanism Study (`CausalGuide`)
 
-Research codebase for **task-grounded security requirement causal analysis** in LLM code generation, built around two core contributions normatively specified in [docs/jci-method.md](docs/jci-method.md):
+Research codebase for **task-grounded prompt representations and Joint Causal Inference (JCI) mechanism discovery** in LLM code generation, normatively specified in [docs/jci-method.md](docs/jci-method.md):
 
-1. **Task-Grounded Graph Representation (`Prompt TSG`)**: Scoped semantic graphs binding requirements to exact operations, `part_of` object-ownership chains, and logical conditions (`src/tsg/`), extracting pre-assignment relational attributes `Z = q(G_P, r)` with graceful local `unresolved` semantics while decoupling semantic representation from target-unit code splicing.
-2. **Context-Anchored Directional JCI & Cross-Fitted Effect Learning**: Native-Python exogenous-context JCI-12 PAG discovery (`src/discovery/jci_structure.py`), canonical PAG role decomposition `(V_root, V_up, V_term, V_other)` with role-grouped shrinkage and `full_logit` fallback, and task-unit K-fold cross-fitted randomized residual estimation (`src/discovery/prognostic_learning.py`) paired with an independent verifier (`src/verification/prognostic_learning.py`).
+1. **Contribution 1 — Task-Grounded Graph Representation (`Prompt TSG`)**: Scoped semantic graphs binding operations, shared `data_object` ownership paths (`part_of`), logical conditions, and propositions with tolerant span resolution and local `unresolved` semantics (`src/tsg/`); an 8-bit orthogonal structural mechanism vector `TSG_ORTHOGONAL_MECHANISM_NAMES`; operation-scoped prompt intervention rendering (`src/tsg/scoped_intervention.py`, preserving sibling operation contracts against unscoped flat bleed); and deterministic AST symbol splicing (`src/experiment/code_generation.py`).
+2. **Contribution 2 — Joint Causal Mechanism Discovery & Paired Evaluation**: Strictly split-isolated ($D_{\text{disc}} \cap D_{\text{eval}} = \emptyset$) native-Python JCI-12 PAG discovery with post-generation outcome sinks (`src/discovery/jci_structure.py`, `src/discovery/mechanism_discovery.py`) separating true causal security drivers from environment/latent-confounded proxies and unscoped scope-bleed hazards, evaluated via Within-Task Paired Counterfactual ITT (`baseline`, `corr_tsg`, `jci_flat`, `jci_tsg`) with AST security Oracles and isolated Python unit tests (`src/measurement/unit_test_oracle.py`), audited end-to-end by independent verifiers (`src/verification/`).
 
-Formal natural-task protocol activation remains `SPECIFIED_DRAFT` (`formal_claim_allowed=false`). All previously frozen experimental archives under `data/method/`, `results/`, `archive/`, and `docs/experiments/` remain intact and read-only.
+Formal natural-task protocol activation remains `SPECIFIED_DRAFT` (`formal_claim_allowed=false`). Historical frozen archives under `data/method/`, `results/`, `archive/`, and `docs/experiments/` remain intact and read-only.
 
 ---
 
 ## Quickstart & Verification
 
-Requires Python 3.12 (`pip install -e ".[dev]"`). No external R installation is required by default (JCI-12 PAG discovery runs natively in Python; `--rscript PATH` remains optionally supported for R `pcalg 2.7.12`).
+Requires Python 3.12 (`pip install -e ".[dev]"`). No external R installation is required by default (`--rscript PATH` remains optional for R `pcalg 2.7.12`).
 
 ```powershell
 $env:OPENBLAS_NUM_THREADS="1"; $env:OMP_NUM_THREADS="1"
@@ -19,17 +19,15 @@ $env:OPENBLAS_NUM_THREADS="1"; $env:OMP_NUM_THREADS="1"
 # 1. Run default test suite (tests/jci scientific invariants + tests/substrate)
 python -m pytest -q
 
-# 2. Extract Stage I -> Stage II structural attributes from a Prompt TSG fixture
+# 2. Extract Stage I structural and orthogonal mechanism vectors from a Prompt TSG fixture
 python -m prompt_mechanism_study study inspect-tsg src/fixtures/object-participation.json .artifacts/tsg-inspect
 
-# 3. Run the 8-cell (4 scenarios x 2 seeds) directional JCI cross-fitting smoke check
+# 3. Run and verify the 8-cell JCI mechanism discovery & paired counterfactual smoke check
 python -m prompt_mechanism_study study smoke .artifacts/smoke-check --workers 2
-
-# 4. Run the offline natural-task end-to-end smoke check (Stage I 16-predicate bridge -> D1 -> splice -> Oracle -> Stage II)
-python -m prompt_mechanism_study study natural-smoke .artifacts/natural-smoke-check
-
-# 5. Independently reconstruct and verify all RNG streams, CI queries, KKT residuals, and scores
 python -m prompt_mechanism_study study verify .artifacts/smoke-check --workers 2
+
+# 4. Run and verify the offline 12-task (48 evaluations) multi-operation paired natural smoke check
+python -m prompt_mechanism_study study natural-smoke .artifacts/natural-smoke-check
 python -m prompt_mechanism_study study verify .artifacts/natural-smoke-check
 ```
 
@@ -39,13 +37,13 @@ python -m prompt_mechanism_study study verify .artifacts/natural-smoke-check
 
 | Command | Operation |
 | --- | --- |
-| `smoke OUTPUT [--rscript PATH] [--workers N]` | Execute 8-cell smoke run (4 scenarios incl. `misaligned_signal` negative control) using `configs/jci-directional-grouped-smoke.json` |
-| `natural-smoke OUTPUT [--rscript PATH]` | Execute offline natural-task end-to-end smoke check using `configs/jci-natural-task-smoke.json` |
-| `run OUTPUT --plan PLAN [--rscript PATH] [--workers N]` | Execute a declared directional JCI or natural-task (`study_mode: "natural_task"`) study plan |
-| `verify OUTPUT [--workers N]` | Independently reconstruct inputs, TSG/Oracle records, CI queries, PAG roles, fits, and intervals |
-| `inspect-tsg INPUT OUTPUT` | Compile `PromptTSG` source record and emit Stage I -> Stage II structural attributes (7-dim summary + 16 binary predicates) |
+| `smoke OUTPUT [--rscript PATH] [--workers N]` | Run 8-cell JCI mechanism + paired simulation smoke check (`configs/jci-mechanism-smoke.json`) |
+| `natural-smoke OUTPUT [--rscript PATH]` | Run offline 12-task multi-operation natural-task paired check (`configs/jci-natural-task-smoke.json`) |
+| `run OUTPUT --plan PLAN [--rscript PATH] [--workers N]` | Execute a declared `mechanism_simulation` or `natural_task` (`offline_fixture` or `local_vllm`) plan |
+| `verify OUTPUT [--workers N]` | Independently replay inputs, TSG/Oracle/unit-test checks, CI queries, PAGs, fits, and paired intervals |
+| `inspect-tsg INPUT OUTPUT` | Compile `PromptTSG` source record (tolerant mode) and emit orthogonal & structural vectors |
 
-Superseded multi-track prototypes and plans are preserved in [archive/legacy_jci_20261116/](archive/legacy_jci_20261116/) and `configs/archive/legacy_jci_20261116/`. The superseded schema-3 selector pipeline (prioritization, schema-3 randomization and inference, reviewer workflow, frozen-data verifiers) is preserved in [archive/legacy_pipeline_20261116/](archive/legacy_pipeline_20261116/README.md). `src/` keeps only the two contributions and the natural-task substrate: Stage I extraction, fold-nested assignment (D1), generation, and Oracle/functional measurement.
+Live `local_vllm` multi-operation pilot configuration: [configs/jci-local-vllm-pilot.json](configs/jci-local-vllm-pilot.json) paired with `$STUDY_ROOT`-relative runner [scripts/run_local_vllm_pilot.sh](scripts/run_local_vllm_pilot.sh).
 
 ---
 
@@ -53,17 +51,15 @@ Superseded multi-track prototypes and plans are preserved in [archive/legacy_jci
 
 | Artifact / Study | Scope | Key Verified Outcome |
 | --- | --- | --- |
-| [2026-11-16-jci-grouped-crossfit-results.md](docs/experiments/2026-11-16-jci-grouped-crossfit-results.md) | 48 simulation cells (`227,250` CI queries, `VERIFIED`) | `downstream_signal`: **10/10 passed** (`+13.06%` to `+17.57%` $\Delta\text{Var}$); `upstream_control`: **0 harms**, `+2.53%` to `+16.79%` (**7/10 passed**); `target_new_attribute`: `+2.25%` to `+5.33%` (0 harms) |
-| [2026-11-16-negative-control-and-measurement-noise.md](docs/experiments/2026-11-16-negative-control-and-measurement-noise.md) | 2 × 64 formative simulation cells (`VERIFIED`) | `misaligned_signal` negative control: JCI reduces to `full_logit` (0/10 passed, 0 harms); at 10% attribute flips: **0/28 primary passed**, `downstream_gate_passed=false`, 0 harms (Stage I reliability is a precondition) |
-| [2026-11-05-graph-jci-joint-results.md](docs/experiments/2026-11-05-graph-jci-joint-results.md) | Frozen Round 1 (384 simulation cells) + 240 local Qwen unified-diff calls | `JCI_ROUND1_SUCCESS` in `reference` `downstream_signal` (`+12.51%` to `+18.38%`, prior to role-grouped upstream fix); 240/240 local generation format failures (`JOINT_SCIENTIFIC_BOUNDED_UNMET`) |
-| [finalization-20261110-executed](data/method/policy-expression-graph-65536-20261107/finalization-20261110-executed/FINAL_REPORT.md) | 120-assignment `P0/P1` cohort (6-call qualification gate) | 6/6 rejected pre-measurement (`delete_count > 16` or duplicate coordinate under native XGrammar); 114 remaining assignments `NOT_STARTED_BY_PREDECLARED_INTERFACE_GATE` |
+| [2026-11-16-jci-mechanism-paired-validation.md](docs/experiments/2026-11-16-jci-mechanism-paired-validation.md) | 48 simulation cells (`4,538` CI queries, `VERIFIED`) | `jci_tsg` beats `corr_tsg` (`+0.127` to `+0.147` joint, `9/12`–`11/12` sig) & `jci_flat` (`+0.095` to `+0.283` joint); **`0/12`** false positives (`100%` abstention) on `null_spurious_only` vs `12/12` for `corr`; `56.5%`–`82.9%` paired SE variance reduction |
+| [2026-11-16-jci-grouped-crossfit-results.md](docs/experiments/2026-11-16-jci-grouped-crossfit-results.md) | Archived pre-consolidation unpaired baseline (`48` cells, `VERIFIED`) | Preserved read-only reference for legacy directional shrinkage prior to Direction 1 refactoring |
 
 ---
 
 ## Documentation Map
 
-- [docs/jci-method.md](docs/jci-method.md): Normative specification of the active two-stage method.
-- [docs/reviewer-guide.md](docs/reviewer-guide.md): Stage invariants, reproduction instructions, and 10-file core reading order.
-- [tests/README.md](tests/README.md): Scientific invariant test suite documentation.
-- [docs/experiments/historical-development-ledger-202610-202611.md](docs/experiments/historical-development-ledger-202610-202611.md): Consolidated Oct–Nov 2026 development chronology and frozen SHA-256 pointers.
-- [paper/fse2027/](paper/fse2027/README.md): Anonymous ACM TOSEM manuscript draft (`SPECIFIED_DRAFT`).
+- [docs/jci-method.md](docs/jci-method.md): Normative specification of the Direction 1 two-stage method.
+- [docs/reviewer-guide.md](docs/reviewer-guide.md): Stage invariants, reproduction commands, and 10-file core reading order.
+- [tests/README.md](tests/README.md): Scientific invariant and substrate test suite documentation.
+- [docs/experiments/historical-development-ledger-202610-202611.md](docs/experiments/historical-development-ledger-202610-202611.md): Archived Oct–Nov 2026 development chronology and frozen SHA-256 pointers.
+- [paper/fse2027/](paper/fse2027/README.md): Anonymous manuscript draft (`SPECIFIED_DRAFT`; awaiting live natural-task runs).

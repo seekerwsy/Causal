@@ -11,6 +11,7 @@ from prompt_mechanism_study.tsg.prompt_tsg import (
 )
 from prompt_mechanism_study.tsg.source_representation import (
     TSG_BINARY_ATTRIBUTE_NAMES,
+    TSG_ORTHOGONAL_MECHANISM_NAMES,
     evaluate_binary_attribute_reliability,
     extract_tsg_structural_attributes,
 )
@@ -116,6 +117,8 @@ def test_stage1_to_stage2_structural_attributes_and_cli_inspect(tmp_path):
     assert named['multi_operation_task'] == 1 and named['high_operation_fanout'] == 1
     assert named['multi_operation_shared_object'] == 1 and named['deep_component_ownership'] == 1
     assert named['local_binding_complete'] == 1 and named['has_local_unresolved'] == 1
+    assert tuple(attrs['orthogonal_mechanism_names']) == TSG_ORTHOGONAL_MECHANISM_NAMES
+    assert len(attrs['orthogonal_mechanism_vector']) == 8 and set(attrs['orthogonal_mechanism_vector']) <= {0, 1}
 
     out_dir = tmp_path / 'tsg-inspect'
     assert cli_main(['study', 'inspect-tsg', 'src/fixtures/object-participation.json', str(out_dir)]) == 0

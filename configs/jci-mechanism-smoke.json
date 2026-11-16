@@ -1,0 +1,25 @@
+{
+  "study_id": "jci-mechanism-paired-smoke-20261116",
+  "study_mode": "mechanism_simulation",
+  "evidence_role": "NON_CLAIM_MECHANISM_PAIRED_SMOKE",
+  "scenarios": [
+    "confounded_and_scoped",
+    "pure_latent_trap",
+    "multi_op_high_interference",
+    "null_spurious_only"
+  ],
+  "batch_seeds": [
+    2026111601,
+    2026111602
+  ],
+  "repetitions_per_seed": 1,
+  "n_discovery": 420,
+  "n_eval": 100,
+  "ci_draws": 199,
+  "ci_alpha": 0.05,
+  "maximum_skeleton_conditioning_order": 2,
+  "eval_alpha": 0.05,
+  "practical_margin": 0.05,
+  "formal_claim_allowed": false,
+  "new_provider_calls": 0
+}

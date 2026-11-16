@@ -23,7 +23,87 @@ from prompt_mechanism_study.records import canonical_value, content_hash, conten
 _REVIEW_STATUSES = {"development_exposed", "prospective_frozen"}
 
 
-def compile_source_propositions(task, record, *, extractor_id):
+def resolve_evidence_span(
+    prompt: str,
+    quote: str,
+    occurrence: int = 1,
+    *,
+    tolerant: bool = True,
+) -> tuple[int, int] | None:
+    """Resolve an evidence quote to prompt character bounds, with whitespace/backtick tolerance."""
+    if (
+        not isinstance(prompt, str)
+        or not isinstance(quote, str)
+        or not quote.strip()
+        or type(occurrence) is not int
+        or occurrence < 1
+    ):
+        return None
+
+    def _exact_match(candidate: str) -> tuple[int, int] | None:
+        if not candidate:
+            return None
+        starts: list[int] = []
+        offset = 0
+        while True:
+            found = prompt.find(candidate, offset)
+            if found < 0:
+                break
+            starts.append(found)
+            offset = found + 1
+        if occurrence <= len(starts):
+            start = starts[occurrence - 1]
+            return start, start + len(candidate)
+        return None
+
+    def _ws_match(candidate: str) -> tuple[int, int] | None:
+        tokens = candidate.split()
+        if not tokens:
+            return None
+        pattern = r"\s+".join(re.escape(token) for token in tokens)
+        matches = list(re.finditer(pattern, prompt))
+        if occurrence <= len(matches):
+            return matches[occurrence - 1].start(), matches[occurrence - 1].end()
+        return None
+
+    exact = _exact_match(quote)
+    if exact is not None or not tolerant:
+        return exact
+
+    ws_hit = _ws_match(quote)
+    if ws_hit is not None:
+        return ws_hit
+
+    stripped = quote.strip()
+    variants: list[str] = []
+    if "`" in stripped:
+        no_ticks = stripped.strip("`").strip()
+        if no_ticks and no_ticks != quote:
+            variants.append(no_ticks)
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        unquoted = stripped[1:-1].strip()
+        if unquoted and unquoted != quote:
+            variants.append(unquoted)
+    for variant in variants:
+        hit = _exact_match(variant) or _ws_match(variant)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _exact_occurrence_index(prompt: str, matched_text: str, start: int) -> int:
+    starts: list[int] = []
+    offset = 0
+    while True:
+        found = prompt.find(matched_text, offset)
+        if found < 0:
+            break
+        starts.append(found)
+        offset = found + 1
+    return starts.index(start) + 1
+
+
+def compile_source_propositions(task, record, *, extractor_id, tolerant: bool = False):
     if task['task_unit_id'] != record['task_unit_id']:
         raise PromptTSGError('来源命题与任务身份不同')
     catalog = open_concept_catalog()
@@ -39,28 +119,182 @@ def compile_source_propositions(task, record, *, extractor_id):
     for relation, targets in roles.items():
         catalog['edge_types'].append(relation)
         catalog['allowed_edges'] += [[source, relation, target] for source in sorted(REQUIREMENT_TYPES) for target in sorted(targets)]
-    if (any(row['edge_type'] == 'part_of' for row in record['relations'])
-        or any(row[1] == 'part_of' for row in record['unresolved_relations'])):
+    raw_relations = list(record.get('relations', ()))
+    raw_unresolved_relations = list(record.get('unresolved_relations', ()))
+    if (any(row['edge_type'] == 'part_of' for row in raw_relations)
+        or any(row[1] == 'part_of' for row in raw_unresolved_relations)):
         catalog['edge_types'].append('part_of')
         catalog['allowed_edges'].append(['data_object', 'part_of', 'data_object'])
     for relation in ('refers_to', 'supports', 'contrasts'):
         catalog['edge_types'].append(relation)
         catalog['allowed_edges'] += [[source, relation, target] for source in catalog['node_types']
             for target in catalog['node_types'] if source != 'task' and target != 'task']
-    for fact in record['facts']:
-        quote, occurrence = fact['evidence_text'], fact['occurrence']
-        if not isinstance(quote, str) or not quote or type(occurrence) is not int or occurrence < 1:
-            raise PromptTSGError('来源命题引用无效')
-        if len(list(re.finditer('(?='+re.escape(quote)+')', task['prompt']))) < occurrence:
-            raise PromptTSGError('来源命题引用没有在指定位置逐字出现')
-    graph = build_prompt_tsg(task_id=task['task_unit_id'], prompt=task['prompt'], extractor_id=extractor_id,
-        catalog=catalog, facts=record['facts'], relations=record['relations'],
-        unresolved_semantics=record['unresolved_semantics'], unresolved_relations=record['unresolved_relations'],
-        requirement_structures=record['requirement_structures'], requirement_scopes=record['requirement_scopes'],
-        requirement_relations=record['requirement_relations'])
-    local = source_nodes(record['facts'], prompt=task['prompt'])
-    return graph, dict(catalog=catalog, graph=prompt_tsg_record(graph),
-        local_node_ids={key: node.node_id for key, node in local.items()})
+
+    if not tolerant:
+        for fact in record['facts']:
+            quote, occurrence = fact['evidence_text'], fact['occurrence']
+            if not isinstance(quote, str) or not quote or type(occurrence) is not int or occurrence < 1:
+                raise PromptTSGError('来源命题引用无效')
+            if len(list(re.finditer('(?='+re.escape(quote)+')', task['prompt']))) < occurrence:
+                raise PromptTSGError('来源命题引用没有在指定位置逐字出现')
+        graph = build_prompt_tsg(task_id=task['task_unit_id'], prompt=task['prompt'], extractor_id=extractor_id,
+            catalog=catalog, facts=record['facts'], relations=record['relations'],
+            unresolved_semantics=record['unresolved_semantics'], unresolved_relations=record['unresolved_relations'],
+            requirement_structures=record['requirement_structures'], requirement_scopes=record['requirement_scopes'],
+            requirement_relations=record['requirement_relations'])
+        local = source_nodes(record['facts'], prompt=task['prompt'])
+        return graph, dict(catalog=catalog, graph=prompt_tsg_record(graph),
+            local_node_ids={key: node.node_id for key, node in local.items()})
+
+    prompt = task['prompt']
+    allowed_set = {tuple(item) for item in catalog['allowed_edges']}
+    semantics = catalog['semantics']
+    kept_facts: list[dict[str, Any]] = []
+    local_semantics_by_id: dict[str, str] = {}
+    dropped_local_semantics: dict[str, str] = {}
+    unresolved_sem_set: set[str] = {
+        s for s in record.get('unresolved_semantics', ())
+        if isinstance(s, str) and s in semantics and s != 'task.root'
+    }
+    kept_sem_set: set[str] = set()
+
+    for fact in record.get('facts', ()):
+        local_id = fact.get('local_id')
+        semantic_id = fact.get('semantic_id')
+        quote = fact.get('evidence_text', '')
+        occurrence = fact.get('occurrence', 1)
+        span = resolve_evidence_span(prompt, quote, occurrence, tolerant=True)
+        valid_concept = isinstance(semantic_id, str) and semantics.get(semantic_id) == fact.get('node_type')
+        if span is None or not valid_concept or not isinstance(local_id, str) or not local_id.strip():
+            if isinstance(local_id, str) and isinstance(semantic_id, str) and semantic_id in semantics and semantic_id != 'task.root':
+                dropped_local_semantics[local_id] = semantic_id
+                unresolved_sem_set.add(semantic_id)
+            continue
+        start, end = span
+        matched_text = prompt[start:end]
+        occ_idx = _exact_occurrence_index(prompt, matched_text, start)
+        updated_fact = {
+            'local_id': local_id,
+            'node_type': fact['node_type'],
+            'semantic_id': semantic_id,
+            'evidence_text': matched_text,
+            'occurrence': occ_idx,
+            'attributes': dict(fact.get('attributes', {})),
+        }
+        kept_facts.append(updated_fact)
+        local_semantics_by_id[local_id] = semantic_id
+        kept_sem_set.add(semantic_id)
+
+    unresolved_sem_set -= kept_sem_set
+    kept_ids = set(local_semantics_by_id)
+    available_semantics = kept_sem_set | unresolved_sem_set
+
+    kept_relations: list[dict[str, Any]] = []
+    kept_rel_sem_triples: set[tuple[str, str, str]] = set()
+    candidate_unresolved_rels: list[tuple[str, str, str]] = [
+        (row[0], row[1], row[2])
+        for row in raw_unresolved_relations
+        if isinstance(row, (list, tuple)) and len(row) == 3
+    ]
+    for rel in raw_relations:
+        src, dst, kind = rel.get('source'), rel.get('target'), rel.get('edge_type')
+        if src in kept_ids and dst in kept_ids:
+            s_sem, t_sem = local_semantics_by_id[src], local_semantics_by_id[dst]
+            if (semantics.get(s_sem), kind, semantics.get(t_sem)) in allowed_set:
+                kept_relations.append({'source': src, 'target': dst, 'edge_type': kind})
+                kept_rel_sem_triples.add((s_sem, kind, t_sem))
+                continue
+        s_sem = local_semantics_by_id.get(src) or dropped_local_semantics.get(src)
+        t_sem = local_semantics_by_id.get(dst) or dropped_local_semantics.get(dst)
+        if s_sem and t_sem and isinstance(kind, str):
+            candidate_unresolved_rels.append((s_sem, kind, t_sem))
+
+    unresolved_rels: list[list[str]] = []
+    seen_unres: set[tuple[str, str, str]] = set()
+    for s_sem, kind, t_sem in candidate_unresolved_rels:
+        triple = (s_sem, kind, t_sem)
+        if (
+            triple not in seen_unres
+            and triple not in kept_rel_sem_triples
+            and s_sem in available_semantics
+            and t_sem in available_semantics
+            and (semantics.get(s_sem), kind, semantics.get(t_sem)) in allowed_set
+        ):
+            seen_unres.add(triple)
+            unresolved_rels.append([s_sem, kind, t_sem])
+
+    kept_req_ids = {
+        fact['local_id']
+        for fact in kept_facts
+        if fact['node_type'] in REQUIREMENT_TYPES
+    }
+    raw_structures = {
+        k: {'kind': v['kind'], 'members': [m for m in v.get('members', ()) if m in kept_req_ids]}
+        for k, v in dict(record.get('requirement_structures', {})).items()
+        if k in kept_req_ids
+    }
+    changed = True
+    while changed:
+        changed = False
+        valid_keys = set(raw_structures)
+        pruned: dict[str, dict[str, Any]] = {}
+        for k, v in raw_structures.items():
+            kind = v['kind']
+            members = [m for m in v['members'] if m in valid_keys]
+            ok = (
+                (kind in {'atom', 'opaque'} and not members)
+                or (kind == 'not' and len(members) == 1)
+                or (kind in {'and', 'or'} and len(members) >= 2)
+            )
+            if ok:
+                pruned[k] = {'kind': kind, 'members': members}
+            else:
+                changed = True
+        raw_structures = pruned
+
+    kept_scopes = {}
+    for k, v in dict(record.get('requirement_scopes', {})).items():
+        if k not in kept_req_ids or any(rel['source'] == k and rel['edge_type'] == 'constrains' for rel in kept_relations):
+            continue
+        boundaries = [b for b in v.get('boundaries', ()) if b in kept_ids]
+        if v.get('kind') == 'each' and len(boundaries) != 1:
+            continue
+        kept_scopes[k] = {
+            'kind': v['kind'],
+            'boundaries': boundaries,
+            'target_class': v.get('target_class'),
+        }
+
+    kept_req_rels: dict[str, list[dict[str, Any]]] = {}
+    for owner, rows in dict(record.get('requirement_relations', {})).items():
+        if owner in kept_req_ids and raw_structures.get(owner, {}).get('kind', 'atom') == 'atom':
+            valid_rows = [
+                dict(row) for row in rows
+                if row.get('source') in kept_ids and row.get('target') in kept_ids
+            ]
+            if valid_rows:
+                kept_req_rels[owner] = valid_rows
+
+    graph = build_prompt_tsg(
+        task_id=task['task_unit_id'],
+        prompt=prompt,
+        extractor_id=extractor_id,
+        catalog=catalog,
+        facts=kept_facts,
+        relations=kept_relations,
+        unresolved_semantics=sorted(unresolved_sem_set),
+        unresolved_relations=unresolved_rels,
+        requirement_structures=raw_structures,
+        requirement_scopes=kept_scopes,
+        requirement_relations=kept_req_rels,
+    )
+    local = source_nodes(kept_facts, prompt=prompt)
+    return graph, dict(
+        catalog=catalog,
+        graph=prompt_tsg_record(graph),
+        local_node_ids={key: node.node_id for key, node in local.items()},
+        degraded_local_ids=sorted(dropped_local_semantics),
+    )
 
 
 def task_context_contract_record(contract: OpenTaskContract) -> dict[str, Any]:

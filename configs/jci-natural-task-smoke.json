@@ -1,72 +1,18 @@
 {
-  "study_id": "jci-natural-task-smoke-20261116",
+  "study_id": "jci-natural-multiop-smoke-20261116",
   "study_mode": "natural_task",
-  "evidence_role": "NON_CLAIM_NATURAL_TASK_END_TO_END_SMOKE",
-  "fixture_path": "src/fixtures/natural-task-smoke.json",
-  "context_names": [
-    "ctx_service_boundary",
-    "ctx_query_or_exec_family"
-  ],
-  "target_folds": 4,
-  "assignment_seed": 2026111651,
+  "evidence_role": "NON_CLAIM_NATURAL_MULTIOP_PAIRED_SMOKE",
+  "provider_mode": "offline_fixture",
+  "fixture_path": "src/fixtures/natural-multiop-benchmark.json",
   "ci_seed": 2026111652,
-  "fit_seed": 2026111653,
-  "shuffle_seed": 2026111654,
-  "structure_method": "attribute_majority_merged",
-  "maximum_skeleton_conditioning_order": 2,
   "ci_draws": 199,
   "ci_alpha": 0.05,
-  "source_cv_folds": 3,
-  "inverse_penalties": [
-    0.03,
-    0.1,
-    0.3,
-    1.0,
-    3.0
-  ],
-  "l1_ratios": [
-    0.25,
-    0.75,
-    1.0
-  ],
-  "screen_sizes": [
-    4,
-    8,
-    12,
-    18
-  ],
-  "screen_inverse_penalties": [
-    0.1,
-    1.0,
-    10.0
-  ],
-  "boost_depths": [
-    2
-  ],
-  "boost_iterations": [
-    50
-  ],
-  "pca_dimensions": [
-    4,
-    8,
-    12,
-    18
-  ],
-  "structure_strengths": [
-    0.0,
-    8.0,
-    100.0
-  ],
-  "correction_penalties": [
-    1.0,
-    10.0,
-    100.0,
-    1000.0
-  ],
-  "component_alpha": 0.05,
+  "maximum_skeleton_conditioning_order": 2,
+  "eval_alpha": 0.05,
   "practical_margin": 0.05,
   "max_median_flip_rate": 0.05,
   "max_attribute_flip_rate": 0.1,
+  "unit_test_timeout_seconds": 5.0,
   "formal_claim_allowed": false,
   "new_provider_calls": 0
 }

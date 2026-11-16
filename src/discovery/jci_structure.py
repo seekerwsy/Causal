@@ -157,11 +157,12 @@ def discover_jci_pag(
     alpha,
     *,
     context_vars=('C1', 'C2'),
+    sink_vars=(),
     max_order=3,
     majority_rule=True,
     on_insufficient_ci='abort',
 ):
-    """Native Python FCI + JCI-12 (exogenous context) PAG discovery.
+    """Native Python FCI + JCI-12 (exogenous context, optional post-generation sinks) PAG discovery.
 
     PAG endpoint convention matches pcalg: pag[i, j] stores the mark AT node j
     on edge (i, j), where 0=none, 1=circle, 2=arrowhead, 3=tail.
@@ -172,8 +173,14 @@ def discover_jci_pag(
     p = len(labels)
     if any(name not in labels for name in context_vars):
         raise ValueError('Declared context variables must be present in labels')
+    if any(name not in labels for name in sink_vars):
+        raise ValueError('Declared sink variables must be present in labels')
     roots = tuple(labels.index(name) for name in context_vars)
     root_set = set(roots)
+    sinks = tuple(labels.index(name) for name in sink_vars)
+    sink_set = set(sinks)
+    if root_set & sink_set:
+        raise ValueError('sink_vars and context_vars must be disjoint')
 
     adj = np.ones((p, p), dtype=bool)
     np.fill_diagonal(adj, False)
@@ -196,6 +203,7 @@ def discover_jci_pag(
             maximum_skeleton_conditioning_order=int(max_order),
             maximum_conditioning_order=int(largest_conditioning),
             context_variables=[labels[r] for r in roots],
+            sink_variables=[labels[s] for s in sinks],
             backend='python-jci12',
         )
 
@@ -209,11 +217,21 @@ def discover_jci_pag(
                 adj[col, :] = False
                 adj[:, col] = False
 
+    def _cond_neighbors(node_idx, other_idx, raw_neigh):
+        # Post-generation sinks never lie on non-collider paths between pre-generation variables.
+        if node_idx not in sink_set and other_idx not in sink_set and sink_set:
+            return [n for n in raw_neigh if n != other_idx and n not in sink_set]
+        return [n for n in raw_neigh if n != other_idx]
+
     order = 0
     while order <= max_order:
         snap = {i: sorted(np.flatnonzero(adj[i]).tolist()) for i in range(p)}
         if not any(
-            adj[i, j] and (len(snap[i]) - 1 >= order or len(snap[j]) - 1 >= order)
+            adj[i, j]
+            and (
+                len(_cond_neighbors(i, j, snap[i])) >= order
+                or len(_cond_neighbors(j, i, snap[j])) >= order
+            )
             for i in range(p)
             for j in range(i + 1, p)
         ):
@@ -223,8 +241,8 @@ def discover_jci_pag(
             for j in range(i + 1, p):
                 if not adj[i, j]:
                     continue
-                neigh_i = [n for n in snap[i] if n != j]
-                neigh_j = [n for n in snap[j] if n != i]
+                neigh_i = _cond_neighbors(i, j, snap[i])
+                neigh_j = _cond_neighbors(j, i, snap[j])
                 for comb in _iter_unique_subsets(neigh_i, neigh_j, order):
                     largest_conditioning = max(largest_conditioning, len(comb))
                     p_val = ci.query(labels[i], labels[j], [labels[idx] for idx in comb])
@@ -247,6 +265,14 @@ def discover_jci_pag(
             if adj[r, z] and z not in root_set:
                 pag[r, z] = 2
                 pag[z, r] = 3
+    # Temporal post-generation sink orientation: arrowhead into sink s from any non-sink u;
+    # keep pag[s, u] open as circle (unless u is an exogenous root) for v-structures & R1.
+    for s in sinks:
+        for u in range(p):
+            if adj[u, s] and u not in sink_set:
+                pag[u, s] = 2
+                if u in root_set:
+                    pag[s, u] = 3
 
     ambiguous_triples: set[tuple[int, int, int]] = set()
     for y in range(p):
@@ -261,8 +287,8 @@ def discover_jci_pag(
                     continue
                 pair = (min(i, k), max(i, k))
                 if majority_rule:
-                    neigh_i = [n for n in np.flatnonzero(adj[i]).tolist() if n != k]
-                    neigh_k = [n for n in np.flatnonzero(adj[k]).tolist() if n != i]
+                    neigh_i = _cond_neighbors(pair[0], pair[1], np.flatnonzero(adj[pair[0]]).tolist())
+                    neigh_k = _cond_neighbors(pair[1], pair[0], np.flatnonzero(adj[pair[1]]).tolist())
                     sep_list = []
                     base_sep = sepset.get(pair)
                     if base_sep is not None:
@@ -296,6 +322,8 @@ def discover_jci_pag(
 
     def orient_mark(u, v, mark):
         if mark == 2 and v in root_set:
+            return False
+        if mark == 3 and v in sink_set and u not in sink_set:
             return False
         if pag[u, v] == mark:
             return False
@@ -454,6 +482,7 @@ def discover_jci_pag(
         maximum_skeleton_conditioning_order=int(max_order),
         maximum_conditioning_order=int(largest_conditioning),
         context_variables=[labels[r] for r in roots],
+        sink_variables=[labels[s] for s in sinks],
         backend='python-jci12',
     )
 
@@ -500,6 +529,7 @@ class StructureBackend:
         *,
         max_order=3,
         context_vars=('C1', 'C2'),
+        sink_vars=(),
         on_insufficient_ci='abort',
     ):
         started = time.monotonic()
@@ -510,6 +540,7 @@ class StructureBackend:
                 ci,
                 alpha,
                 context_vars=context_vars,
+                sink_vars=sink_vars,
                 max_order=max_order,
                 majority_rule=majority,
                 on_insufficient_ci=on_insufficient_ci,

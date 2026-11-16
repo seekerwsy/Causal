@@ -1,0 +1,29 @@
+{
+  "study_id": "jci-local-vllm-multiop-pilot-20261116",
+  "study_mode": "natural_task",
+  "evidence_role": "FORMATIVE_LOCAL_VLLM_PAIRED_PILOT",
+  "provider_mode": "local_vllm",
+  "fixture_path": "src/fixtures/natural-multiop-benchmark.json",
+  "evaluator": {
+    "provider": "local_vllm",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model_id": "Qwen2.5-Coder-7B-Instruct",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 20261116,
+    "response_format": null,
+    "maximum_output_tokens": 2048,
+    "timeout_seconds": 120.0,
+    "max_response_bytes": 262144
+  },
+  "ci_seed": 2026111652,
+  "ci_draws": 199,
+  "ci_alpha": 0.05,
+  "maximum_skeleton_conditioning_order": 2,
+  "eval_alpha": 0.05,
+  "practical_margin": 0.05,
+  "max_median_flip_rate": 0.05,
+  "max_attribute_flip_rate": 0.1,
+  "unit_test_timeout_seconds": 5.0,
+  "formal_claim_allowed": false
+}

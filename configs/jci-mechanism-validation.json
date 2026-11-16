@@ -1,0 +1,27 @@
+{
+  "study_id": "jci-mechanism-paired-validation-20261116",
+  "study_mode": "mechanism_simulation",
+  "evidence_role": "FORMATIVE_MECHANISM_PAIRED_VALIDATION_48CELL",
+  "scenarios": [
+    "confounded_and_scoped",
+    "pure_latent_trap",
+    "multi_op_high_interference",
+    "null_spurious_only"
+  ],
+  "batch_seeds": [
+    2026111611,
+    2026111612,
+    2026111613,
+    2026111614
+  ],
+  "repetitions_per_seed": 3,
+  "n_discovery": 480,
+  "n_eval": 120,
+  "ci_draws": 299,
+  "ci_alpha": 0.05,
+  "maximum_skeleton_conditioning_order": 2,
+  "eval_alpha": 0.05,
+  "practical_margin": 0.05,
+  "formal_claim_allowed": false,
+  "new_provider_calls": 0
+}

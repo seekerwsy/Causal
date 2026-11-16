@@ -1,4 +1,4 @@
-"""Single active CLI entry point for Prompt TSG inspection and directional JCI learning."""
+"""Single active CLI entry point for Prompt TSG inspection and JCI mechanism discovery."""
 
 from __future__ import annotations
 
@@ -11,39 +11,42 @@ from typing import Sequence
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog='prompt-mechanism-study',
-        description='Task-grounded Prompt TSG inspection and context-anchored directional JCI learning.',
+        description='Task-grounded Prompt TSG inspection and JCI mechanism discovery with paired evaluation.',
     )
     groups = parser.add_subparsers(dest='group', required=True)
-    study = groups.add_parser('study', help='run active Stage I/II inspection, learning, and verification')
+    study = groups.add_parser('study', help='run active Stage I/II inspection, mechanism discovery, and verification')
     actions = study.add_subparsers(dest='action', required=True)
 
-    smoke = actions.add_parser('smoke', help='run bounded 8-cell directional JCI cross-fitting smoke check (4 scenarios incl. negative control)')
+    smoke = actions.add_parser(
+        'smoke',
+        help='run bounded 8-cell JCI mechanism discovery & paired counterfactual smoke check (4 scenarios incl. negative control)',
+    )
     smoke.add_argument('output', type=Path)
     smoke.add_argument('--rscript', type=Path, default=None)
     smoke.add_argument('--workers', type=int, default=1)
-    smoke.set_defaults(plan=Path('configs/jci-directional-grouped-smoke.json'))
+    smoke.set_defaults(plan=Path('configs/jci-mechanism-smoke.json'))
 
     natural_smoke = actions.add_parser(
         'natural-smoke',
-        help='run bounded offline natural-task Stage I -> Stage II end-to-end smoke check',
+        help='run bounded offline natural-task multi-operation Stage I -> Stage II -> paired evaluation smoke check',
     )
     natural_smoke.add_argument('output', type=Path)
     natural_smoke.add_argument('--rscript', type=Path, default=None)
     natural_smoke.set_defaults(plan=Path('configs/jci-natural-task-smoke.json'))
 
-    run = actions.add_parser('run', help='execute a directional JCI or natural-task study plan')
+    run = actions.add_parser('run', help='execute a mechanism_simulation or natural_task study plan')
     run.add_argument('output', type=Path)
     run.add_argument('--plan', type=Path, required=True)
     run.add_argument('--rscript', type=Path, default=None)
     run.add_argument('--workers', type=int, default=1)
 
-    verify = actions.add_parser('verify', help='independently verify saved directional JCI or natural-task results')
+    verify = actions.add_parser('verify', help='independently verify saved mechanism_simulation or natural_task results')
     verify.add_argument('output', type=Path)
     verify.add_argument('--workers', type=int, default=1)
 
     inspect_tsg = actions.add_parser(
         'inspect-tsg',
-        help='compile source Prompt TSG and extract Stage I -> Stage II structural attributes',
+        help='compile source Prompt TSG and extract Stage I -> Stage II orthogonal mechanism attributes',
     )
     inspect_tsg.add_argument('input', type=Path)
     inspect_tsg.add_argument('output', type=Path)
@@ -60,7 +63,7 @@ def _run_inspect_tsg(input_path: Path, output_dir: Path) -> dict:
     task = payload['task']
     record = payload['record']
     target = payload.get('target', {})
-    graph, compiled = compile_source_propositions(task, record, extractor_id='cli-inspect-tsg')
+    graph, compiled = compile_source_propositions(task, record, extractor_id='cli-inspect-tsg', tolerant=True)
     ids = compiled['local_node_ids']
     op_id = ids.get(target.get('operation_local_id')) if target.get('operation_local_id') else None
     req_id = ids.get(target.get('requirement_local_id')) if target.get('requirement_local_id') else None
@@ -93,24 +96,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_natural_study(args.plan, args.output, rscript=args.rscript)
     elif args.action in ('smoke', 'run'):
         plan = read_json(args.plan)
-        if plan.get('study_mode') == 'natural_task':
+        mode = plan.get('study_mode')
+        if mode == 'natural_task':
             from prompt_mechanism_study.experiment.natural_study import run_natural_study
 
             result = run_natural_study(args.plan, args.output, rscript=args.rscript)
-        else:
-            from prompt_mechanism_study.discovery.prognostic_learning import run_directional_study
+        elif mode == 'mechanism_simulation':
+            from prompt_mechanism_study.discovery.mechanism_discovery import run_mechanism_simulation_study
 
-            result = run_directional_study(args.plan, args.output, rscript=args.rscript, workers=args.workers)
+            result = run_mechanism_simulation_study(args.plan, args.output, rscript=args.rscript, workers=args.workers)
+        else:
+            raise ValueError(f'Unsupported study_mode in plan: {mode!r}')
     elif args.action == 'verify':
         plan = read_json(args.output / 'inputs' / 'plan.json')
-        if plan.get('study_mode') == 'natural_task':
+        mode = plan.get('study_mode')
+        if mode == 'natural_task':
             from prompt_mechanism_study.verification.natural_study import verify_natural_study
 
             result = verify_natural_study(args.output)
-        else:
-            from prompt_mechanism_study.verification.prognostic_learning import verify_directional_study
+        elif mode == 'mechanism_simulation':
+            from prompt_mechanism_study.verification.mechanism_discovery import verify_mechanism_study
 
-            result = verify_directional_study(args.output, workers=args.workers)
+            result = verify_mechanism_study(args.output, workers=args.workers)
+        else:
+            raise ValueError(f'Unsupported study_mode in saved plan: {mode!r}')
     elif args.action == 'inspect-tsg':
         result = _run_inspect_tsg(args.input, args.output)
     else:
