@@ -1,0 +1,67 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Comic Sans MS","fontSize":"22px","primaryTextColor":"#20242A","lineColor":"#626B7C"},"flowchart":{"htmlLabels":true,"nodeSpacing":28,"rankSpacing":36,"curve":"linear"}}}%%
+flowchart TB
+  subgraph top[" "]
+    direction LR
+    subgraph panel_a["(a)  Task and preservation obligations"]
+      direction TB
+      task["Illustrative programming request<br>Delete database records matching<br>the supplied user identifier.<br>Return the number of deleted records."]
+      retained["Preserve<br>Record-selection condition<br>Returned deletion count"]
+      task --> retained
+    end
+    subgraph panel_b["(b)  Source-grounded scope and queries"]
+      direction TB
+      identifier(("Identifier u"))
+      deletion(("Delete records"))
+      count(("Deletion count n"))
+      returning(("Return n"))
+      candidate["Candidate requirement r<br>Bind u as a SQL value parameter<br>Source expression: unexpressed"]
+      readout["Operation readout I_G(Delete)<br>Selection obligation + source evidence<br>Retain complete conditions and scope"]
+      identifier -->|"used_by: SQL value"| deletion
+      deletion -->|"produces"| count
+      count -->|"used_by"| returning
+      candidate -. "scope query" .-> deletion
+      deletion -. "read bound propositions" .-> readout
+    end
+    panel_a --> panel_b
+  end
+  subgraph bottom[" "]
+    direction LR
+    subgraph panel_c["(c)  Requirement intervention and reference"]
+      direction TB
+      shared["Common scope<br>User identifier at database deletion"]
+      target["Requirement Introduction T_r+<br>A=1: Pass the identifier separately<br>as a bound SQL value parameter."]
+      reference["Matched reference<br>A=0: Use the identifier to select<br>the records to delete as requested."]
+      contrast["Target effect: E_T[Y(1) - Y(0)]<br>Both prompts retain the selection rule<br>and return the deletion count"]
+      shared --> target --> contrast
+      shared --> reference --> contrast
+    end
+    subgraph panel_d["(d)  Explanation and suggested action"]
+      direction TB
+      explanation["Explain the tested scope<br>Parameter binding concerns identifier u<br>at the deletion operation.<br>Preserve selection and returned count."]
+      evidence["Report actual evidence when available<br>Effect estimate + interval + status<br>Functionality, Oracle coverage, unknowns"]
+      advice["Conceptual suggested action<br>Evaluate the scoped modification.<br>Adoption depends on the declared evidence."]
+      explanation --> evidence --> advice
+    end
+    panel_c --> panel_d
+  end
+  top --> bottom
+  classDef source fill:#FFF5E2,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef object fill:#A6C4EA,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef operation fill:#F4AB6F,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef query fill:#F1E7F8,stroke:#8442AA,stroke-width:2px,color:#61367D
+  classDef context fill:#E1EDF9,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef report fill:#DEF1D7,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef evidence fill:#FFF3DB,stroke:#C28A2A,stroke-width:2px,color:#80561E
+  class task,retained source
+  class identifier,count object
+  class deletion,returning operation
+  class candidate,target query
+  class readout,shared,reference,contrast context
+  class explanation,advice report
+  class evidence evidence
+  style top fill:none,stroke:none
+  style bottom fill:none,stroke:none
+  style panel_a fill:#FFFCF5,stroke:#626B7C,stroke-dasharray:5 4
+  style panel_b fill:#FAFCFE,stroke:#626B7C,stroke-dasharray:5 4
+  style panel_c fill:#FFFCFA,stroke:#626B7C,stroke-dasharray:5 4
+  style panel_d fill:#FBFEFA,stroke:#626B7C,stroke-dasharray:5 4

@@ -1,200 +1,194 @@
 \section{Evaluation}
+\label{sec:evaluation}
+\newcommand{\pendingresult}{\textit{TBD}}
 
 \subsection{Evaluation Overview}
 
-The evaluation asks whether requirement-level causal analysis produces useful
-evidence and whether experts find the resulting explanations useful for prompt
-modification. RQ1 compares the hypotheses identified by five methods. RQ2
-isolates the contribution of FCI-based admission. RQ3 examines the effects and
-limits of the proposed modifications, and RQ4 compares the perceived utility
-of the five methods' explanation products. The computational and human studies
-address complementary claims; neither substitutes for the other.
+Our evaluation isolates each methodological contribution and its end-to-end
+hardening value across three research questions:
+\begin{itemize}
+  \item \textbf{RQ1 (Structured Graph Representation):} How effectively does
+  \prompttsg improve multi-operation requirement binding, pre-assignment
+  attribute accuracy, and code validity compared with \textsc{Raw} and
+  \textsc{Flat} representations?
+  \item \textbf{RQ2 (Directional JCI and Cross-Fitted Learning):} Under
+  identical attributes and outcome budgets, does context-anchored directional
+  JCI role-grouped shrinkage with task-unit cross-fitting reduce
+  effect-estimation variance across downstream, target-shift, and upstream
+  mechanisms compared with unstructured and undirected-skeleton baselines?
+  \item \textbf{RQ3 (End-to-End Scoped Security Hardening):} How effectively
+  does \model identify confirmed positive security-hardening edits compared with
+  state-of-the-art prompt analysis baselines while keeping adverse warnings,
+  functionality, and Oracle coverage distinct?
+\end{itemize}
 
-Development, independent qualification, discovery, and held-out confirmation
-use prospectively separated task units. Methods share frozen task manifests,
-generator and request-randomness policies, candidate budgets, a common
-hypothesis bridge, randomized confirmation, and independent measurement.
-Candidate identities, method slots, editing policies, and inference rules are
-fixed before confirmation outcomes. Each unique selected model-bound effect
-is confirmed once and its result is reused by every referring method slot.
+All comparisons share frozen task manifests, generator decoding policies,
+candidate budgets $K$, assigned-arm ITT accounting, and independent programmatic
+measurement. Prospective settings (Table~\ref{tab:evaluation-settings}) and
+nominations are frozen prior to confirmation outcome access; \pendingresult{}
+denotes pending formal natural-task measurements where prospective protocol
+activation has not yet occurred.
 
-\paragraph{Tasks and experimental settings.}
-Natural programming tasks must specify an interpretable operation, the relevant
-security boundary, and the non-target behavior to preserve. Incomplete functional
-specifications limit functionality and joint-success claims without automatically
-excluding an independently measurable security comparison. Source lineage and
-task-unit deduplication govern the role split. The final source inventory,
-admitted language and task families, model configurations, task and request
-counts, and budget $K$ require a joint freeze with Oracle qualification and
-the comparator implementations before formal execution. This section specifies
-the evaluation design; it does not report completed experiments.
+\begin{table}[htbp]
+  \centering
+  \caption{Prospective experimental settings for formal \model evaluation.}
+  \label{tab:evaluation-settings}
+  \small
+  \begin{tabularx}{\linewidth}{@{}p{0.42\linewidth}X@{}}
+    \toprule
+    Setting & Declared value \\
+    \midrule
+    Sources, languages, and task families & \pendingresult \\
+    Generator, version, and decoding settings & \pendingresult \\
+    Source / target task-unit budgets & \pendingresult \\
+    Cross-fitting folds $K$ and confirmation units & \pendingresult \\
+    Candidate slots $K_{\rm cand}$ and nomination rule & \pendingresult \\
+    \prompttsg attributes and regularization grids & \pendingresult \\
+    Oracle scope and functionality measurements & \pendingresult \\
+    Inference families and practical margins $m_h$ & \pendingresult \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-\subsection{Compared Methods}
-\label{sec:compared-methods}
+\subsection{RQ1: Graph Structured Representation}
 
-RQ1 and RQ4 use the same five-method comparison. It includes representative
-research approaches and simple reference baselines, rather than treating every
-comparator as a state-of-the-art system.
+\textbf{RQ1.} \emph{How effectively does \prompttsg improve multi-operation
+requirement binding, pre-assignment attribute accuracy, and valid code yield
+compared with \textsc{Raw} and \textsc{Flat} representations?}
 
-\paragraph{\model.}
-Our method constructs task-grounded requirement hypotheses, applies FCI-based
-admission and observational RD ranking, and links selected prompt policies to
-independent effect evidence. Its explanation identifies the requirement's
-scope, the tested modification, and the action or limitation supported by that
-evidence.
+RQ1 compares \textsc{Graph} (\prompttsg) against complete-source \textsc{Raw}
+and structured \textsc{Flat} checklists under identical source facts, API
+context, token budgets, and deterministic target-unit code splicing.
+Independent source-based references evaluate complete multi-operation bindings
+(correctly distinguishing governed operations, \texttt{part\_of} object chains,
+execution conditions, and preserved obligations) and pre-assignment structural
+attributes $Z = q(G_P, r)$ (Table~\ref{tab:rq1-representation}). Code validity
+($Y_C$), oracle-evaluable secure yield ($Y$), local functionality, joint
+success, and \texttt{unknown} rates retain full assigned-arm ITT denominators.
 
-\paragraph{Prompt Attribution.}
-This simple correlation-based baseline uses associations between prompt-side
-features and measured outcomes to identify candidate requirements. Its native
-evidence is associational: a high attribution score does not establish the
-effect of editing the corresponding requirement.
+\begin{table}[htbp]
+  \centering
+  \caption{RQ1: Stage~I representation quality and downstream ITT code outcomes
+  under shared source facts and decoupled code splicing.}
+  \label{tab:rq1-representation}
+  \small
+  \begin{tabularx}{\linewidth}{@{}Xrrrrrr@{}}
+    \toprule
+    Representation & \shortstack{Complete\\binding} &
+      \shortstack{Attribute\\accuracy} & \shortstack{Valid\\code ($Y_C$)} &
+      \shortstack{Secure\\yield ($Y$)} & \shortstack{Local\\func.} & Unknown \\
+    \midrule
+    \textsc{Raw} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Flat} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Graph} (\prompttsg) & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-\paragraph{Causal Prompt Concepts.}
-This comparator represents the concept-level causal-analysis approach. Its
-concept-based candidates must be mapped to a specific task scope, requirement,
-and editing operation before they can enter the shared intervention evaluation.
-The name is a study working label; the exact source method, implementation,
-and adaptation remain to be fixed, rather than being assumed from a related
-paper's capabilities.
+\subsection{RQ2: Directional JCI and Cross-Fitted Effect Learning}
 
-\paragraph{Prompt Perturbation.}
-This comparator represents analysis through natural-language prompt changes.
-Its proposed changes must be mapped to a single scoped security requirement
-and checked for preservation of non-target behavior. The permitted
-perturbations, selection rule, source implementation, and explanation procedure
-remain to be fixed. General robustness perturbations are not automatically
-valid requirement interventions.
+\textbf{RQ2.} \emph{Does context-anchored directional JCI role-grouped
+shrinkage with task-unit $K$-fold cross-fitting reduce effect-estimation
+variance relative to unstructured learners and undirected-skeleton ablations?}
 
-\paragraph{LLM-Judge Explanation.}
-This simple baseline directly prompts an LLM to propose a security explanation
-and suggested prompt modification from its allowed inputs. The model, prompt,
-accessible evidence, and candidate selection rule are fixed prospectively.
-Here, \emph{Judge} names the baseline, not the security Oracle or the experts
-participating in RQ4; its statements do not adjudicate the other methods' results.
+RQ2 holds covariates $X=(C,Z)$, source observations, target task units, and
+cross-fitting folds fixed, comparing \model's JCI role-grouped estimator
+against seven unstructured baselines (\textsc{Direct Uniform}, \textsc{Direct
+Context}, \textsc{Full Logit}, \textsc{Sparse Logit}, \textsc{Screened Logit},
+\textsc{Boosted}, \textsc{PCA}) and three structural ablations
+(\textsc{Undirected Skeleton}, \textsc{Propagated Skeleton}, \textsc{Shuffled
+Roles}), alongside \textsc{Target-Only} adaptation. Evaluation spans
+downstream confluence (\texttt{downstream\_signal}), shifted target attributes
+(\texttt{target\_new\_attribute}), upstream precursor mechanisms
+(\texttt{upstream\_control}), and a \emph{negative control}
+(\texttt{misaligned\_signal}) in which the outcome loads only on
+latent-confounded attributes outside every structural role, so the role menu
+carries no correct hypothesis. A sensitivity arm repeats all four regimes with
+random attribute flips to emulate Stage~I extraction error. The prespecified
+reading is asymmetric: directional roles must improve precision when the
+structure is informative, and must reduce to the unstructured fallback without
+supported harm when it is not. We measure relative variance reduction
+$\Delta\text{Var}$, simultaneous Bonferroni-adjusted intervals, bias, MSE, and
+coverage (Table~\ref{tab:rq2-jci}).
 
-All five methods receive the same $K$ output slots. A common, outcome-blind
-bridge maps their outputs into the frozen admissible requirement-policy space.
-It preserves each method's proposed requirement and edit rather than supplying
-missing reasoning or selecting a better hypothesis on its behalf. Unmappable
-outputs remain failed slots. Each method's allowed information, implementation
-version, adaptation, and mapping rules must be declared and qualified before
-the comparison. Differences in native output spaces make this an evaluation
-of the declared method-plus-bridge procedures, not an unqualified comparison
-of their original systems. Shared confirmation is an external evaluator, not
-a native causal capability credited to every baseline. Equal $K$ also does not
-imply equal computation; method-specific model calls and other resource costs
-are reported separately. RD-only is reserved for RQ2, not a sixth main comparator.
+\begin{table}[htbp]
+  \centering
+  \caption{RQ2: Stage~II effect-estimation precision at a fixed outcome budget.
+  $\Delta$Var is relative score-variance reduction versus \textsc{Full Logit};
+  positive values indicate higher precision.}
+  \label{tab:rq2-jci}
+  \small
+  \begin{tabularx}{\linewidth}{@{}Xrrrrr@{}}
+    \toprule
+    Estimator & Variance & $\Delta$Var & Simultaneous CI & Bias & Coverage \\
+    \midrule
+    \model (Directional JCI) & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Undirected Skeleton} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Propagated Skeleton} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Shuffled Roles} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Full Logit} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Sparse Logit} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Direct Context} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Target Only} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-\subsection{RQ1: Overall Effectiveness}
+\subsection{RQ3: End-to-End Scoped Security Hardening}
 
-\textbf{RQ1. How effectively does \model identify actionable prompt-side security hypotheses compared with state-of-the-art methods?}
+\textbf{RQ3.} \emph{How effectively does \model identify and confirm actionable
+positive security-hardening edits compared with existing prompt analysis
+baselines while tracking adverse regressions separately?}
 
-RQ1 asks which methods identify requirement modifications that receive meaningful
-effect evidence in held-out confirmation. The reporting funnel contains $K$,
-\emph{Mapped}, \emph{Effect-confirmed}, and \emph{Effect-confirmed Yield@$K$}.
-Mapped counts slots whose output resolves to a concrete requirement, task scope,
-editing operation, and comparator under the common bridge. Mapping does not
-establish that every task can be protocolized or that the proposed change has
-an effect.
+RQ3 compares \model against \textsc{Prompt Attribution}, \textsc{Ji et al.}~\cite{ji2025causality},
+\textsc{NLPerturbator}~\cite{chen2026nlperturbator}, and \textsc{LLM-Judge}
+using a common outcome-blind bridge into the admissible scoped-intervention
+space (Table~\ref{tab:rq3-discovery}). Crucially, we measure \textbf{Positive
+Hardening Yield@$K$}—the fraction of $K$ nominated slots achieving confirmed
+positive-meaningful security yield above margin $m_h$—while reporting
+negative-meaningful findings separately as \emph{Adverse Warnings} rather than
+conflating regressions with hardening yield. Table~\ref{tab:rq3-outcomes}
+records the full assigned-arm endpoint decomposition for confirmed edits,
+keeping code validity, Oracle evaluability, functionality, and joint success
+explicitly separate.
 
-Effect-confirmed counts slots with a positive-meaningful or negative-meaningful
-held-out effect under the practical margins and simultaneous intervals in
-Section~\ref{sec:method-causal}. Thus, Effect-confirmed Yield@$K$ is this count
-divided by the original $K$; it is the reporting name for meaningful Yield@$K$,
-not a new significance rule. Positive and negative counts are reported separately.
-Empty slots, mapping or protocolization failures, and non-evaluable findings
-remain in the denominator, alongside practically null and inconclusive effects.
-The full funnel also reports candidate overlap and failure composition.
+\begin{table}[htbp]
+  \centering
+  \caption{RQ3: Intervention discovery and confirmed security-hardening yield
+  across $K$ nominated slots. Adverse findings are reported separately as
+  warnings.}
+  \label{tab:rq3-discovery}
+  \small
+  \begin{tabularx}{\linewidth}{@{}Xrrrrr@{}}
+    \toprule
+    Method & $K$ & Mapped & \shortstack{Positive\\Hardening} &
+      \shortstack{Adverse\\Warnings} & \shortstack{Positive\\Yield@$K$} \\
+    \midrule
+    \model & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{Prompt Attribution} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Ji et al.~\cite{ji2025causality} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    NLPerturbator~\cite{chen2026nlperturbator} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \textsc{LLM-Judge} & \pendingresult & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-An effect-confirmed hypothesis is not necessarily a successful recommendation.
-Confirmation establishes a scoped effect of the tested edit, not the correctness
-of its explanation or predicted direction. An effect opposite to the proposed
-advice can therefore count as effect-bearing while contradicting that advice.
-RQ3 examines this distinction; RQ4 evaluates explanation utility. Yield
-differences describe the frozen benchmark and do not establish expected
-superiority over arbitrary discovery populations.
-
-\subsection{RQ2: Component Contribution}
-
-\textbf{RQ2. Which components of \model contribute to its effectiveness in identifying actionable security hypotheses?}
-
-RQ2 isolates the contribution of FCI-based admission through Full versus
-RD-only. The two selectors hold the candidate universe, task rows, natural-state
-support, folds, first-order RD scores, tie-breaking, and $K$ fixed; only Full
-applies the qualified FCI adjacency gate. Both use the same bridge and downstream
-confirmation results.
-
-We report Full-minus-RD-only Effect-confirmed Yield@$K$, selected-candidate
-overlap, and empty-slot and failure composition. This comparison tests the
-admission criterion, not every representation or measurement component.
-In particular, it cannot establish that graph-grounded explanations are easier
-to understand; that attribution would require a separately designed comparison.
-
-\subsection{RQ3: Prompt Hardening Effectiveness}
-
-\textbf{RQ3. Can security explanations produced by \model guide prompt hardening that reduces insecure code generation?}
-
-RQ3 examines what the effects used in RQ1 support about the proposed actions.
-It uses the same held-out comparisons, not a second experiment selected after
-observing favorable findings. The primary contrast is a single-requirement
-target edit versus operation-matched no-op on oracle-evaluable secure-code
-yield. Placebo/sham and generic-security controls assess specificity under
-separately frozen secondary inference rules. Requirement addition (ADD) and
-removal (REMOVE) remain distinct policies.
-
-Effects are model-specific, realization-weighted assigned-arm ITT estimates,
-with task-unit uncertainty and one simultaneous primary family. Every committed
-assignment remains in its assigned arm regardless of fidelity, compliance,
-generation success, or non-target drift. We report effect direction, magnitude,
-uncertainty, and positive-meaningful, negative-meaningful, practically null,
-inconclusive, or non-evaluable status. Validity, evaluability, insecure and
-unknown labels, functionality, joint success, and coverage sensitivity bounds
-accompany the primary endpoint.
-
-These records distinguish a supported modification, an endpoint-specific warning,
-and a decision for which adoption advice must be withheld under
-Section~\ref{sec:method-guidance}. Secure-yield gains alone do not establish
-reduced underlying insecurity or preserved functionality. RQ3 therefore evaluates
-the evidence for the policies underlying the guidance, not whether a person
-can read an explanation and successfully apply its advice.
-
-\subsection{RQ4: Explanation Quality}
-
-\textbf{RQ4. How do security experts evaluate the quality of explanations produced by \model and competing methods?}
-
-RQ4 compares anonymized English \emph{Explanation + Suggested Action} records
-from the same five methods. Each record is a complete product: the requirement
-identified, the evidence presented, and the suggested modification or stated
-reason to withhold advice. Common presentation fields make the products
-comparable without inventing evidence, strengthening a baseline's claims,
-or rewriting every method's output through \model. Each method's evidence
-access and explanation-construction procedure, including whether shared
-confirmation results are available, must be fixed before producing study
-materials. RQ1's external validation does not automatically become a baseline's
-own explanation evidence.
-
-Experts rate five items on 1--5 Likert scales: clarity, evidence
-sufficiency/justification, credibility, actionability, and overall usefulness.
-The planned primary rating is overall usefulness; the other four characterize
-the perceived strengths and weaknesses of each product. This is a comparison
-of complete-product perceived utility, not a wording-only comparison with
-identical evidence. Differences cannot be attributed solely to Prompt TSG,
-causal correctness, or prose format.
-
-The study will use balanced case--method assignment and blinded randomized
-presentation order. Prospective case sampling must include unfavorable and
-unresolved findings rather than only successful hardening examples. Study
-materials must also follow prespecified handling of empty or unmappable outputs
-and unavailable explanation products, with decisions and counts reported by
-method. Participant
-criteria and counts, case sampling, comparator materials, exact item wording
-and anchors, ethics determination, and an analysis accounting for repeated
-ratings by expert and case require preregistration before recruitment or
-response inspection. The primary rating and secondary-item multiplicity rule
-must be finalized in that plan.
-
-Rated credibility does not establish causal correctness, and rated clarity
-or actionability does not establish objective comprehension, actual adoption,
-or repair accuracy. These ratings cannot revise the computational evidence in
-RQ1--RQ3. They assess whether the resulting explanations help experts judge
-the proposed prompt changes and their limits.
+\begin{table}[htbp]
+  \centering
+  \caption{RQ3: Assigned-arm ITT outcome decomposition for confirmed prompt
+  interventions, retaining all validity, evaluability, and unknown states.}
+  \label{tab:rq3-outcomes}
+  \small
+  \begin{tabularx}{\linewidth}{@{}Xrrp{0.20\linewidth}p{0.14\linewidth}@{}}
+    \toprule
+    Endpoint & Reference & Intervention & Difference and CI & Status \\
+    \midrule
+    Secure yield ($Y$, primary) & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Code validity ($Y_C$) & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Oracle evaluability ($Y_E$) & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Security-unknown rate & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Declared functionality & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    Joint secure-and-functional & \pendingresult & \pendingresult & \pendingresult & \pendingresult \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

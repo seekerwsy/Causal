@@ -1,1 +1,1 @@
-"""Independently measured security and functionality outcomes."""
+"""Independently measured security (AST Oracle profiles) and functionality outcomes."""

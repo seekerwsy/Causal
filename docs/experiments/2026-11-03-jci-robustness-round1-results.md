@@ -1,0 +1,70 @@
+# 第一轮JCI稳健性实验的执行记录
+
+## 已固定设计与实现
+
+设计为2026-11-03-jci-robustness-round1-design.md，配置为configs/jci-robustness-round1.json。四种压力条件各保留三种结果机制，固定384个完整评价单元；204项比较共同使用0.025错误概率及预定5%实用门槛。本轮384项评价已经全部完成逐单元独立核验和原生图重放，完整汇总、独立汇总核对及只读Codex CLI最终审查均已成功完成。JCI组件判定为JCI_ROUND1_SUCCESS。
+
+新增实现允许明确设定上下文对属性的作用强度，以及分配前属性翻转概率。生产采样与独立重建分别实现，不改变原始默认参数。测量误差的潜在机制角色与可观察因果图分别解释，不把10%压力设定当成真实Graph误差率。
+
+tests/development/check_attribute_measurement.py实际复现一份已冻结单元的辅助、来源、目标拟合、校准及效应估计五种角色；另完成36项不同机制、环境及误差条件的独立采样核对。随机有符号残差期望恒等式的最大数值误差1.0690233420707074e-16。核对状态VERIFIED_ATTRIBUTE_MEASUREMENT_AND_RANDOMIZED_SCORE，记录摘要175b3a083e7e35018f66fd46d1da9de770f333af67613f0d511f19cfde2c91bc。旧单元坐标2026111451/0/0，未消耗新的评价批次。这些检查不提供学习收益。
+
+## 实际输入与服务器执行
+
+已传输输入results/jci-robustness-round1-20261103-inputs.tar.gz，1926808字节，SHA256为c591489b22eee6bbcb59d1938451ebb26f90d79ebc9027695dc36131e88825e6，本地与服务器inputs相同。归档含当前科学源码、完整四组计划、已暴露坐标的四组实现检查计划、完整设计及现有独立核对器。
+
+服务器输入为/home/wsy/work/prompt-mechanism-study/inputs/jci-robustness-round1-20261103-runtime。包内src以原样复制形式提供.runtime/prompt_mechanism_study导入，不改写源码。实际入口为data/method/jci-robustness-round1-20261103/run.sh，canary执行四个代表单元，full执行完整384项；两种角色使用不同结果目录，后者只有前者全部通过才允许启动。
+
+四个canary代表单元均已完成完整学习、独立数值核对和原生图重放，进程退出状态为零，错误日志为空。每项status=VERIFIED、cells=1、native_graphs_replayed=1；每项独立重拟合177个模型并核对2268条逻辑回归交叉验证路径。查询数量分别为reference 16031、weak_context 5100、measurement_error 104234、limited_structure_data 32599。各项核对结果已取回本研究canary-verification目录。代表单元仍是已暴露坐标的实现检查，不计入384项独立评价。
+
+四项共享源码归档摘要026ae44efa40c80a8734a7afb3d09397b1624a51dc9d6bbba5914d58961dd68c，独立核对器摘要787b61798589db37d257cffed47a57d2242e7ed5d9a52665e9b9a4b311175207。实际完整评价使用同一已核对输入包及源文件，入口run.sh full。结果目录为项目results/jci-robustness-round1-20261103-full，过程输出为同名full.stdout.txt与full.stderr.txt。完整四组按固定顺序执行，分别进行全部数值核对及原生图重放；不根据部分结果调整设计。
+
+运行使用已有Python环境及R/pcalg库，数值运算单线程；代表单元单进程，完整评价最多四进程。TEMP、TMP与TMPDIR均指向项目结果中的runtime-tmp。源源码归档、软件版本及逐项身份由既有attribute_run.py保存，数值重建及原生图重放由既有attribute_verify.py执行。没有模型服务调用、付费服务或受保护数据使用。
+
+## 完整结果的描述性诊断
+
+截至2026-11-04 19:32（服务器时区+0800），reference、weak_context、measurement_error与limited_structure_data四组各96项评价均已完成独立数值重拟合和原生图重放，完整独立核验完成384/384项。四组均为status=VERIFIED、cells=96、native_graphs_replayed=96，共享源码与独立核对器身份均与冻结输入相同。每组独立重拟合16992个模型、核对217728条逻辑回归交叉验证路径。四份原生重放文件的SHA256均为ee75c83424bd1dd71faaf29af3b83255e28c76c6e76ec0a6d7db41d239b4fb21。主进程及其核验、R子进程已经结束，完整错误日志仅包含四组原生重放进度；启动器未单独保存主进程退出码。四份成功终止核验记录与完整执行日志构成主运行完成证据，完整分析命令退出状态为零仅表示分析完成，不解释为主运行退出码。
+
+在读取本轮新估计值之前，已实现设计规定的偏差、均方误差、名义95%区间覆盖及方向诊断。区间具体使用正态Wald形式；真值积分的五倍标准误差与区间边界重叠时保留数值边界未知。这些描述不进入主要成功门槛，也不改变204项比较及其错误概率。
+
+attribute_estimation_diagnostics重新计算最终随机有符号残差及标准误差。summarize.py仅接受四组全部通过逐单元独立核对和原生图重放的384项结果，输出132项方法与机制诊断。verify_aggregate.py单独从已核对的最终估计、标准误差和积分值计算描述，使用独立边集合构造核对方向计数；不调用生产诊断或图构造函数，并检查全部比较与汇总身份。带噪条件只报告与无噪机制方向的差异，不称为观测图真值恢复。
+
+tests/development/check_attribute_estimation_diagnostics.py已在旧冻结坐标2026111451/0/0完成十一种方法的生产与独立诊断逐字段核对，没有读取本轮新估计或生成新数据。完整分析使用新的独立分析目录；summarize.py已经返回COMPLETED_VERIFIED_ROBUSTNESS_AGGREGATION，生成204项比较及132项描述性诊断。summary.json为137932字节，SHA256为af02ef80b4e0eee5eebe0ef78403940426f1ee5259b128f05c713439282b6ac2。verify_aggregate.py已经返回INDEPENDENTLY_VERIFIED_COMPLETE_ROBUSTNESS_AGGREGATION，核对384项评价、204项比较及132项诊断，记录中的aggregate_sha256与该汇总完全相同。verification.json的SHA256为424a68aee2d1c0e8e7c675663dfa9550ba66322946466a9e88e2445e32779270，独立汇总核对器SHA256为56d532ae0bd0f3304afb7d5e31e4ae91164d1ec9159aac26aad9c99887d179b0。完整分析命令退出状态为零。冻结学习输入保持原样，当前聊天未读取汇总中的效果数值。
+
+诊断分析输入已冻结为results/jci-robustness-round1-20261103-analysis-inputs.tar.gz，24406字节，摘要d3098a34881d9f788beeeea2ad3f70cca606eb8bc19129be6da2e4e70b097dab，本地与服务器inputs相同。包内只有分析所需共同源码、主配置、汇总与独立核对程序及设计记录；不修改学习输入。完整结果取得后，在独立inputs/jci-robustness-round1-20261103-analysis目录解压，将包内src原样复制到.runtime/prompt_mechanism_study，使用既有科学Python环境执行summarize.py，两个位置参数依次为包含四个条件子目录的完整结果根目录和新的汇总JSON路径；随后执行verify_aggregate.py，三个位置参数依次为同一完整结果根目录、汇总JSON及新的核对JSON。两项程序都拒绝不完整的384项结果，输出文件必须使用尚不存在的路径。
+
+实际工作目录为/home/wsy/work/prompt-mechanism-study/inputs/jci-robustness-round1-20261103-analysis，分析输入与输出目录均为首次创建。PYTHONPATH指向该目录的.runtime，PYTHONDONTWRITEBYTECODE=1，OMP_NUM_THREADS、OPENBLAS_NUM_THREADS与MKL_NUM_THREADS均为1；TEMP、TMP与TMPDIR指向results/jci-robustness-round1-20261103-analysis/runtime-tmp。实际分析命令如下，已有输出不得覆盖：
+
+```bash
+/home/wsy/work/prompt-mechanism-study/inputs/jci-framework/.venv/bin/python data/method/jci-robustness-round1-20261103/summarize.py /home/wsy/work/prompt-mechanism-study/results/jci-robustness-round1-20261103-full /home/wsy/work/prompt-mechanism-study/results/jci-robustness-round1-20261103-analysis/summary.json
+/home/wsy/work/prompt-mechanism-study/inputs/jci-framework/.venv/bin/python data/method/jci-robustness-round1-20261103/verify_aggregate.py /home/wsy/work/prompt-mechanism-study/results/jci-robustness-round1-20261103-full /home/wsy/work/prompt-mechanism-study/results/jci-robustness-round1-20261103-analysis/summary.json /home/wsy/work/prompt-mechanism-study/results/jci-robustness-round1-20261103-analysis/verification.json
+```
+
+## 完整结果取回
+
+服务器完整结果传输归档为/home/wsy/work/prompt-mechanism-study/archive/jci-robustness-round1-20261103-complete-results.tar.gz，本地保存为results/jci-robustness-round1-20261103-complete-results.tar.gz。归档为2188979195字节、1601个成员，SHA256为3dee97c0643de4e0250ad2435dfe25a84a21e449cdfc9313824c31679caa005d。服务器压缩完整性、归档可读性及成员清单检查成功；本机字节数和SHA256与服务器完全相同。归档包含全部384项原始结果、四份原生图重放、逐单元核验记录、完整执行日志、最终汇总和独立汇总核对，排除runtime-tmp缓存，原始服务器结果保持原状。
+
+本机已按归档相对路径解压至results/jci-robustness-round1-20261103-full及results/jci-robustness-round1-20261103-analysis，解压拒绝覆盖既有路径。四个条件均有96项结果及一份覆盖96项的原生重放记录，核验状态全部为VERIFIED；共享源码、独立核对器和四份原生重放摘要与服务器记录相同。最终汇总与独立汇总核对摘要均与上述记录相同，本机传输核对状态为VERIFIED_LOCAL_COMPLETE_JCI_TRANSFER。
+
+## 聚合判定
+
+完整汇总状态为COMPLETED_VERIFIED_ROBUSTNESS_AGGREGATION，独立核对状态为INDEPENDENTLY_VERIFIED_COMPLETE_ROBUSTNESS_AGGREGATION。独立核对逐字段重建384项评价、204项比较及132项描述性诊断，aggregate_sha256与最终汇总SHA256完全相同。只读Codex CLI最终审查引用同一汇总身份、同一独立核对身份及同一完整结果传输归档身份，并确认输入完整。
+
+JCI组件判定为JCI_ROUND1_SUCCESS。冻结的reference主要重复性门槛reference_gate_passed=true：downstream_signal相对十项预定对照全部满足至少5%相对方差减少、Bonferroni校正区间下界大于零及两个批次分别改善；target_new_attribute在reference条件下也为10/10通过。downstream_signal与target_new_attribute的通过范围均限定为reference模拟条件。weak_context、measurement_error及limited_structure_data三个压力条件均未取得方向收益支持。upstream_control判定为损害，冻结的负点估计、精确零值及校正区间支持的损害全部保留。
+
+本轮只建立模拟条件下、相同目标结果预算、独立随机效应估计的条件性方差收益及失效边界。自然任务收益、策略价值、代码安全率、完整功能、安全与功能联合成功、Graph表示收益、TSG独特贡献、Graph与JCI集成收益、未来环境稳定性和正式确认性证据均未建立。Graph组件状态为BLOCKED_SOURCE_BOUNDARY，联合状态为JOINT_SCIENTIFIC_BOUNDED_UNMET，第二轮不启动。
+
+## 诊断边界
+
+- 132项诊断使用描述性的名义95%正态Wald区间，每个条件与机制组合只有32次重复，不能认证精确95%覆盖。偏差、均方误差、覆盖及完整预测器选择均未加入成功门槛。
+- reference的upstream_control保留一个方向无效单元，measurement_error的downstream_signal保留一个方向无效单元；两项均保留在各自32次重复与全部比较分母中。
+- weak_context的三个机制均为0/10通过；limited_structure_data的三个机制均为0/10通过，并保留三个校正区间支持的损害结果。
+- measurement_error的observed_graph_truth_available=false。与无噪机制角色的差异不能解释为观测图恢复错误率，10%属性翻转也不能解释为真实Graph测量错误率。
+- 全部132项诊断保留一个integration_boundary_unknown记录。该未知没有归入覆盖或未覆盖，也没有改变384项分母。
+- reference的target_new_attribute方差门槛通过，同时保留其偏差、均方误差与覆盖诊断；机制通过不能替代这些诊断。
+- 来源上下文分离不构成未来环境稳定性证明。Graph绑定和测量仍需要独立表示证据。
+
+## 冻结交付
+
+最终归档为results/jci-robustness-round1-20261103-frozen.tar.gz，字节数为2191231231，SHA256为44db172714253be7787a4e375c3dcf7365d12f7c6b80473f937823817069eb1f，共19个成员。归档成员集合无缺失、额外成员或重复路径，全部成员从归档解出后的SHA256与封包前实际文件相同；gzip与tar可读性、归档字节数及归档SHA256均已核对。归档在该核对后保持不变。
+
+归档外共同交付manifest为data/method/jci-robustness-round1-20261103/frozen-result-manifest.json。本结果文档与该manifest不纳入最终归档；归档、本结果文档和manifest必须共同交付。manifest记录研究身份、384项分母、四组状态、归档身份、19个成员的仓库相对路径与逐文件SHA256，以及本结果文档的路径与SHA256。

@@ -1,69 +1,78 @@
 \section{Introduction}
 
-Developers using large language models for code generation face a prompt-level
-security decision: which requirements should they make explicit, where should
-those requirements apply, and what evidence justifies the change? Vulnerabilities
-have been documented in generated code~\cite{pearce2022copilot}, and security
-prompting and prompt optimization provide ways to influence the
-output~\cite{tony2025prompting,nazzal2024promsec}. For a developer considering a
-particular modification, a useful explanation must connect the requirement to
-the task, describe the proposed change, and make its evidence and limitations
-understandable.
+Developers using large language models for code generation face a concrete
+prompt-level security decision: which requirements should be made explicit,
+where within a multi-operation task do those requirements apply, and what causal
+evidence justifies modifying the prompt? Insecure patterns are widespread in
+generated code~\cite{pearce2022copilot,perry2023assistants}, and security
+prompting or iterative prompt optimization can shift model
+behavior~\cite{tony2025prompting,nazzal2024promsec}. Yet turning prompt
+adjustments into trustworthy engineering guidance poses two foundational
+methodological challenges.
 
-The first difficulty is giving a security requirement its task-local meaning.
-A request to parameterize a database value must identify the operation and
-input it governs. The same prompt may contain several operations, only some
-of which are covered by an explicit requirement. A concept label alone cannot
-locate the proposed modification or identify the functional behavior that must
-remain unchanged. Structured task representation must therefore connect
-requirements to operations, objects, and conditions. Those connections give
-both the intervention and its explanation a concrete scope.
+The first challenge is \textbf{compositional scope ambiguity in multi-operation
+prompts}. Natural programming tasks frequently combine several operations that
+share data objects, nested attribute components, and logical execution
+conditions~\cite{cicalese2026language}. A requirement to parameterize an SQL
+value must specify which operation and input object it governs while leaving
+sibling uses of the same object—such as file-path construction or return
+formatting—unchanged. Flat requirement checklists or ungrounded concept tags
+collapse these operation-level distinctions, and coupling semantic extraction
+to brittle patch-syntax contracts causes syntax rejections to obscure true
+requirement-binding effects. Structured task representation must therefore tie
+normative propositions to exact operations, object-component ownership paths,
+and logical guards while preserving local unresolved facts without discarding
+valid bindings.
 
-The second difficulty is establishing evidence for a modification, rather than
-an association with an outcome. Natural prompts with and without a requirement
-can differ in task content and other instructions. Their outcome differences
-alone do not identify what would change under an explicit requirement edit.
-Prior work uses human-understandable concepts and causal analysis to explain
-code generation and support prompt adjustment~\cite{ji2025causality,velasco2026smells}.
-For task-bound security guidance, the comparison must specify exactly which
-requirement expression changes and which non-target requirements remain fixed.
-Evidence that prioritizes this question must remain distinct from independent
-randomized evidence about the resulting prompt policy.
+The second challenge is \textbf{confounded structural attributes under limited
+target budgets}. Even when prompt semantics are precisely bound, observing
+higher security in natural prompts that contain a requirement does not identify
+the effect of explicitly editing that requirement~\cite{ji2025causality,velasco2026smells}.
+Furthermore, target randomized budgets for any single atomic policy are small,
+while prompt-derived structural attributes extracted from task graphs are
+highly collinear and include latent-confounded proxy chains. Conditioning
+directly on naive correlations or undirected adjacency risks overfitting noisy
+source attributes or suffering negative transfer when downstream and upstream
+mechanisms shift across populations. Causal structure discovery must
+distinguish genuine context-anchored causal roles from latent proxies while
+retaining strict finite-sample unbiasedness under target randomization.
 
-The third difficulty is translating effect evidence into guidance. An estimate
-does not by itself state where the edit applies, what it was compared with,
-or whether its security benefit is accompanied by preserved functionality.
-Measurement coverage and uncertainty can further limit the supported
-conclusion~\cite{dai2026rethinking}. An explanation must connect the task and
-the concrete modification to these qualifications, then distinguish a supported
-action from an unconfirmed option or an unresolved decision. Finding an effect
-and having enough evidence to recommend adopting a change are different outcomes.
+We introduce \model, a two-stage framework for task-grounded requirement
+representation and causal prompt guidance. In \textbf{Stage~I (Task-Grounded
+Graph Representation)}, \prompttsg binds normative requirements, operations,
+data-object ownership chains, and logical conditions to character-verified
+evidence spans, decouples semantic representation from deterministic code
+splicing, and extracts pre-assignment relational attributes $Z=q(G_P,r)$. In
+\textbf{Stage~II (Context-Anchored Directional JCI and Cross-Fitted Effect
+Learning)}, \model uses Joint Causal Inference~\cite{mooij2020jci} with
+exogenous preparation contexts $C$ to discover a Partial Ancestral Graph (PAG)
+over $(C,Z)$, decomposes attributes into canonical directional roles
+$(V_{\rm root},V_{\rm up},V_{\rm term},V_{\rm other})$ to guide role-grouped
+finite shrinkage with an unweighted fallback, and estimates target average
+intervention effects via task-unit $K$-fold cross-fitted randomized residual
+scoring paired with scoped evidence reporting.
 
-We introduce \model, a method for requirement-level causal analysis and
-evidence-grounded security guidance. Structured Graph Representation binds
-requirements to their task context. Requirement-Level Causal Analysis uses
-observational evidence to prioritize questions within a fixed budget, then
-estimates single-requirement policy effects through held-out randomized
-comparisons. Evidence-Grounded Explanations and
-Guidance organizes the linked task semantics, prompt edits, and measured effects
-into an Explanation and a Suggested Action, with explicit limits on the advice
-the evidence can support.
+Our methodological contributions are twofold:
+\begin{enumerate}
+  \item \textbf{Task-Grounded Graph Representation (\prompttsg).} We formalize
+  scoped semantic graphs that resolve multi-operation object participation,
+  preserve local \texttt{unresolved} boundaries, decouple prompt semantics from
+  code-edit syntax, and project graph-topological attributes cleanly into
+  pre-assignment statistical covariates.
+  \item \textbf{Context-Anchored Directional JCI and Cross-Fitted Effect
+  Learning.} We introduce a directional PAG role-grouped shrinkage estimator
+  that separates context entry targets ($V_{\rm root}$), upstream precursors
+  ($V_{\rm up}$), confluence terminals ($V_{\rm term}$), and latent-confounded
+  leaves ($V_{\rm other}$), coupled with task-unit $K$-fold cross-fitting that
+  preserves exact finite-sample unbiasedness while mitigating negative transfer
+  across both downstream and upstream regimes.
+\end{enumerate}
 
-Our methodological contributions are twofold.
-\textbf{Task-grounded requirement-level causal analysis} connects a security
-requirement's operation, object, and conditions to an explicit intervention
-comparison. Structured task semantics support hypothesis construction and
-task-preserving prompt edits, while independent measurements and randomized
-inference establish the intended source of policy-effect evidence. The semantic
-graph is not itself a causal graph.
-
-\textbf{Evidence-grounded explanations and security guidance} links applicable
-task scope, concrete modifications, effect evidence, functionality, and
-uncertainty to the action that can be supported. We specify how to present
-these elements and when to withhold adoption advice, including for unconfirmed
-or insufficiently supported changes. The computational evaluation examines
-the hypotheses identified by five methods, the contribution of FCI-based
-admission, and the effects of the proposed prompt modifications. A separate
-expert study will compare the same five methods' complete explanation products
-for perceived clarity, justification, credibility, actionability, and usefulness.
-Its design will be preregistered before recruitment.
+The evaluation design in Section~\ref{sec:evaluation} isolates each
+contribution across three research questions: \textbf{RQ1} measures the
+representation and binding gains of \prompttsg over \textsc{Raw} and
+\textsc{Flat} baselines; \textbf{RQ2} evaluates effect-estimation variance
+reduction of directional cross-fitted JCI against unstructured learners and
+undirected-skeleton ablations; and \textbf{RQ3} assesses end-to-end positive
+security-hardening yield while keeping adverse warnings, functionality, and
+Oracle coverage distinct.

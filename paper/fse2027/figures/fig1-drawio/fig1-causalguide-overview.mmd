@@ -1,0 +1,48 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Comic Sans MS","fontSize":"22px","primaryTextColor":"#20242A","lineColor":"#626B7C"},"flowchart":{"htmlLabels":true,"nodeSpacing":24,"rankSpacing":32,"curve":"linear"}}}%%
+flowchart LR
+  subgraph stage_i["I  Task-Grounded Requirement Representation"]
+    direction TB
+    source["Complete source input P<br>Task, system messages, API context"]
+    graph["Source-grounded Prompt TSG<br>G_P = (V, E, types, attributes, evidence)"]
+    queries["Complete bindings B_G(r)<br>Operation queries I_G(o)<br>Unbound propositions U_G"]
+    interventions["Requirement intervention + reference<br>Scope, conditions, preserved obligations"]
+    attributes["Fixed pre-assignment queries<br>Background W, contexts C, attributes Z<br>Unknown states retained"]
+    source --> graph --> queries --> interventions --> attributes
+  end
+  subgraph stage_ii["II  JCI-Guided Prognostic Learning and Effect Estimation"]
+    direction TB
+    roles["Freeze interventions and task roles<br>Randomized reference A=0 / target A=1<br>Independent security and functionality measurement"]
+    source_data["Source learning records D_S<br>Arm-stratified JCI + common base-penalty CV"]
+    support["Source-context separation queries<br>Feature support s_j"]
+    fit["Shared average-outcome predictor<br>Source coefficients beta + target deviation delta<br>Target fitting records D_fit"]
+    calibration["Independent target calibration D_cal<br>Select structure gamma and shrinkage eta<br>by outcome-prediction loss"]
+    predictor["Freeze target predictor g_T(L)<br>L = (W, Z, C); A excluded"]
+    ranking["Independent target ranking D_rank<br>R = 2(2A - 1) [Y - g_T(L)]"]
+    nominations["Rank interventions by absolute effect<br>Freeze nominations"]
+    confirmation["Independent confirmation D_confirm<br>Randomized effects + simultaneous intervals<br>Positive / negative / null<br>Inconclusive / non-evaluable"]
+    roles --> source_data --> support --> fit --> calibration --> predictor --> ranking --> nominations --> confirmation
+  end
+  subgraph stage_iii["III  Evidence-Grounded Explanations and Guidance"]
+    direction TB
+    report["Explanation<br>Requirement scope + intervention / reference<br>Confirmed effect + interval + status<br>Functionality, Oracle support, unknowns"]
+    action["Suggested Action<br>Evaluate a modification or report a scoped finding<br>Issue a warning or withhold adoption advice"]
+    boundary["Adoption requires the declared<br>security and task-preservation evidence"]
+    report --> action --> boundary
+  end
+  stage_i -->|"Interventions and measured attributes"| stage_ii
+  stage_ii -->|"Independent effect evidence"| stage_iii
+  classDef representation fill:#E1EDF9,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef intervention fill:#F1E7F8,stroke:#8442AA,stroke-width:2px,color:#61367D
+  classDef learning fill:#FBE4D6,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef independent fill:#F0F1F3,stroke:#626B7C,stroke-width:2px,color:#20242A
+  classDef reporting fill:#DEF1D7,stroke:#20242A,stroke-width:2px,color:#20242A
+  classDef scope fill:#FFF3DB,stroke:#C28A2A,stroke-width:2px,color:#80561E
+  class source,graph,queries,attributes representation
+  class interventions intervention
+  class source_data,support,fit,predictor learning
+  class roles,calibration,ranking,nominations,confirmation independent
+  class report,action reporting
+  class boundary scope
+  style stage_i fill:#FAFCFE,stroke:#626B7C,stroke-width:2px,stroke-dasharray:5 4
+  style stage_ii fill:#FFFCFA,stroke:#626B7C,stroke-width:2px,stroke-dasharray:5 4
+  style stage_iii fill:#FBFEFA,stroke:#626B7C,stroke-width:2px,stroke-dasharray:5 4

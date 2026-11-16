@@ -1,72 +1,52 @@
 \section{Motivating Example and Problem Formulation}
 
-\subsection{From a Task Requirement to a Guidance Question}
+\subsection{Multi-Operation Scope Disambiguation}
 
-Consider a request to delete database records for a supplied user identifier
-and return the number of deleted records. The request specifies an operation,
-its input, and observable behavior, but does not explicitly require SQL value
-parameterization. A developer considering a prompt modification needs to know
-which input the requirement concerns, what to change, and what evidence would
-justify doing so. The proposed intervention adds that requirement for the
-identifier used by the deletion operation while retaining the requested record
-selection and return behavior. This defines something to investigate; it does not
-establish that code generated from the original prompt lacks parameterization
-or is insecure.
+Consider a natural-language task that stores an uploaded file's path in a SQL
+database and subsequently uses the same path to serve file downloads
+(Figure~\ref{fig:method-example}). The prompt mentions one data object
+(\texttt{filepath}) participating in two distinct operations: SQL persistence and
+filesystem retrieval. A developer considering adding a SQL parameterization
+requirement needs to know which operation and input role the edit constrains,
+which non-target behaviors (saving uploads and downloading files) must remain
+invariant, and what empirical effect the edit produces. Attaching the requirement
+to the download operation instead of database storage would define an entirely
+different intervention.
 
-The intervention's scope is part of the hypothesis. A parameterization
-requirement attached to another input or database operation would define a
-different comparison. Prompt TSG records these task-local distinctions so that
-source assessment and prompt editing refer to the same requirement. A hypothesis
-specifies where the requirement applies, whether to add or remove it, and which
-non-target requirements must remain fixed. Its concrete prompt-editing policy is
-tested against a matched rewrite that leaves the target requirement's expression
-unchanged. The experimental object is this policy, not an intrinsic causal
-property of a requirement name or graph node.
+\prompttsg records these task-local distinctions so that requirement assessment
+and prompt realization operate on the same scoped object. An atomic
+requirement hypothesis fixes the target requirement expression, governed
+operation and object-component path, execution conditions, edit operator
+(Requirement Introduction $\mathcal T_r^+$, Requirement Withdrawal
+$\mathcal T_r^-$, or explicit policy restatement), and preserved non-target
+obligations. The experimental unit is this concrete prompt-editing policy, not
+an intrinsic causal property of an isolated keyword or graph node.
 
-The intended output is an \emph{Explanation + Suggested Action} record.
-For the example, the explanation identifies the supplied identifier as a SQL value, locates
-the proposed parameterization requirement at the deletion operation, and states
-the record-selection and return behavior that must remain unchanged. It then
-names the tested edit and comparison and presents the available effect evidence
-and its uncertainty. The suggested action states whether to consider the edit
-for testing, adopt it on sufficient evidence, or withhold adoption advice.
-This example specifies the explanation's
-content; it is not a measured hardening result.
-
-\subsection{Evidence and Scope of Guidance}
+\subsection{Target Causal Estimand and Endpoint Separation}
 \label{sec:matter-definition}
 
-We study changes to requirement expression within a declared task population
-and generator model. The analysis produces evidence for selected single-requirement
-prompt policies, not an explanation of why one particular code
-sample was generated. Task semantics determine what the policy changes;
-independent measurements determine what can be said about its consequences.
+We estimate population-level intervention effects on independent, deduplicated
+\emph{task units} within a declared task population and generator model;
+repeated generations from the same task unit reduce within-task noise without
+inflating effective sample size. The primary safety endpoint is
+\emph{oracle-evaluable secure-code yield}:
+\begin{equation}
+  Y = Y_C Y_E\,\mathbb I\{\text{Oracle label is secure}\},
+  \label{eq:secure-yield-pf}
+\end{equation}
+where $Y_C \in \{0,1\}$ indicates valid parseable code and $Y_E \in \{0,1\}$
+indicates that an arm-blind security Oracle renders a supported decision.
+Functionality preservation against the original task, code validity $Y_C$,
+Oracle evaluability $Y_E$, \texttt{unknown} security coverage, and joint
+secure-and-functional success remain separately reported outcomes. Neither
+\texttt{unresolved} source facts nor \texttt{unknown} Oracle decisions are
+coerced into absence or insecurity.
 
-The primary safety endpoint is \emph{oracle-evaluable secure-code yield}:
-whether a generation request produces valid code that a fixed security
-measurement procedure, the \emph{Oracle}, can assess and labels secure.
-Functionality is assessed independently on the same generated code against the
-original task. Code validity, Oracle support and unknown coverage, and
-secure-and-functional joint success remain separate outcomes. An unknown
-security label is not an insecure label, and a higher observed secure yield
-does not alone establish a lower underlying insecure-code rate when measurement
-coverage changes.
-
-For a single-requirement policy, a meaningful effect is positive or negative
-relative to a prespecified practical margin and simultaneous uncertainty
-interval. Practically null, inconclusive, and non-evaluable findings remain
-distinct. An informative finding need not support hardening: an adverse
-policy effect can support an endpoint-specific warning about that edit.
-Favorable security evidence alone does not establish preserved functionality.
-An explanation must distinguish an unconfirmed option, a supported effect
-statement, and a recommendation whose
-additional security and task-preservation conditions have been met.
-
-Effects are estimated at the level of independent, deduplicated \emph{task
-units}; repeated generation requests do not create additional tasks. Each claim
-refers to the tested requirement, operation and scope, task population, editing
-policy, generator model, endpoint, and inference family. Source binding does
-not convert this population-level evidence into a guarantee for an individual
-task or show that several individually assessed edits remain beneficial when
-combined. The Method specifies how the comparison and inferential rules are fixed
-before confirmation outcomes and how their evidence constrains guidance.
+Under assigned-arm intention-to-treat (ITT) accounting, every committed task
+assignment remains in its assigned arm regardless of post-assignment fidelity,
+formatting errors, or non-target drift. For a single-requirement policy $h$,
+a confirmed positive-meaningful finding supports scoped security hardening,
+whereas a negative-meaningful finding yields an endpoint-specific warning;
+positive hardening yield and adverse warnings are tracked separately in guidance
+generation. Adoption recommendations additionally require meeting declared
+task-preservation and Oracle-coverage criteria.

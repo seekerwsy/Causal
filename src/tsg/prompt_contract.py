@@ -3,20 +3,64 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
 
 from prompt_mechanism_study.tsg.prompt_tsg import (
     PromptTSG,
     PromptTSGError,
+    REQUIREMENT_TYPES,
     build_prompt_tsg,
     catalog_sha256,
     catalog_from_record,
     _occurrence_span,
+    prompt_tsg_record,
+    source_nodes,
 )
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 
 
 _REVIEW_STATUSES = {"development_exposed", "prospective_frozen"}
+
+
+def compile_source_propositions(task, record, *, extractor_id):
+    if task['task_unit_id'] != record['task_unit_id']:
+        raise PromptTSGError('来源命题与任务身份不同')
+    catalog = open_concept_catalog()
+    catalog['attribute_names'] = ['binding_complete', 'descriptive_force', 'normative_force']
+    for semantic, concept in record['concepts'].items():
+        if semantic == 'task.root' or concept['node_type'] not in catalog['node_types'] or concept['node_type'] == 'task':
+            raise PromptTSGError('来源概念类型无效')
+        catalog['semantics'][semantic] = concept['node_type']
+        require_text(concept['meaning'], 'concept meaning')
+        catalog['semantic_guidance'][semantic] = concept['meaning']
+    roles = {'about_operation': {'task_operation'}, 'has_subject': {'data_object'},
+        'under_condition': {'condition'}, 'scope_evidence': REQUIREMENT_TYPES | {'condition'}}
+    for relation, targets in roles.items():
+        catalog['edge_types'].append(relation)
+        catalog['allowed_edges'] += [[source, relation, target] for source in sorted(REQUIREMENT_TYPES) for target in sorted(targets)]
+    if (any(row['edge_type'] == 'part_of' for row in record['relations'])
+        or any(row[1] == 'part_of' for row in record['unresolved_relations'])):
+        catalog['edge_types'].append('part_of')
+        catalog['allowed_edges'].append(['data_object', 'part_of', 'data_object'])
+    for relation in ('refers_to', 'supports', 'contrasts'):
+        catalog['edge_types'].append(relation)
+        catalog['allowed_edges'] += [[source, relation, target] for source in catalog['node_types']
+            for target in catalog['node_types'] if source != 'task' and target != 'task']
+    for fact in record['facts']:
+        quote, occurrence = fact['evidence_text'], fact['occurrence']
+        if not isinstance(quote, str) or not quote or type(occurrence) is not int or occurrence < 1:
+            raise PromptTSGError('来源命题引用无效')
+        if len(list(re.finditer('(?='+re.escape(quote)+')', task['prompt']))) < occurrence:
+            raise PromptTSGError('来源命题引用没有在指定位置逐字出现')
+    graph = build_prompt_tsg(task_id=task['task_unit_id'], prompt=task['prompt'], extractor_id=extractor_id,
+        catalog=catalog, facts=record['facts'], relations=record['relations'],
+        unresolved_semantics=record['unresolved_semantics'], unresolved_relations=record['unresolved_relations'],
+        requirement_structures=record['requirement_structures'], requirement_scopes=record['requirement_scopes'],
+        requirement_relations=record['requirement_relations'])
+    local = source_nodes(record['facts'], prompt=task['prompt'])
+    return graph, dict(catalog=catalog, graph=prompt_tsg_record(graph),
+        local_node_ids={key: node.node_id for key, node in local.items()})
 
 
 def task_context_contract_record(contract: OpenTaskContract) -> dict[str, Any]:

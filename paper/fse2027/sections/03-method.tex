@@ -1,294 +1,244 @@
 \section{Method}
 \label{sec:method}
 
-\model explains a concrete prompt-editing decision: which security requirement
-to change, where it applies, and what evidence supports that change. Given
-natural programming requests and a generator model, it first grounds
-requirements in a structured task graph, then acquires causal evidence for
-selected requirement changes, and finally produces an \emph{Explanation} with
-a \emph{Suggested Action}. Task scope connects the three stages: the requirement
-being analyzed must refer to the same operation, inputs, and conditions as the
-edit being explained.
+Figure~\ref{fig:method-overview} summarizes our two-stage \model pipeline, and
+Figure~\ref{fig:method-example} illustrates a scoped requirement intervention
+on a multi-operation upload-and-storage task.
 
-The procedure comprises seven scientific operations: representation,
-prioritization, hypothesis freeze, intervention/randomization, measurement,
-outcome assembly, and inference/reporting. Stage I covers representation;
-Stage II obtains and analyzes intervention evidence; Stage III presents that
-evidence as guidance. Discovery and confirmation use disjoint deduplicated
-\emph{task units}, so observations used to select a change do not also establish
-its effect. Appendix~\ref{app:method-details} gives the execution and inference
-details.
+\subsection{Stage I: Task-Grounded Graph Representation}
+\label{sec:method-tsg}
 
-\subsection{Stage I: Structured Graph Representation}
-
-\subsubsection{Typed Symbolic Representation}
-A concept such as parameterization does not by itself identify what should
-change in a programming request. For a task that deletes database records using
-a supplied user identifier and returns the deletion count, the relevant
-requirement concerns the identifier's use as a SQL value at the deletion
-operation. A requirement attached to another operation would describe a
-different edit. The representation must therefore retain the requirement's
-meaning and its task-local binding.
-
-Semantic graph representations encode concepts and their relations beyond
-surface wording~\cite{banarescu2013amr}. We use a typed symbolic graph,
-\prompttsg, to represent programming requirements together with the operations,
-objects, and conditions they constrain. For the complete baseline input $P$
-and fixed extractor $\mathcal E$, the graph is
+\subsubsection{Source-Grounded Typed Representation}
+For the complete model-visible task input $P$, including system directives,
+programming instructions, and supplied API or source context, define the
+\prompttsg:
 \begin{equation}
-  G_P=T_{\mathcal E}(P)=(V,E,\tau_V,\tau_E,\alpha),
+  G_P = (V, E, \tau_V, \alpha, \epsilon),
+  \qquad E \subseteq V \times \mathcal{R} \times V.
+  \label{eq:source-graph}
 \end{equation}
-where $\tau_V$ and $\tau_E$ assign node and relation types, and $\alpha$ records
-concept identities, source spans, and task-local identities. The representation
-language defines permitted types and connections; a fixed vocabulary supplies
-reusable concepts; each task graph binds them to particular source instances.
-For example, the same parameterization concept can constrain distinct SQL
-operations without merging their inputs or obligations.
+Here $V$ partitions into typed nodes ($\tau_V$) representing the task root
+(\texttt{task}), operations (\texttt{task\_operation}), data objects and
+nested components (\texttt{data\_object}), logical guards
+(\texttt{condition}), and requirement propositions ($V_{\rm prop}$);
+$\mathcal{R}$ is the typed semantic relation vocabulary; $\alpha$ records
+concept identities, normative versus descriptive force, logical composition,
+and uncertainty; and $\epsilon$ anchors each source-grounded node to verified
+character spans in $P$~\cite{banarescu2013amr}. Typed edges bind semantic
+participants—for example, \texttt{used\_by} and \texttt{produces} link data
+objects to operations, \texttt{part\_of} traces component ownership hierarchies
+across nested fields, \texttt{about\_operation} binds propositions to governed
+operations, and \texttt{conditions} attaches execution guards.
 
-Nodes distinguish task objects and operations from functional and safety
-requirements, constraints, conditions, and presentation controls. Relations
-record participation, outputs, order, and requirement scope. These semantic
-relations identify both the target of an edit and the surrounding behavior
-that must remain unchanged. They are not causal edges: the graph locates the
-parameterization requirement but does not establish its effect on generated code.
+Source preparation fixes the vocabulary and span-grounding checks
+independently of generated code. Importantly, \prompttsg preserves local
+\texttt{unresolved} facts explicitly: incomplete or ambiguous auxiliary facts
+remain flagged in unresolved sets without invalidating verified local
+bindings elsewhere in $G_P$. \prompttsg edges encode task-local semantic scope
+and never denote causal edges.
 
-\subsubsection{Graph Construction and Grounding}
-Graph construction starts from the complete system and user messages actually
-supplied to the generator. Source-only LLM annotation extracts records of
-objects, operation participants and outputs, requirements, target scopes, and
-conditions, each linked to source evidence. Mechanical checks and one source
-review assess the records and allow a bounded local correction before
-deterministic compilation constructs the graph. Compilation checks structural
-consistency; it does not supply missing task semantics.
+\subsubsection{Requirement Binding, Operation Queries, and Code Realization}
+For a proposition $r \in V_{\rm prop}$, its complete binding readout is
+\begin{equation}
+  B_G(r) = \bigl(\psi_r, \mathcal{O}_r, \mathcal{D}_r,
+                 \mathcal{C}_r, \mathcal{S}_r, \epsilon_r\bigr),
+  \label{eq:requirement-binding}
+\end{equation}
+retaining the full logical expression $\psi_r$ (negation, disjunctions
+$c \Rightarrow (q_1 \lor q_2)$, quantifiers), governed operations
+$\mathcal{O}_r$, subject objects $\mathcal{D}_r$, owned conditions
+$\mathcal{C}_r$, scope $\mathcal{S}_r$, and character-verified spans
+$\epsilon_r$. Querying an operation $o$ retrieves its governed propositions:
+\begin{equation}
+  \mathcal{I}_G(o) =
+  \left\{(r, B_G(r)) \;\middle|\;
+  (r, \texttt{about\_operation}, o) \in E\right\},
+  \label{eq:operation-query}
+\end{equation}
+tracing \texttt{part\_of} ownership chains to actual operation participants
+without leaking bindings across distinct operations that merely share an
+object name. Propositions lacking an explicit operation attachment remain
+explicitly segregated in
+\begin{equation}
+  \mathcal{U}_G = \left\{r \in V_{\rm prop} \;\middle|\;
+    \nexists o : (r, \texttt{about\_operation}, o) \in E\right\},
+  \label{eq:unbound-propositions}
+\end{equation}
+preserving background obligations without fabricating global scope.
 
-The vocabulary and extraction rules are developed before discovery and fixed
-for formal use. Requirement records preserve obligations, negation, conditions,
-and compound meanings while keeping input assumptions distinct from editable
-requirements. Candidate construction then normalizes equivalent requirements
-and binds their exact scopes. A compound obligation cannot be split merely to
-create a single-factor candidate, and semantic atomicity alone does not establish
-that an edit preserves the rest of the task. Source-semantic qualification and
-subsequent intervention validation address these different questions.
-Appendix~\ref{app:representation-details} specifies the bounded checks.
-Generated code, security outcomes, and selector rankings never supply source
-facts for this representation.
+To prevent output-syntax failures from masking semantic binding effects, \model
+decouples \emph{input semantic representation} from \emph{target-unit code
+realization}: $G_P$ governs requirement scoping and prompt construction, while
+candidate edits are synthesized at typed syntactic unit boundaries and spliced
+deterministically into the source repository for downstream measurement.
 
-\subsubsection{Context and Requirement Queries}
-A proposed addition requires knowing both that a requirement applies and that
-the prompt does not express it. We separate a \emph{context query}, which
-identifies the relevant operation and security boundary, from a
-\emph{requirement-state query}, which assesses expression within that scope.
-The context is defined independently of the target state: an operation using
-a supplied SQL value remains in scope whether parameterization is requested
-or not.
+\subsubsection{Intervention Construction and Structural Attribute Bridge}
+An atomic \emph{requirement intervention} fixes one complete requirement,
+governed operations and objects, execution guards, reference baseline, and
+non-target obligations to preserve. Requirement Introduction ($\mathcal{T}_r^+$)
+explicitly states an applicable requirement resolved as unexpressed in $P$;
+Requirement Withdrawal ($\mathcal{T}_r^-$) removes an expressed requirement
+without disturbing sibling obligations; and explicit policy restatement compares
+baseline source context against scoped restatement of the target rule.
 
-A source-only assessment evaluates applicability and expression against the
-complete input and the existing graph bindings. Each requirement-state query
-returns \textsc{present}, \textsc{absent}, \textsc{not-applicable}, or
-\textsc{unresolved}. Absence requires an applicable scope and a resolved
-judgment that the source leaves the requirement unexpressed; a missing graph
-match is insufficient. For example, if an input might name a database column
-rather than provide a SQL value, missing parameterization wording cannot
-resolve its role. The assessment cannot add source facts or rebind the query
-to a more convenient operation.
+To connect Stage~I representation to Stage~II causal learning, deterministic
+pre-assignment queries extract a structured covariate vector from $G_P$:
+\begin{equation}
+  Z = q(G_P, r), \qquad Z_j \in \mathcal{D}_j \cup \{\texttt{unresolved}\}.
+  \label{eq:attribute-query}
+\end{equation}
+Specifically, $q(G_P, r)$ extracts topological features inaccessible to flat
+checklists—including multi-operation count, shared-object participation across
+distinct operations, maximum \texttt{part\_of} component path depth,
+conditional or composite guard presence, unbound proposition count
+$|\mathcal{U}_G|$, local binding completeness, and local unresolved counts.
+Exogenous preparation contexts $C$ and pre-assignment attributes $Z$ are
+measured strictly prior to randomized intervention assignment $A$.
 
-Stage I thus supplies the requirement's scope, expression state, source
-location, and non-target obligations. These determine where a possible edit
-belongs and what it must preserve, before any outcome evidence is considered.
+\input{figures/method-overview}
+\input{figures/method-example}
 
-\subsection{Stage II: Requirement-Level Causal Analysis}
+\subsection{Stage II: Directional JCI Discovery and Cross-Fitted Effect Learning}
 \label{sec:method-causal}
 
-\subsubsection{Task-Grounded Hypotheses and Prioritization}
-A hypothesis asks whether changing one scoped requirement alters the generator's
-outcomes. Its identity specifies the requirement, task context, editing
-direction, and outcome. An \emph{Atomic} requirement is one independently
-editable semantic obligation, rather than one sentence, node, or edge.
-Requirement addition and removal are separate hypotheses because they begin
-from different source states. Task-local names instantiate a shared scope
-definition; they do not create new factors for otherwise equivalent tasks.
-
-Because independent intervention evidence is costly, \model prioritizes a
-fixed number of hypotheses from natural discovery tasks. An outcome-blind
-discoverability check first requires applicable contexts, support for the
-natural requirement states, source-lineage overlap, and valid task-unit folds.
-Experimental edits cannot manufacture this natural support. Among eligible
-candidates, structural admission identifies relationships to investigate, while
-an outcome-difference score determines their priority.
-
-For structural admission, Fast Causal Inference (FCI) uses conditional
-independence relations to recover candidate causal structure while allowing
-unobserved common causes~\cite{spirtes1995fci}. We use its causal-learn
-implementation~\cite{zheng2024causallearn} separately for each security scope
-and generator model. Inputs are natural requirement-query states, approved
-pre-treatment metadata, independently measured baseline outcomes, and fixed
-background constraints. A requirement is admitted when its feature--outcome
-adjacency meets the qualified criterion. This observational graph is separate
-from the task-semantic Prompt TSG.
-
-For ranking, a \emph{risk difference} (RD) measures the difference in outcome
-probabilities between natural requirement states. Cross-fitting and covariate
-standardization produce an operation-oriented first-order RD: expressed minus
-unexpressed for addition, and the reverse for removal. We rank by its absolute
-magnitude and retain its sign, allowing potentially harmful as well as beneficial
-changes to be investigated. FCI supplies admission, not the numerical score;
-neither observational quantity establishes the effect of an assigned prompt
-edit. That effect requires the matched interventions below.
-
-\subsubsection{Matched Requirement Interventions}
-Natural prompts differ in task content and other instructions as well as in
-security requirements. To isolate a specified editing decision, confirmation
-compares prompt policies within the same task. Before observing confirmation
-outcomes, we freeze each selected hypothesis's scope, editing recipes,
-comparison arms, eligible populations, model settings, endpoint, and inference
-rules. The fixed $K$ proposal slots retain empty, failed, and non-evaluable
-entries without replacement; shared hypotheses reuse the same independently
-obtained effect evidence.
-
-The intervention changes the prompt rather than the generated code.
-\emph{Requirement addition} (ADD) introduces a requirement resolved as
-unexpressed in an applicable source scope. This does not imply that baseline
-code lacks the protection. \emph{Requirement removal} (REMOVE) withdraws an
-identifiable requirement through a neutral, task-preserving counterpart; it
-does not request the opposite insecure behavior. Both preserve non-target
-obligations. For the deletion task, either direction must retain the deletion
-target and return behavior while changing only the parameterization instruction.
-
-The primary comparison is a target edit $T$ against an
-\emph{operation-matched no-op} $N$. The no-op matches the editing operation
-while retaining the source requirement state: unexpressed for addition,
-expressed for removal. Comparing $T$ with $N$ therefore asks about the target
-requirement change relative to a matched rewrite, rather than relative to the
-untouched prompt. A length-matched placebo or sham edit and a
-direction-compatible generic-security instruction complete the four-arm
-design. These additional controls support separate questions about nonspecific
-editing and security guidance; specificity claims require prospectively fixed
-secondary inference.
-
-A policy may include several wording recipes, or \emph{realizations}, with
-prespecified positive weights. Each task--policy coordinate receives one
-realization before task-specific wording is produced. Its four-arm bundle is
-validated and, once assigned, receives equal request counts with randomized
-execution order under the same model and decoding policy. This design estimates
-the declared editing policy, including its wording mixture, rather than a
-post-hoc choice of successful edits. Allocation and failure rules appear in
-Appendix~\ref{app:intervention-details}.
-
-\subsubsection{Outcome Measurement and Effect Estimation}
-\label{sec:method-measurement}
-Security and functionality are different outcomes of code generation, as
-outcome-based evaluations such as CWEval emphasize~\cite{peng2025cweval}.
-A security instruction may also change whether valid code is produced or
-whether the evaluator supports it. We therefore define the primary endpoint
-as \emph{oracle-evaluable secure-code yield}:
+\subsubsection{Target ITT Estimand and Outcome Measurement}
+For a fixed generator, target task population $T$, and intervention $h$, let
+$A_i \in \{0,1\}$ denote equal-probability binary randomization between target
+($A_i=1$) and reference ($A_i=0$) realizations on independent, deduplicated task
+units. The target average treatment effect is
 \begin{equation}
-  Y=Y_CY_E\,\mathbb I\{\text{Oracle label is secure}\},
+  \tau_h = \mathbb{E}_T[Y_h(1) - Y_h(0)],
+  \label{eq:target-effect}
 \end{equation}
-where $Y_C$ indicates syntactically valid code and $Y_E$ indicates a supported
-security decision. The \emph{Oracle} is the fixed, arm-blind security measurement
-procedure, which must be qualified for the admitted languages, task families,
-and code forms before formal use.
-The endpoint counts requests yielding valid code assessed as secure, without
-conditioning the denominator on successful generation.
+where primary safety yield $Y = Y_C Y_E\,\mathbb{I}\{\text{Oracle label is
+secure}\}$ combines valid code ($Y_C$), arm-blind Oracle evaluability ($Y_E$),
+and secure classification~\cite{peng2025cweval,dai2026rethinking}. Generated
+code supplies measured endpoints only; it is never a PAG node or post-treatment
+filter, and every committed assignment stays in its ITT denominator alongside
+separate functionality and \texttt{unknown} measurements.
 
-Every committed assignment remains in its assigned arm under
-\emph{intention-to-treat} (ITT) analysis. No-code, invalid-code, and
-Oracle-unknown outcomes contribute zero observed secure yield but retain their
-distinct labels; unknown is not relabeled insecure. Infrastructure evidence
-that is missing blocks the affected analysis rather than becoming a measured
-zero. Fidelity, semantic compliance, generation success, and non-target drift
-are diagnostics, never exclusion criteria after assignment.
+\subsubsection{Context-Anchored JCI-12 PAG Discovery and Role Decomposition}
+Given outcome-free observations of $(C, Z)$ across exogenous preparation or
+source contexts $C$, Stage~II applies Joint Causal Inference~\cite{mooij2020jci}
+under JCI-12 assumptions (context variables $C$ are mutually independent
+exogenous roots with zero causal ancestors in $Z$). Majority-rule anytime FCI
+coupled with Zhang's orientation rules (R1--R4 and
+R8--R10)~\cite{spirtes1995fci,zhang2008ancestral} estimates a Partial Ancestral
+Graph $\widehat{H}$ over $(C, Z)$ allowing arbitrary latent confounding.
 
-For hypothesis $h$ and a fixed generator model, let $\widehat\mu_{ha}$ denote
-arm $a$'s task-unit mean under the prespecified realization mixture. Repeated
-requests are averaged within task instances and combined using frozen
-within-unit weights before applying the original realization weights
-(Appendix~\ref{app:inference-details}). The primary policy effect is
+Before consuming directional information, a structural validity guard checks
+that the definite directed subgraph $G_{\rm dir}$ ($\widehat{H}[u,v]=2 \land
+\widehat{H}[v,u]=3$) is acyclic, contains no arrowhead-ancestry conflicts, and
+exhibits zero arrowheads into $C$. Whenever valid, let
+$\mathcal{R} = \operatorname{Desc}_{G_{\rm dir}}(C) \setminus C$ denote the
+context-reachable attribute cone. We partition the attribute coordinates of $Z$
+into four canonical JCI structural roles:
 \begin{equation}
-  \widehat\tau_h=\widehat\mu_{hT}-\widehat\mu_{hN}.
+\begin{aligned}
+  V_{\rm root} &= \operatorname{Ch}_{G_{\rm dir}}(C) \setminus C, &
+  V_{\rm term} &= \bigl\{v \in \mathcal{R} :
+    \operatorname{Succ}_{G_{\rm dir}}(v) \cap \mathcal{R} = \emptyset\bigr\}, \\
+  V_{\rm up}   &= \mathcal{R} \setminus V_{\rm term}, &
+  V_{\rm other} &= Z \setminus \mathcal{R}.
+\end{aligned}
+\label{eq:pag-roles}
 \end{equation}
-Unlike the observational RD used for selection, this difference uses assigned
-interventions on held-out tasks. Its causal interpretation assumes consistency,
-positive arm probabilities, and no cross-request interference, and remains
-specific to the tested policy, task population, and generator.
+Here $V_{\rm root}$ captures immediate context-intervention entry points,
+$V_{\rm term}$ isolates downstream confluence sinks, $V_{\rm up}$ captures
+context-reachable upstream precursors, and $V_{\rm other}$ isolates
+latent-confounded proxy chains or unreached noise attributes blocked by
+collider arrowheads. If $\widehat{H}$ fails the validity guard or has
+insufficient conditional-test support, the decomposition falls back to
+$V_{\rm other} = Z$.
 
-Whole-task-unit resampling preserves dependence among arms, instances,
-overlapping hypotheses, and models. One simultaneous max-$|T|$ family covers
-all unique selected model-bound primary effects. The resulting intervals
-distinguish positive-meaningful, negative-meaningful, practically null, and
-inconclusive effects relative to prespecified practical margins.
-Insufficient provenance, support, coverage, or valid inference produces an
-explicit non-evaluable status, not a null finding.
+\subsubsection{Role-Grouped Shrinkage and Task-Unit $K$-Fold Cross-Fitting}
+The PAG is learned from outcome-free observations, so nothing guarantees that
+any single role carries the prognostic signal for $Y$; the roles are a small,
+structure-derived \emph{hypothesis menu} rather than an identified predictor
+set. Stage~II therefore avoids locking into one subset. On source data $D_S$
+(with covariates $X=(C,Z)$), stratified 3-fold
+cross-validation selects among weighted L2-penalized logistic predictors
+spanning the uniform baseline ($w \equiv 1$, $\gamma = 0$) and role-grouped
+profiles $V_{\rm active} \in \{V_{\rm term}, V_{\rm root}, V_{\rm up},
+V_{\rm term} \cup V_{\rm up}\}$ across finite strengths $\gamma > 0$:
+\begin{equation}
+  (\widehat{\beta}_{0},\widehat{\beta}) =
+  \arg\min_{\beta_0,\beta}\;
+  -\ell_{D_S}(\beta_0,\beta)
+  + \frac{1}{2C_{\rm reg}}\sum_{j} w_j\beta_j^2,
+  \qquad
+  w_j = \begin{cases}
+    1, & j \in C \cup V_{\rm active},\\
+    1+\gamma, & \text{otherwise.}
+  \end{cases}
+  \label{eq:role-shrinkage}
+\end{equation}
+Let $\widehat{m}_{\rm JCI}(X)$ denote the selected source predictor and
+$\widehat{m}_{\rm full}(X)$ the unweighted full-feature source predictor.
 
-Each effect record also retains code validity, Oracle coverage, unknown
-outcomes, original-task functionality, and secure-and-functional joint success.
-Blinded functional review assesses syntax-valid code against the original
-task, with unknown results for genuinely unassessable requirements.
-Coverage sensitivity bounds accompany secure-yield effects, so increased
-evaluability alone is not described as reduced underlying insecurity.
-These measurements and their uncertainty provide the evidence for Stage III;
-individual-policy effects do not establish the benefit of combining edits.
+To utilize scarce target outcomes efficiently without incurring calibration
+noise or winner's-curse leakage, target units $D_T$ are partitioned
+deterministically by task-unit index into $K$ disjoint folds $I_0,\dots,I_{K-1}$
+(never stratified on $A$ or $Y$~\cite{egami2022texts}). On each complement
+$D_T^{(-k)} = D_T \setminus I_k$, inner $(K-1)$-fold cross-validation selects
+both the candidate base predictor $\widehat{m}_k \in \{\widehat{m}_{\rm JCI},
+\widehat{m}_{\rm full}\}$ (providing automatic unweighted fallback under severe
+target mechanism shifts) and the target Ridge deviation penalty $\eta > 0$:
+\begin{equation}
+  \widehat{\delta}_k = \arg\min_{\delta}
+  \sum_{i \in D_T^{(-k)}} \bigl[Y_i - \widehat{m}_k(X_i) - \tilde{X}_i^\top\delta\bigr]^2
+  + \eta\|\delta\|_2^2,
+  \qquad
+  \widehat{g}_T^{(-k)}(x) = \operatorname{clip}_{[0,1]}\!\bigl(
+    \widehat{m}_k(x) + \tilde{x}^\top\widehat{\delta}_k\bigr).
+  \label{eq:crossfit-target}
+\end{equation}
+Crucially, $A_i$ never enters $\widehat{g}_T^{(-k)}$. For each unit $i \in I_k$,
+we compute the out-of-fold randomized residual score:
+\begin{equation}
+  R_i = 2(2A_i - 1)\bigl[Y_i - \widehat{g}_T^{(-k(i))}(X_i)\bigr],
+  \qquad
+  \widehat{\tau}_h = \frac{1}{n_T}\sum_{i=1}^{n_T} R_i.
+  \label{eq:randomized-score}
+\end{equation}
+Assignment is either independent Bernoulli$(1/2)$ or completely randomized
+\emph{within} each fold, with the fold partition fixed before assignment, so
+that $A_i$ for $i \in I_k$ is independent of every quantity entering
+$\widehat{g}_T^{(-k)}$. (Completely randomizing across all $n_T$ units without
+nesting induces an $O(1/n_T)$ dependence between $A_i$ and out-of-fold outcomes
+and voids exactness.) Under this design condition, the score is exactly
+unbiased and its precision is governed by out-of-fold squared error:
+\begin{equation}
+  \mathbb{E}_T[R_i \mid X_i, \widehat{g}_T^{(-k(i))}]
+    = \mathbb{E}_T[Y_i(1) - Y_i(0) \mid X_i],
+  \qquad
+  \operatorname{Var}_T(R_i \mid \widehat{g}_T^{(-k)})
+    = 4\mathbb{E}_T\!\left[(Y - \widehat{g}_T^{(-k)}(X))^2 \mid \widehat{g}_T^{(-k)}\right] - \tau_h^2.
+  \label{eq:score-identity}
+\end{equation}
+Every source-assisted comparator uses the exact same cross-fitting and
+randomization estimator. Consequently, \emph{validity and efficiency separate}:
+unbiasedness and interval validity of $\widehat{\tau}_h$ hold for any PAG,
+including a wrong one, whereas the PAG role decomposition can only change the
+variance term in Eq.~\eqref{eq:score-identity}. A misleading structure can
+therefore cost precision but cannot bias the effect estimate, and the
+comparison isolates the efficiency contribution of the directional roles.
 
-\subsection{Stage III: Evidence-Grounded Explanations and Guidance}
+\subsubsection{Candidate Confirmation and Scoped Evidence Output}
 \label{sec:method-guidance}
+Candidates ranked by $|\widehat{\tau}_h|$ are frozen before accessing held-out
+confirmation outcomes. Against a prespecified practical margin $m_h > 0$, a
+simultaneous confirmation interval entirely above $m_h$ establishes a
+positive-meaningful hardening finding, whereas one entirely below $-m_h$
+establishes an adverse-effect warning; intervals inside $[-m_h,m_h]$ are
+practically null, and remaining evaluable cases are inconclusive.
 
-\subsubsection{Explanation Construction}
-An effect estimate becomes useful guidance only when the reader can identify
-the decision it concerns. Work on human explanation emphasizes the role of an
-explicit contrast and relevance to the question being asked~\cite{miller2017explanation}.
-We organize each output around a scoped prompt modification: the requirement
-being changed, the comparison being made, and the available evidence about its
-effects. The output contains an \emph{Explanation} and a
-\emph{Suggested Action}, constructed from linked task, policy, and evidence
-records.
-
-The Explanation first locates the requirement at its operation, object, and
-condition bindings, names the non-target behavior to preserve, and presents
-the concrete edit and matched comparator. It then separates the reason for
-investigating the requirement from the intervention finding. FCI admission
-and observational RD describe selection; the randomized estimate, simultaneous
-interval, practical margin, and effect status describe the tested policy's
-outcome. Reported effects retain their model and realization/population scope,
-together with functionality and measurement limits. Task-local grounding
-makes the proposed edit specific without turning a population-average effect
-into an individual prediction or an account of the model's internal reasoning.
-
-\subsubsection{Evidence-Conditioned Suggested Actions}
-The Suggested Action considers the effect evidence together with applicability,
-functionality, and measurement limits. Without formal randomized evidence,
-it presents an unconfirmed option to test. With evaluable evidence, it can
-report a supported endpoint-specific effect; recommending adoption additionally
-requires security and task-preservation evidence meeting prospectively fixed
-decision criteria. A favorable primary effect alone is insufficient, and
-absence of a detected functional loss does not establish preservation.
-The exact secondary margins, coverage conditions, and joint adoption rule
-remain to be specified before confirmation; until they and the required evidence
-are available, adoption advice is withheld.
-
-Other findings remain useful when presented with their scope.
-Negative-meaningful evidence supports a warning about the tested policy's
-endpoint effect. A practically null result bounds that average effect within
-the declared margin; inconclusive and non-evaluable findings identify
-unresolved evidence for different reasons. A harmful removal does not validate
-the reverse addition policy. The output retains these findings rather than
-converting every selected hypothesis into positive advice.
-
-For the running task, an illustrative pre-confirmation output is:
-\begin{quote}
-\emph{Explanation.} The supplied user identifier is used as a SQL value in
-the deletion operation. The prompt does not explicitly require parameterization
-at that operation. The proposed edit adds \emph{Bind the supplied user identifier
-as a parameter in the DELETE query}, while preserving which records are
-deleted and the returned deletion count. Its comparator is a matched rewrite
-that leaves parameterization unexpressed. No randomized effect estimate is
-available for this policy, so neither a security benefit nor preserved
-functionality has been established by this analysis.
-
-\emph{Suggested Action.} Treat this wording as an option for evaluation, not
-a validated recommendation. Adoption advice is withheld pending the specified
-security, coverage, and original-task functionality evidence.
-\end{quote}
-This example illustrates the content format, not an observed result or a
-qualified explanation generator. Computational evaluation assesses the evidence
-behind the modifications; the separate expert study assesses the explanation
-products' perceived quality and usefulness.
+Each evaluated policy produces a contrast-grounded~\cite{miller2019explanation}
+\emph{Explanation + Suggested Action} record pairing Stage~I bindings
+(requirement, governed operation, objects, conditions, and preserved
+obligations) with Stage~II evidence (tested realizations, generator,
+target population, effect interval, functionality, and Oracle coverage).
+Unconfirmed candidates remain labeled as options to test, confirmed adverse
+effects issue endpoint-specific warnings, and adoption recommendations are
+emitted only when both security hardening and declared task-preservation
+criteria are satisfied.

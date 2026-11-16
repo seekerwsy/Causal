@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prompt-mechanism-study"
 version = "1.6.0"
-description = "JCI requirement-policy learning with independent task-unit evaluation."
+description = "Task-grounded Prompt TSG and directional JCI requirement-policy learning with independent verification."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -19,8 +19,8 @@ prompt-mechanism-study = "prompt_mechanism_study.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=8", "markdown-it-py>=4,<5"]
 selectors = ["causal-learn==0.1.4.7", "numpy>=2,<3"]
-preparation = ["tiktoken==0.14.0"]
-source-acquisition = ["requests==2.34.2", "beautifulsoup4==4.15.0"]
+preparation = ["tiktoken==0.14.0", "libcst==1.9.0"]
+source-acquisition = ["requests==2.34.2", "beautifulsoup4==4.15.0", "pyarrow==23.0.1"]
 analysis = []
 languages = [
   "tree-sitter==0.25.2",
@@ -37,7 +37,6 @@ languages = [
 [tool.setuptools]
 packages = [
   "prompt_mechanism_study",
-  "prompt_mechanism_study.data",
   "prompt_mechanism_study.tsg",
   "prompt_mechanism_study.discovery",
   "prompt_mechanism_study.experiment",
@@ -47,13 +46,13 @@ packages = [
 package-dir = {prompt_mechanism_study = "src"}
 
 [tool.setuptools.package-data]
-prompt_mechanism_study = ["fixtures/*.json", "fixtures/*.html", "fixtures/*.js"]
+prompt_mechanism_study = ["fixtures/*.json", "fixtures/*.html", "fixtures/*.js", "discovery/*.R"]
 "prompt_mechanism_study.discovery" = ["*.R"]
 "prompt_mechanism_study.verification" = ["*.R"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/jci"]
-addopts = "--basetemp=.test-tmp/pytest"
+testpaths = ["tests/jci", "tests/substrate"]
+addopts = "--basetemp=.artifacts/pytest-tmp -p no:cacheprovider"
 norecursedirs = ["development"]
 markers = [
   "milestone: minimal end-to-end reproduction checks",

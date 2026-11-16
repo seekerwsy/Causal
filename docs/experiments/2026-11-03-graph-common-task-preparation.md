@@ -1,0 +1,154 @@
+# Graph共同任务与独立绑定参考的准备状态
+
+## 当前完整输入
+
+下表十七项完整共同任务已完成独立自动输入审查、另行独立绑定参考及引文核对。每项提供完整选定来源文件、政策、保留义务和静态调用锚点。Raw、Flat及Graph表示制作和新代码生成均未开始。
+
+| 任务来源 | 完整共同文件 | 共同提示字符 | 静态调用 | 输入判定 | 输入审查引文 | 独立绑定参考引文 |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| libnmap | 4 | 34501 | 123 | 八项supported | 48 | 100 |
+| PyJWT | 7 | 51929 | 238 | 八项supported | 86 | 73 |
+| pypdf | 5 | 51472 | 35 | 八项supported | 51 | 44 |
+| Werkzeug | 5 | 36918 | 86 | 八项supported | 49 | 58 |
+| Starlette | 6 | 47089 | 204 | 八项supported | 50 | 49 |
+| Asteval | 5 | 81984 | 308 | 八项supported | 42 | 53 |
+| mkdocs-include | 7 | 88626 | 156 | 八项supported | 50 | 58 |
+| html-sanitizer | 4 | 24932 | 103 | 八项supported | 48 | 48 |
+| GitPython | 5 | 58248 | 154 | 八项supported | 49 | 54 |
+| OctoPrint | 3 | 97313 | 402 | 八项supported | 42 | 58 |
+| Flask-CORS | 6 | 36066 | 25 | 八项supported | 51 | 58 |
+| Remarshal | 4 | 34685 | 141 | 八项supported | 45 | 52 |
+| Requests | 7 | 151395 | 136 | 八项supported | 54 | 74 |
+| urllib3 | 6 | 60088 | 81 | 八项supported | 29 | 33 |
+| sqlparse | 8 | 77344 | 48 | 八项supported | 72 | 50 |
+| Bleach | 8 | 67308 | 86 | 八项supported | 58 | 64 |
+| MLAlchemy | 9 | 30997 | 39 | 八项supported | 35 | 35 |
+
+libnmap任务规定三个公开XML入口拒绝自定义DTD实体声明，并保留无自定义实体的DOCTYPE、普通XML文字、公开对象及错误行为。目标为完整libnmap/parser.py。PyJWT任务明确HMACAlgorithm.prepare_key、选择HMAC的jwt.encode和启用HMAC签名验证的jwt.decode三个验收入口；低层sign/verify保持已准备密钥合同。目标为完整jwt/algorithms.py。
+
+pypdf任务规定LZW输出流累计逻辑字节上限16384，超过前抛出LimitReachedError，保留编码及限额内全部行为；目标为完整_codecs.py。Werkzeug任务规定每个分段文档的Field与File合计最多四项，在第五项事件返回之前拒绝，保留增量解析、大文件和原有字节限额；目标为完整sansio/multipart.py。Starlette任务规定UploadFile底层写入及首次转存的执行线程，保留内存写入的事件循环行为、准确字节及全部公开结构；目标为完整datastructures.py。
+
+Asteval任务约束动态f-string格式说明中的受保护对象访问和异常暴露，保留正常表达式与格式说明，目标为完整asteval.py。mkdocs-include任务规定登记指令位置与普通文字的身份，覆盖两类包含、恢复顺序及递归开关，目标为完整event.py。html-sanitizer任务规定Unicode处理后最终HTML继续满足默认允许规则，保留合法内容和规范化行为，目标为完整sanitizer.py。
+
+GitPython任务规定引用读取遵守两个可信元数据根目录的实际文件位置，覆盖符号引用跳转、文件链接与packed-refs，并保留内部链接及工作树角色，目标为完整symbolic.py。OctoPrint任务规定显式会话查询不能继续查找持久账户，保留无会话查询和有效会话，目标为完整users.py。Flask-CORS任务规定资源匹配使用实际request.path，保留合法CORS响应及普通请求，目标为完整extension.py。十一项均采用同政策表示组件身份，不把已有安全边界或研究者具体化请求标为新的Atomic ADD效应。
+
+共同信息包括完整目标模块、列明的完整来源文件、统一环境、完整政策和保留合同。后续三种方法取得完全相同的源输入与静态工具。作者控制、测试、期望输出、运行测量及独立评审不提供给表示制作者。任务来自独立获取的真实程序，编程请求由研究者编制，自然编程请求仍未取得。
+
+## 隔离审查与六项参考
+
+输入资格审查用于完成共同任务。每个任务的表示评价参考均另由此前未参与任务编制、输入资格审查或表示制作的独立上下文提供，只读取根AGENTS.md、当前固定任务JSON、完整共同提示及调用锚点，不读取资格评审、作者控制、测试、方法输出或测量，不执行来源。八项检查涉及完整单项政策、输入对象及入口、允许情况、保留义务、限定模块是否足够、来源身份、静态证据范围和输入缺陷。表内任务均无阻断缺陷。
+
+每份独立绑定参考保留六个固定维度：输入对象状态、安全操作与消费者、适用入口及分支、完整政策及允许情况、保留行为及接口、未知与源码/规范身份。记录具体来源引文和不确定性，源码事实与研究者要求分别标记。reference_role=INDEPENDENT_REPRESENTATION_BINDING_REFERENCE，任务编制、资格评审参与及表示编制三个身份均为false。输入资格评审中的来源笔记保留其原身份；表示评价使用另行固定的独立参考。参考未见任何Raw、Flat或Graph输出，当前不评价表示准确率。
+
+这些参考保持自动审查身份，human_gold_reference=false。静态源码能够说明词法调用及条件，不能证明实际运行路径、全部功能、因果方向或未来实现成功。引文核对只证明逐字来源及输入身份匹配，不自动认证评审结论。
+
+## 程序、身份与复现
+
+共同任务为data/method/graph-jci-goal-20261103中的task-*.json，已完成审查的文件对应上表。prepare_task_source.py核对固定上下文和原始提交，复制完整选定来源，并使用现有source_call_catalog生成共同静态调用锚点。实际准备使用Windows Python 3.12.14及LibCST 1.9.0。verify_task_review.py检查评审身份、允许材料、八项判定、六项参考、全部逐字引文、任务与共同输入摘要。独立参考还须通过三个未参与身份检查。程序不调用被测来源或生成模型。
+
+当前libnmap输入位于.test-tmp/graph-common-task-libnmap-20261103，PyJWT输入位于.test-tmp/graph-common-task-pyjwt-20261103-api。准备命令如下，新的输出目录必须尚不存在：
+
+```sh
+.venv/Scripts/python.exe data/method/graph-jci-goal-20261103/prepare_task_source.py data/method/graph-jci-goal-20261103/task-libnmap.json .test-tmp/graph-common-task-libnmap-20261103
+.venv/Scripts/python.exe data/method/graph-jci-goal-20261103/prepare_task_source.py data/method/graph-jci-goal-20261103/task-pyjwt.json .test-tmp/graph-common-task-pyjwt-20261103-api
+```
+
+隔离审查完成后，以同一任务文件、输入目录及新的核对结果路径执行verify_task_review.py。不得用修改后的任务解释另一个输入身份的旧评审；每份评审及其输入保持自身身份。
+
+libnmap任务摘要80dd6c987a73ca87f2e2e62b3dde0a4902fc116ca746c7795c2984f98ef70fb7，共同提示摘要55acceb3ea7caeaec45979b1356e42b9cc8bd1cdeae99a3a7852c3af69794432，独立评审摘要4f6d6c846b59772a02b4cfd8dc27cd7d77c7a75a6035093eab1e7339eab84ad0，核对结果摘要7de947990c96bd019f2c4213e189db23f08b611564da63964ef4e5ccd34808ca。
+
+PyJWT任务摘要d44951835dc1b14c44348618f35bf8e7dcbe43e53a575eb7b80a4484a31e9123，共同提示摘要5c7127d715f2895313ac2ac53c7f3a0e43d5cefc244367158d42f0fb310aa5eb，独立评审摘要e90b1fb38f1e0fc6288135d229b9d5f032506c7bdcc143605b7178865194aa7f，核对结果摘要fcfe15bc8f07e52bbdfbeb387f98d995cec2e5d5f1fb4d113fffc77f396c6900。
+
+共同任务及输入资格审查冻结包results/graph-common-tasks-20261103-frozen.tar.gz为141083字节，摘要e4ec744048d51ed932bd81df15a1fc2671e78159fa7b53abd0d2ff8ae1b1c8a6，本地与服务器archive一致。在新目录inputs/graph-common-tasks-20261103-replay解压，使用包内核对器及原样科学代码重核两份评审，逐字节复现上文两项核对摘要。没有执行来源或生成表示和代码。
+
+另行独立参考位于.test-tmp/graph-binding-reference-libnmap-20261103及.test-tmp/graph-binding-reference-pyjwt-20261103。libnmap参考摘要68d99a284bd0343a3793bbfd886e9e6ecb8fb266c3f4ed0e3845265b2a2f3329，reference-verification.json摘要e14f07b76cf849ff4941bd2a5a818649028f18fef165180016ef3965dc3c0c05；PyJWT参考摘要418531fc0988a1d9d7945f4a34b7fc5783a4f0539966d776709ceb872e3cb40f，核对摘要f4954b86b0a60ea4e0f1d557588171f66caf3427cfdac1a14427243688f81208。它们分别通过100及73处逐字引文与角色元数据核对。
+
+独立绑定参考冻结包results/graph-binding-references-20261103-frozen.tar.gz为146801字节，摘要3974afa19399af0953d064246563a9b2b6f340ed96db81a3261d54d82363cb85，本地与服务器archive一致。在新目录inputs/graph-binding-references-20261103-replay独立解压，用包内核对器和科学代码重查两份参考及未参与角色元数据，逐字节复现e14f07b76cf849ff4941bd2a5a818649028f18fef165180016ef3965dc3c0c05与f4954b86b0a60ea4e0f1d557588171f66caf3427cfdac1a14427243688f81208。未重新制作参考、执行来源或生成表示和代码。
+
+## pypdf、Werkzeug及Starlette的固定输入身份
+
+三项共同输入分别位于.test-tmp/graph-common-task-pypdf-20261103、graph-common-task-werkzeug-20261103及graph-common-task-starlette-20261103。使用同一准备与审查核对入口；各自任务摘要依次为eb0bb816bea04fa475d48d245481cc646f418f560f364ee40f55e626d6102781、6bf5bae21fcfb0eee813ea44e7ac0ec25babd963d3754ca5ec52bc2aef4a4d26及6c62ce2bad74f14f2604fd34819203f7af23a6b0960b1cbf760580fec4c1afe1。
+
+三项输入资格核对摘要依次为5a55f666058821085f9eec564c83317b49039aa589c2c2e2e58881030d0abb5e、ed752b4fa0809ab02dcee9188b27dbe9002215a430b5194ef6735ad2b3d301b8及44478cbac82ae72b60f82d5537d9a30dc19397b35bbd9ce10c3c2e9d53c31184。各项的来源摘要、静态锚点摘要及评审摘要均保留在该核对JSON中。
+
+另行独立参考位于对应的.test-tmp/graph-binding-reference-pypdf-20261103、graph-binding-reference-werkzeug-20261103及graph-binding-reference-starlette-20261103。reference-verification.json摘要依次为ab7b010248f5caf9170d13b4b52978bfd0c6d3740fd3ee4e5031b1c0acf5cca4、32860a20a1ca56fbc55c2f24b2914c3f0f9e2c73e34ab77321741199e4275911及ad70c902dadb9ee3b7fb8b3b1e0036e0e68b4f4c4ee8bb4ca78e9ee5129a6fb2。角色元数据与44、58及49处逐字引文均通过核对。三份参考与输入资格评审由不同的独立上下文提供。
+
+pypdf的共同材料没有EncodedStreamObject本体，Werkzeug没有Request本体；其指定入口来自共同任务和原始包可用性声明，运行路径保持未知。目标模块、已有包装消费者和独立运行测量分别保留各自证据身份。Starlette的标准文件运行行为同样由实际程序测量承担，静态笔记不认证线程执行。
+
+三项共同任务、各自输入资格审查及另行独立参考冻结包results/graph-common-tasks-three-sources-20261103-frozen.tar.gz为364558字节，摘要42104c4e98b449be7ad6eca4b82cfcbdd442a3b47248e1e0acd8db13c5537ea4，本地与服务器archive一致。服务器在新目录inputs/graph-common-tasks-three-sources-20261103-replay解压，用包内原样科学代码及核对器重查六份评审和全部引文、角色元数据，六项核对JSON逐字节复现。没有重新制作评审或生成表示和代码。
+
+## Asteval、mkdocs-include及html-sanitizer的固定输入身份
+
+三项共同输入分别位于.test-tmp/graph-common-task-asteval-20261103、graph-common-task-mkdocs-include-20261103及graph-common-task-html-sanitizer-20261103；另行独立参考位于对应graph-binding-reference目录。三项任务摘要依次为0e5f005108464c4e8fa4675fa262578dc122c383fea86b92185a734a414e1105、0cd14570b2e45f7cb3b3ab2bc1d74102a3ff79cfe0484bb7f17a11de3a80412f及6c2fb291fac3e91993a2cf4c2661f8798d50c5f019417ad2f475f1f355f20982。
+
+输入资格核对摘要依次为5c86f34411a81f1b021c2c3856b19f624047b32f2351a1b6120898b7257f19b6、34ca33a7fba3dbbd5eacc157735b34122e7e8e5966231d0595840424cd4b4a0a及91922f887723735856b17d33d9f9ee0003c1507d8faef1c77e7bbb90746cb431。reference-verification.json摘要依次为5830cd378cf691889f23f28d5094d3c0f7da9a78811168c2395e0b275381f648、f50af472cf6dbc5b5dfbf250f699c0ebb0777083405638374f864f7e70532749及10a52321b0c2293228e682de56dd195d4f199e10474c772a2f71ec89fec60b95。输入身份、引文及参考未参与角色均通过核对。
+
+三个独立参考分别记录格式说明求值与异常对象、包含指令登记及恢复、HTML原始文本与最终结构的具体对象和操作。HTML的id输入处理依照原始源码的转换与删除规则记录，README属性文字不单独充当最终允许集合。源码与研究者规范分别标记，运行效果由已有独立程序测量承担。
+
+三项共同任务、输入资格审查及独立参考冻结包results/graph-common-tasks-asteval-mkdocs-html-20261103-frozen.tar.gz为324799字节，摘要d5438ec4221b23b2b139e919a6543ed38206e7e5c585139ee64f69f94aa58666，本地与服务器archive一致。在新目录inputs/graph-common-tasks-asteval-mkdocs-html-20261103-replay解压，用包内核对器及原样科学代码重查六份评审、引文和角色元数据，六项JSON逐字节复现。没有重新制作参考、执行来源或生成表示和代码。
+
+## GitPython、OctoPrint及Flask-CORS的固定输入身份
+
+三项共同输入分别位于.test-tmp/graph-common-task-gitpython-20261103、graph-common-task-octoprint-20261103及graph-common-task-flask-cors-20261103；另行独立参考位于对应graph-binding-reference目录。三项任务摘要依次为b0497823eb27d7d2d5698c197346220b7d17fed684a5db1be3c6bfc8c51b4f0c、674f90a735d582b9003dd4a434868f27117995d25a006557d9cf7a255456a7db及0701d17dd2fcbfd1c4d7f562112ed06f718e2363a9e39611e8649c8cde1265c0。
+
+输入资格核对摘要依次为a48d3ca6effd461cd8a2f865ef988d2804e7850fae61f3ade7fe0553a4007cce、c34ee5c723c71790a98d6a05aab95c9cc047314eb9719e4c4d627220c535f2d7及b927e41ddac3b1b457e72ef0bb53b5d0efc7ea72e0e8f1009422d3bb60075850。reference-verification.json摘要依次为f5353bc03b6b21ef26532f60297582fe5f45ec87c4e71a9fd625f282263da2fa、ee7708c28e7e7523d0c90f76262dfd82a1c80cb5a373f03d6ae07de62d2ec22c及214ac1287fed9ef53000d6d717e13fb96abb393e346fb67c55d50286ec67b740。
+
+独立参考分别保留根目录信任与读取时序、对象会话与持久账户、已解释请求路径与配置资源的语义区分。静态调用笔记不认证文件读取、Cookie撤销或浏览器行为；这些任务只采用各自明确声明的端点。全部引用和未参与角色通过核对，没有读取任何方法输出。
+
+三项共同任务、输入资格审查及独立参考冻结包results/graph-common-tasks-git-octoprint-cors-20261103-frozen.tar.gz为507268字节，摘要e30d53c08cdcb01bcd75e82de1e8b20f9798678b59b07b42f0d0bf6398a59575，本地与服务器archive一致。在新目录inputs/graph-common-tasks-git-octoprint-cors-20261103-replay解压，用包内核对器及原样科学代码重新核对六份评审、引文和角色元数据，六项JSON逐字节复现。没有重新制作参考、执行来源或生成表示和代码。
+
+## Remarshal及Requests的固定输入身份
+
+两个共同任务分别使用完整remarshal.py及requests/sessions.py模块。Remarshal在YAML解析后、后续转换或输出之前限制逐路径展开节点及容器循环；共享引用按每条路径重复计数。Requests区分实际选中代理、HTTPS应用和代理专用认证，保留原有代理路由、正常认证及307正文等行为。目标源码和相邻文件完整共享；没有给出作者控制、探针或答案。
+
+任务摘要分别为2733500959a2d91d846892260f907dd3c6696125c8ecb9b5f277af85413f9e91及52e41f507fca55046a275d4af4ac8a95f1a1e09cca6c57b001db6077b332a8bf。输入资格审查位于.test-tmp/graph-common-task-remarshal-20261103与graph-common-task-requests-20261103；verification.json摘要分别为cdd6da8b4d89852994b1eb548694d64abd35969d666979908bfd007e3bb99681及f631b399ce3deecdedee8ba79115cfe6fa38d3267dd961a0b48d0065a2578bd4。
+
+另行独立参考位于对应.test-tmp/graph-binding-reference目录。reference-verification.json摘要分别为8f13440d0db6e15c1049f89673ec1ea6088a32b4fd92575c63e026314a088321及1416cb980877877d9eee4e1b33d4f5910290e8693e99f1a0f26c8126c256cf00，分别核对52及74处逐字引文。每项输入审查与表示参考均由不同上下文提供，未参与角色通过核对。Requests顶层入口的公开导入可见，api.py实现未共享，运行路径不由静态参考认证。
+
+冻结包results/graph-common-tasks-remarshal-requests-20261103-frozen.tar.gz为271287字节，摘要ffecd8d0ac52aeab0b1391d16df3b0dd674d9ea83e4d9ebf65c5ea474a6f12dc，本地与服务器archive一致。服务器在新目录inputs/graph-common-tasks-remarshal-requests-20261103-replay解压，用包内核对器及原样科学代码重新核对四份审查，四项JSON逐字节复现。没有执行来源、制作表示或调用模型。
+
+## 共同输入的实际预算
+
+使用既有本地Qwen tokenizer和实际聊天模板测量十四份共同输入。输入包含完整政策、保留义务、环境及共同源码，尚未加入表示指导和最终生成指令。服务上限为49152，沿用模块预算检查的16384候选输出额度。十三份输入满足该候选预算。Requests共同输入为34122 tokens，预留输出后超出1354 tokens。可容纳的输出与额外输入合计为15030 tokens。urllib3共同输入为12996 tokens。
+
+该检查确定了Requests在候选额度下的预算缺口。整轮设计须在新代码生成前确定同一任务各组的共同额度，并计量最终完整提示。不得截断原文、删除政策或依据模型结果替换来源。tokenizer报告自身32768长度提示，比较采用已核对的实际服务49152上限，未调用推理服务。
+
+固定输入摘要428b9abc75f1f6d04c5fe8da7a9798256a38b1049aa87687eadab0dd8e9fd0bc，计数结果摘要b251b2be063ecd2517d0136a4ce1acaa33d437f5c14eacb8e609859a197d1f1d。输入记录各共同提示文件摘要。包内复用check_prompt_context.py及既有tokenizer，实际退出码2表示存在候选预算超限。完整包results/graph-common-input-budget-20261103-frozen.tar.gz摘要b7f054f8510c7757e01c6cd8ef687b24834652007227e5c5341262170329dbf4，本地与服务器archive一致。服务器在独立输入目录解压重算，计数JSON逐字节复现。
+
+## urllib3的固定输入与独立参考
+
+共同任务以完整retry.py为编辑目标，并提供PoolManager消费逻辑。任务区分默认跨源策略、显式删除集合和代理专用认证。完整RequestMethods及底层连接池实现未共享，静态参考保留入口转发、同源判定和CONNECT实际运行的不确定性。局部运行证据由独立测量承担。
+
+任务摘要97c66d9f2fae8bd52de8de62cca0fbcbd1ec5c1926aefbfa533770ca560fa6f6，输入资格核对摘要4829aa1ce4a844108f0d882ce9d99f1cede571e56d0ee5f6e7f3da4c6f062cec，独立参考核对摘要1597c3f065378a4deb760b90ec2919d07414d5d60c64bfb6183e0146a7d5cd62。冻结包results/graph-common-task-urllib3-20261103-frozen.tar.gz为130964字节，摘要e0c58eac965cd44e69dc1907403052a07b06d99cf6ad99e3581773d1745ab0f0，本地与服务器archive一致。服务器从独立解压目录重算两项核对JSON，逐字节复现。
+
+## sqlparse的固定输入与独立参考
+
+sqlparse共同任务包含八份完整来源文件、77344字符的共同提示和48个静态调用锚点。输入资格审查与另行独立参考分别核对72和50处逐字引文，全部八项标准、六维参考和未参与角色核对通过。任务摘要a6e5752eb8e6037af965b13d04de14f509127527fe8209f0ee8b4fa235401db0，输入核对摘要696ba4e0b481f8410b10bf083c71a88882cc996f31a5d1e67a54aa0fa0c171cf，独立参考核对摘要95b5d2111dad12d2a9c3852fe96c0b86a3c07bedadb81397071e89b197011466。
+
+冻结包results/graph-common-task-sqlparse-20261103-frozen.tar.gz为653550字节，摘要8ef77d399d22888619c3ac46fdcb9df0b6eaf518c8d33e5fc03107d6e32db60d，本地与服务器archive一致。服务器在独立目录inputs/graph-common-task-sqlparse-20261103-replay解压，使用包内原样科学代码重查两份审查、引文与角色，两项JSON逐字节复现。
+
+任务限定直接API的CRLF注释处理及原有换行语义，CLI保留普通功能的独立身份。整轮比较需要固定样本、最终完整提示预算、比较家族、实用改善、功能非劣及错误率规则。
+
+## sqlparse与Bleach共同输入的预算
+
+使用相同既有Qwen tokenizer、聊天模板及16384候选输出额度计量新增共同任务。sqlparse为18538输入tokens，Bleach为15055输入tokens，分别连同候选输出共34922和31439，均满足49152服务上限。输入包含完整共同来源、政策及保留合同，表示指导与最终生成指令仍需加入后重新计量。
+
+输入摘要233b37a9f190574c244e113e18d646998ba6829209a1b0da01e7d68af9524f4a，结果摘要37b245ccf1938e6ac7b0e8e9af2cf43f5848f62098736913df16241b311571d6。结果使用与先前相同的tokenizer_config摘要959e7f1d9a1b7641a6d6ce05ca97b75c7894fcb66cbe5a040406458fb1128ee4。冻结包results/graph-common-input-budget-additions-20261103-frozen.tar.gz为79734字节，摘要91806b030942a96d444266fbb994d77a3b61ece09c66f46fa8eeb8fcbb7f4e38，本地与服务器archive一致。服务器从新目录独立解压，使用既有check_prompt_context.py及原始模型tokenizer重算，两项计数逐字节复现。模型生成次数为零。
+
+## Bleach的固定输入与独立参考
+
+Bleach共同任务包含八份完整来源文件、67308字符及86个静态调用锚点。政策绑定允许标签配置、原始HTML输入、清理后返回片段和两种脚本解析模式，覆盖bleach.clean及Cleaner.clean。普通style与xmp输出在未允许noscript时保持，目标组合允许转义原始文本中的标记字符。原始清理器使用vendored html5lib，独立HTML结构消费者使用单独安装的html5lib 1.1，两者分别记录。
+
+输入资格审查和另行独立六维参考分别核对58和64处引文，八项判定与参考未参与角色均通过。任务摘要f411eca0cbe0edf3fca4d38a5b92146c6c9094df2b3343b1a4c590d331bf9aff，输入核对摘要3350272baa11e3bde4ddb0a854efbf96c664c084bbe0ae06b739c9585af0d5a0，独立参考核对摘要fa633829865c321f41340899948e703f37d52d901076bd716e73131b89e3169c。两个审查上下文均未读取运行测量、控制实现或方法输出，也未执行来源。
+
+固定包results/graph-common-task-bleach-20261103-verified.tar.gz为668372字节，摘要ef0e251bead45b74054aacad9671251412da17b6bcaeeea12a4e128212fe8491，本地与服务器archive一致。服务器在inputs/graph-common-task-bleach-20261103-verified-replay独立解压，用包内原样科学代码重新核对全部引文和角色，两项核对JSON逐字节复现。源码、任务和局部运行测量保留各自身份；该任务尚无方法表示或生成代码。
+
+## MLAlchemy的固定输入与独立参考
+
+MLAlchemy共同任务包含九份完整来源文件、30997字符及39个静态调用锚点。政策绑定原始YAML文本、构造后的Python对象、后续字典验证和查询消费，要求Python构造标签在副作用之前受到拒绝。正常YAML数据、日期及共享引用、JSON和字典入口的原有查询行为保留。宽范围依赖声明与本次固定的Python 3.9、SQLAlchemy 1.3.24、future 1.0.0及PyYAML 3.13环境分别记录。
+
+输入资格审查与另行独立六维参考各核验35处引文，全部八项判定和未参与角色核对通过。任务摘要7eeda09798bf238c2f7cfe48b8c8a484f673ab6c2646be3499ca635c080b3dcb，输入核对摘要7da8a3dad9908e1be8409f2249119a73a1159b953b8e191faacda5fd22974cfe，独立参考核对摘要2c707d01348704cd549e7c98c714dc9c2d50621f502892be0ab251ad1a5f0a63。审查上下文没有读取运行测量、控制、其他审查或方法输出，运行行为在静态参考中保持未知。
+
+实际Qwen tokenizer计数为7117输入tokens，连同16384候选输出共23501，满足49152服务上限。输入摘要eac4b4da13e1cc72fd7cd1fcb4292eaa9fb83c564d4902ed457a38454a53535b，结果摘要7d10a889609af46a5c38592b4e3ef198f2a7c152d53ed5bac8c9cf0754fbfa27，沿用同一tokenizer_config摘要959e7f1d9a1b7641a6d6ce05ca97b75c7894fcb66cbe5a040406458fb1128ee4。最终表示指导及生成指令仍需加入后重新计量。
+
+固定包results/graph-common-task-mlalchemy-20261103-frozen.tar.gz为656734字节，摘要49d3fea7ba0ae410afd3dfc272c67d4b123bb72c7ed12112859b45a2f6674470，本地与服务器archive一致。服务器在inputs/graph-common-task-mlalchemy-20261103-replay独立解压，使用包内原样科学代码重查两份审查及原始模型tokenizer，全部核对JSON与计数结果逐字节复现。没有制作方法表示、重新执行来源或生成代码。

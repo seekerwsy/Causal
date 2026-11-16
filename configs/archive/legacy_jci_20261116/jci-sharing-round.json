@@ -1,0 +1,16 @@
+{
+  "study_id": "jci-separation-aggregation-development-20261030",
+  "evidence_role": "POST_HOC_EXPOSED_SHARING_DEVELOPMENT",
+  "formal_claim_allowed": false,
+  "repetitions": [0],
+  "scenarios": ["shifted_proxy", "stable_proxy", "weak_context", "source_spillover", "outcome_shift", "nuisance_is_causal"],
+  "batches": [0, 1],
+  "aggregation_penalty": 0.1,
+  "ci_draws": 199,
+  "ci_alpha": 0.05,
+  "minimum_per_level": 2,
+  "new_model_calls": 0,
+  "minimum_useful_confirmation_gain": 0.1,
+  "comparison_methods": ["ancestor_single", "separator_single", "ancestor_aggregate", "adjacency_aggregate", "direct_invariance_aggregate", "direct_domain_aggregate", "direct_search_aggregate"],
+  "comparison_reference": "separator_aggregate"
+}

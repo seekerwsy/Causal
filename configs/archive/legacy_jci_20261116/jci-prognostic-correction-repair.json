@@ -1,0 +1,23 @@
+{
+  "study_id": "jci-prognostic-correction-repair-20261101",
+  "evidence_role": "NON_CLAIM_PROGNOSTIC_STRUCTURE_LEARNING",
+  "formal_claim_allowed": false,
+  "target_correction_penalty_rule": "independent_of_source_support",
+  "scenarios": ["stable_signal", "proxy_shift", "background_shift", "weak_context", "cancellation", "missing_attribute"],
+  "target_sizes": [16, 32],
+  "batch_seeds": [2026110121, 2026110122],
+  "repetitions_per_batch": 2,
+  "source_task_units": 1024,
+  "confirmation_task_units": 32768,
+  "ridge_penalties": [0.1, 1.0, 10.0, 100.0],
+  "deviation_penalties": [1.0, 10.0, 100.0, 1000.0, 1000000.0],
+  "structure_strengths": [0.0, 2.0, 8.0],
+  "ci_draws": 199,
+  "ci_alpha": 0.05,
+  "component_alpha": 0.01,
+  "confirmation_alpha": 0.03,
+  "minimum_relative_variance_reduction": 0.05,
+  "practical_effect": 0.04,
+  "primary_comparators": ["direct", "direct_invariance"],
+  "new_provider_calls": 0
+}

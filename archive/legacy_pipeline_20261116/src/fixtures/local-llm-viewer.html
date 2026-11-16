@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本地模型与多种子开发 · Prompt Mechanism Study</title>
+<style>
+:root{--bg:#f5f5ee;--ink:#20392e;--muted:#647568;--line:#d3ded3;--green:#347959;--soft:#e3ede2;--red:#b16b4c;--unknown:#a4aa9e;--invalid:#d8c797;--card:#fffef9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,-apple-system,"Microsoft YaHei",sans-serif}a{color:#286343;text-underline-offset:3px}button,select{font:inherit;color:inherit;border:1px solid var(--line);border-radius:7px;background:var(--card);padding:9px 13px}button{cursor:pointer}button:hover,a:hover{filter:brightness(.9)}select:focus,button:focus,a:focus{outline:3px solid #b8d5aa;outline-offset:2px}main{max-width:1270px;margin:auto;padding:38px 38px 70px}.eyebrow{font-size:11px;letter-spacing:.17em;color:var(--muted)}h1{font-size:clamp(27px,3.5vw,46px);line-height:1.25;letter-spacing:-.035em;margin:16px 0}h2{font-size:24px;margin:0 0 12px;letter-spacing:-.025em}h3{font-size:16px;margin:0 0 10px}p{margin:9px 0}.muted{color:var(--muted)}.lead{max-width:890px;font-size:16px}.topline{display:flex;justify-content:space-between;align-items:center;gap:20px}.badge{font-size:11px;background:var(--soft);border:1px solid var(--line);padding:5px 10px;border-radius:30px}.stats{display:grid;grid-template-columns:repeat(4,1fr);margin:27px 0 20px;border-block:1px solid var(--line)}.stat{padding:22px 10px 20px 0}.stat b{display:block;font-size:34px;font-weight:600;line-height:1.2}.stat span{font-size:12px;color:var(--muted)}.notice{border-left:3px solid #bd9362;background:#eeeadb;padding:15px 19px;font-size:13px;line-height:1.8;margin:17px 0}.links{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin:18px 0 34px}.section{padding-top:31px;margin-top:31px;border-top:1px solid var(--line)}.section-head{display:flex;justify-content:space-between;align-items:start;gap:20px}.filters{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0}label{font-size:12px;color:var(--muted)}label select{display:block;color:var(--ink);margin-top:4px;min-width:180px}.card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:21px}.twocol{display:grid;grid-template-columns:1.2fr 1fr;gap:20px}.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:13px 0}.legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--dot);margin-right:5px}.arm-row{display:grid;grid-template-columns:84px 1fr 63px;align-items:center;gap:10px;margin:18px 0;font-size:12px}.bar{height:23px;display:flex;background:#e9e9e0;border-radius:4px;overflow:hidden}.bar>span{height:100%;min-width:0}.table-scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 9px;vertical-align:top}th{font-weight:500;color:var(--muted);font-size:11px}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}.effect{font-size:19px;font-weight:600;white-space:nowrap}.effect.positive{color:var(--green)}.effect.negative{color:#96533c}.small{font-size:12px;line-height:1.75}.tiny{font-size:11px;color:var(--muted)}.pill{display:inline-block;background:#edf1e8;border-radius:4px;padding:3px 7px;margin:2px;font-size:11px}.seed-grid td{min-width:100px}.cell-rate{display:block;font-size:17px}.cell-mixed{background:#edf4e8}.cell-failed{background:#f5e6dd}.cell-meta{display:block;color:var(--muted);font-size:10px}.task-link{white-space:nowrap}details{margin:15px 0}summary{cursor:pointer;color:#35674b}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f2e9;padding:16px;font-size:12px;line-height:1.7}.anchor{scroll-margin-top:20px}footer{font-size:11px;color:var(--muted);padding-top:30px}.warn{color:#955938}.complete{color:var(--green)}.empty{padding:18px;color:var(--muted)}
+@media(max-width:900px){main{padding:25px 20px 50px}.twocol{grid-template-columns:1fr}.section-head{display:block}.stats .stat b{font-size:29px}.effect{font-size:16px}}
+@media(max-width:560px){.stats{grid-template-columns:1fr 1fr}.topline{align-items:start}.badge{max-width:140px;text-align:center}.filters label{flex:1}select{width:100%;min-width:0!important}.card{padding:15px}.section{margin-top:22px;padding-top:24px}th,td{padding:11px 7px}.arm-row{grid-template-columns:77px 1fr 56px;gap:6px}.links{gap:12px}.section-head h2{font-size:22px}}
+</style></head><body><main>
+<div class="topline"><div class="eyebrow">PROMPT MECHANISM STUDY / LOCAL DEVELOPMENT</div><span class="badge">有界开发 · 非确认性证据</span></div>
+<h1>两种模型，十二个任务，十次采样。</h1>
+<p class="lead">固定五臂，在服务器本地运行 Qwen2.5-Coder 7B 与 32B。先平均每个任务的种子，再比较独立任务；失败、未知和功能限制保留在结果里。</p>
+<div class="stats"><div class="stat"><b id="n-assigned">—</b><span>代码生成分配</span></div><div class="stat"><b id="n-tasks">—</b><span>独立任务，两模型共用</span></div><div class="stat"><b>10</b><span>每任务每臂的预定种子</span></div><div class="stat"><b>24</b><span>跨模型共同调整的比较</span></div></div>
+<div class="notice" id="qualification"></div>
+<nav class="links"><a href="local-7b.html">查看 7B 的图、Prompt 与全部代码</a><a href="local-32b.html">查看 32B 的图、Prompt 与全部代码</a><a href="#representation">表示检查的改变</a><a href="#planning">下一阶段设计</a><button id="export" style="font-size:12px;padding:2px 9px">导出本页数据</button></nav>
+
+<section class="section anchor" id="outcomes"><div class="section-head"><div><h2>安全产出与任务分母</h2><p class="muted small">对比、采样数量和评估规则在这轮生成前固定。显著性不作为开发验收标准。</p></div><span class="badge" id="closure"></span></div>
+<div class="filters"><label>生成模型<select id="model"></select></label><label>安全要求<select id="policy"></select></label></div>
+<p id="scope" class="small"></p>
+<div class="twocol"><div class="card"><h3>每臂安全测量组成</h3><p class="tiny">右侧是已测安全数 / 全部分配数；缺失结果未填成不安全。</p><div class="legend"><span style="--dot:var(--green)">安全</span><span style="--dot:var(--red)">不安全</span><span style="--dot:var(--unknown)">未知</span><span style="--dot:var(--invalid)">无效代码</span><span style="--dot:#e4b7aa">未取得结果</span></div><div id="arm-bars"></div></div>
+<div class="card"><h3>功能与测量覆盖</h3><p class="tiny">同一个固定 32B 评审器。未经独立资格验证，不能据此宣称功能保持。</p><div class="table-scroll"><table><thead><tr><th>臂</th><th>代码有效</th><th>安全可评</th><th>功能通过 / 失败 / 未知</th></tr></thead><tbody id="functional-arms"></tbody></table></div></div></div>
+<div class="card" style="margin-top:20px"><h3>任务平均效应</h3><p class="tiny">单位：百分点。区间为边际任务 bootstrap 描述区间；p 值按整个阶段 24 项作 Holm 调整。零宽区间不代表总体没有不确定性。</p><div class="table-scroll"><table><thead><tr><th>比较</th><th>效应</th><th>描述区间</th><th>原始 p</th><th>阶段 Holm p</th><th>种子 MC 标准误</th></tr></thead><tbody id="effects"></tbody></table></div><p id="blocked-note" class="small warn"></p></div>
+</section>
+
+<section class="section"><h2>同一任务会生成不同结果吗？</h2><p class="muted small">每格为已测安全次数 / 10。绿色底表示种子间安全标签有变化；浅红底表示有分配尚未取得安全结果。不同代码数仅描述文本变化，不增加独立任务数。</p>
+<div class="card table-scroll"><table class="seed-grid"><thead><tr><th>任务</th><th>BASELINE</th><th>NOOP</th><th>STYLE</th><th>GENERIC</th><th>TARGET</th></tr></thead><tbody id="seed-cells"></tbody></table></div>
+<p id="seed-note" class="tiny"></p><details><summary>采样误差与任务不确定性的区别</summary><p class="small">MC 标准误只描述这组固定任务在预定种子间的波动，不是向其他任务推广的标准误。每格 Wilson 区间描述单任务单臂的安全产出概率，假设请求样本独立；同一服务的共享错误和后端非确定性不由种子保证。即使 10 次都安全，真实生成概率也没有被证明等于 1。</p></details>
+<div class="card"><h3>当前模型的输出语法诊断</h3><p class="small" id="syntax-note"></p><div id="syntax-examples"></div><p class="tiny">这些观察针对本轮固定的 JSON 输出接口；没有区分模型本身和受约束解码的各自影响，也未修补输出后重新计分。</p></div>
+</section>
+
+<section class="section anchor" id="representation"><h2>检查器现在区分“没找到”和“无法判定”</h2><p class="muted small">对同一批保存的 SQL 图重新作零调用诊断。下表不是语义准确率；来源核对图由助手整理，也不是独立人工金标准。</p>
+<div class="card table-scroll"><table><thead><tr><th>案例 / 图源</th><th>通过</th><th>确切未命中</th><th>锚点歧义</th><th>端点阻塞</th><th>未评估状态</th><th>其他不匹配</th><th>关键绑定</th></tr></thead><tbody id="representation-rows"></tbody></table></div>
+<p class="small">完整图覆盖与干预所需绑定分开检查。CASE 04 的新自动图能通过关键对象/操作绑定，但仍缺少其他表示内容。通过关键机械检查后，要求是否已表达、非目标行为能否保留仍需来源核对。没有重新标注或重写以前的冻结结果。</p>
+<a class="small" href="sql-refinement.html">查看 SQL 原始自动图与来源核对图 →</a>
+</section>
+
+<section class="section"><h2>功能评审仍有明确误判</h2><p class="muted small">一轮提示澄清后，12 个合成检查中 10 个符合预期。两个依赖不透明 helper 的未知案例仍被判失败；这些案例与 1,200 次主分配分开。</p>
+<div class="card table-scroll"><table><thead><tr><th>检查案例</th><th>预期</th><th>实际</th><th>判断</th></tr></thead><tbody id="functional-check"></tbody></table></div>
+<div id="functional-errors"></div><p class="small">此前九例为 7/9；新增三例均是可见失败检查，因此 10/12 不表示原有两例误判已改善。功能标签只作开发诊断，独立安全测量继续保留。未再根据结果调提示、换评审模型或选择性重跑。</p></section>
+
+<section class="section anchor" id="planning"><h2>下一阶段，把资源用在独立任务上</h2><p class="muted small">下面是假设标准差下的正态数量级估算，不是主协议要求的分类模拟与 max-|T| 功效验证，也不是已获准的样本量。</p>
+<div class="twocol"><div class="card"><h3>每效应需要多少独立任务</h3><div class="table-scroll"><table><thead><tr><th>任务效应标准差</th><th>超过检验边界</th><th>任务数</th></tr></thead><tbody id="power-table"></tbody></table></div><p class="tiny">24 项比较、alpha 0.05、假定目标功效 0.8。超过边界的距离若为 10 个百分点，所需数量随任务差异从 97 增至 385。</p></div>
+<div class="card"><h3>结构消融的公平比较</h3><p class="small"><b>Atomic：</b>Full 与 RD-only 共用候选、任务、RD 排序与固定 K，只改变是否读取 FCI Gate。</p><p class="small"><b>Pair：</b>Full 与 No-Relation 共用兼容候选和四格支持，只改变是否读取关系 Gate；不要求 Atomic 父项先被选中。</p><p class="small"><b>独立表示研究提案：</b>Full TSG 对扁平事实列表保留同一来源和信息预算；扁平版可以自行绑定对象，不能用“缺少图边”预先判它失败。此提案尚未冻结或执行，也未加入现有 RQ2。</p><a href="local-next-study-design.md" class="small">下载完整下一阶段设计 →</a></div></div>
+</section>
+<section class="section"><h2>复核与运行身份</h2><p id="calls" class="small"></p><p class="small">所有结果均为开发证据。Prompt TSG 的边不是因果边；生成代码的安全和功能测量不是主因果图的中介变量。正式协议仍为 SPECIFIED_DRAFT。</p><details><summary>展开输入身份、验证结果和运行限制</summary><pre id="provenance"></pre></details></section>
+<footer>离线读取冻结结果，不发起模型请求。每个模型的详情页包含 60 个 Prompt 版本及 600 次生成分配。原有结果页面继续保留。</footer>
+</main><script type="application/json" id="data">__STAGE_DATA__</script><script>
+'use strict';
+const D=JSON.parse(document.getElementById('data').textContent),$=id=>document.getElementById(id),O=D['overview.json'];
+const arms=['BASELINE','NOOP','STYLE','GENERIC','TARGET'];
+const names={BASELINE:'原始基线',NOOP:'任务重述',STYLE:'风格对照',GENERIC:'一般安全',TARGET:'具体要求'};
+const policyNames={'explicit_requirement.sql_single_value':'单输入 SQL 参数绑定','explicit_requirement.command':'命令参数不经 Shell 解释','explicit_requirement.path':'路径约束'};
+const stateNames={pass:'通过',fail:'失败',unknown:'未知',not_run:'未运行',unavailable:'未取得结果'};
+const models=Object.keys(O.models).sort((a,b)=>a.includes('7B-')?-1:1);
+const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
+const fmt=x=>x===null||x===undefined?'—':x.toFixed(3),pp=x=>x===null||x===undefined?'未估计':(x>0?'+':'')+(x*100).toFixed(2);
+const tr=(target,values)=>{const r=node('tr');values.forEach(v=>{const c=node('td');if(v instanceof Node)c.append(v);else c.textContent=v;r.append(c)});$(target).append(r);return r};
+$('n-assigned').textContent=O.assigned_rows.toLocaleString();$('n-tasks').textContent=O.independent_task_units;
+const failures=Object.values(O.reports).reduce((s,r)=>s+r.failed_rows,0),measured=Object.values(O.reports).reduce((s,r)=>s+r.measured_rows,0);
+$('qualification').textContent='安全由冻结的本地 AST Oracle 独立测量。功能评审器尚未合格：12 个合成检查有 2 个 unknown→fail 误判，本轮功能结果不能支持“功能保持”或完整联合成功结论。自动 TSG 抽取也尚未取得正式资格。';
+$('closure').textContent=`${measured.toLocaleString()} 次已测量 · ${failures} 次生成失败`;
+models.forEach(m=>{const o=node('option',m.replace('Qwen2.5-Coder-','').replace('-Instruct',''));o.value=m;$('model').append(o)});
+Object.entries(policyNames).forEach(([p,n])=>{const o=node('option',n);o.value=p;$('policy').append(o)});
+function render(){
+ const model=$('model').value,policy=$('policy').value,sampling=D['sampling.json'][model],rows=D['arms.json'].filter(r=>r.model_id===model&&r.policy_id===policy);
+ const cells=sampling.cells.filter(c=>c.policy_id===policy),contrasts=sampling.contrasts.filter(c=>c.policy_id===policy),fx=D['effects.json'].filter(e=>e.model_id===model&&e.policy_id===policy);
+ const n=rows[0]?.task_units||0;$('scope').textContent=`当前：${policyNames[policy]} · ${n} 个独立任务 × 5 臂 × 10 种子 = ${n*50} 次分配。两模型使用相同任务与种子。`;
+ ['arm-bars','functional-arms','effects','seed-cells'].forEach(id=>$(id).replaceChildren());
+ rows.forEach(r=>{
+  const line=node('div',undefined,'arm-row');line.append(node('span',names[r.arm]));const bar=node('div',undefined,'bar');
+  const sc=r.security_counts,parts=[[sc.secure||0,'var(--green)'],[sc.insecure||0,'var(--red)'],[sc.unknown||0,'var(--unknown)'],[r.invalid_code,'var(--invalid)'],[r.missing_outcomes,'#e4b7aa']];
+  parts.forEach(([count,color])=>{if(!count)return;const s=node('span');s.style.width=(count/r.assigned*100)+'%';s.style.background=color;s.title=String(count);bar.append(s)});
+  line.append(bar,node('span',r.secure+' / '+r.assigned));$('arm-bars').append(line);
+  const f=r.functional_counts;tr('functional-arms',[names[r.arm],`${r.code_valid}/${r.assigned}`,`${r.oracle_evaluable}/${r.assigned}`,`${f.pass||0} / ${f.fail||0} / ${f.unknown||0}`+(f.not_run?`；未运行 ${f.not_run}`:'')+(f.unavailable?`；无结果 ${f.unavailable}`:'')]);
+ });
+ fx.forEach(e=>{const c=contrasts.find(c=>'TARGET - '+c.control===e.comparison),effect=node('span',pp(e.effect),e.effect===null?'warn':'effect '+(e.effect>0?'positive':e.effect<0?'negative':''));
+  tr('effects',[e.comparison,effect,e.ci_low===null?'分配结果不完整':`[${pp(e.ci_low)}, ${pp(e.ci_high)}]`,fmt(e.p_value),fmt(e.adjusted_p_value),c?.fixed_tasks_mc_standard_error===null?'—':((c?.fixed_tasks_mc_standard_error||0)*100).toFixed(2)+' pp']);
+ });
+ $('blocked-note').textContent=fx.some(e=>e.effect===null)?'部分对比包含未取得结果的分配，按冻结规则保留在比较族中并标记阻塞；没有删去这些分配或补成零。':'';
+ [...new Set(cells.map(c=>c.task_unit_id))].sort((a,b)=>D.tasks.find(t=>t.task_unit_id===a).case_number-D.tasks.find(t=>t.task_unit_id===b).case_number).forEach(task=>{const taskInfo=D.tasks.find(t=>t.task_unit_id===task),title=node('span','CASE '+String(taskInfo.case_number).padStart(2,'0'),'task-link'),values=[title];title.title=task;
+  arms.forEach(arm=>{const c=cells.find(c=>c.task_unit_id===task&&c.arm===arm),box=node('div');box.append(node('span',`${c.secure_samples} / ${c.expected_samples}`,'cell-rate'));
+   box.append(node('span',`${c.distinct_code_samples} 种代码`+(c.failed_samples?` · ${c.failed_samples} 失败`:''),'cell-meta'));
+   const ci=c.wilson95_secure_yield_probability;box.append(node('span',ci?`Wilson ${(ci[0]*100).toFixed(0)}–${(ci[1]*100).toFixed(0)}%`:'区间未估计','cell-meta'));values.push(box);
+  });const r=tr('seed-cells',values);arms.forEach((arm,i)=>{const c=cells.find(c=>c.task_unit_id===task&&c.arm===arm);if(c.failed_samples)r.children[i+1].classList.add('cell-failed');else if(c.mixed_secure_yield_across_seeds)r.children[i+1].classList.add('cell-mixed')});
+ });
+ $('seed-note').textContent=`${cells.filter(c=>c.status==='COMPLETE').length} 个完整任务臂格中，${cells.filter(c=>c.mixed_secure_yield_across_seeds).length} 格在种子间呈现混合安全产出；另有 ${cells.filter(c=>c.status!=='COMPLETE').length} 格不完整。`;
+ const syntax=D['syntax-diagnostics.json'][model];$('syntax-note').textContent=`范围：当前模型全部 600 次分配。${syntax.invalid_code_count} 份代码无效；其中 ${syntax.raw_json_code_identical_to_measured_code} 份与原始 JSON code 字段逐字相同，${syntax.independent_python_syntax_failures} 份独立 Python 语法检查失败。`;
+ $('syntax-examples').replaceChildren();syntax.failures.slice(0,3).forEach(f=>{const d=node('details');d.append(node('summary',f.arm+' · '+f.message));d.append(node('pre',`分配 ${f.assignment_id}\n第 ${f.line_number||'—'} 行：${f.line_text||'空程序'}`));$('syntax-examples').append(d)});
+}
+$('model').onchange=render;$('policy').onchange=render;render();
+const variantNames={old_automatic:'旧自动图',new_automatic:'新自动图',source_reviewed:'来源核对图'};
+D.representation.filter(r=>r.variant!=='old_automatic').sort((a,b)=>a.case_number-b.case_number||a.variant.localeCompare(b.variant)).forEach(r=>{const a=r.assessment,c=a.check_status_counts;
+ tr('representation-rows',[`CASE ${String(r.case_number).padStart(2,'0')} · ${variantNames[r.variant]}`,c.PASS||0,c.MISSING||0,c.AMBIGUOUS_SOURCE_BINDING||0,c.BLOCKED_ENDPOINT_BINDING||0,c.UNASSESSED_FEATURE||0,(c.COLLAPSED_ROLES||0)+(c.WRONG_STATE||0)+(c.FORBIDDEN_RELATION||0),a.critical_scope_status==='MET_PENDING_SEMANTIC_SOURCE_REVIEW'?(r.variant==='source_reviewed'?'机械通过；助手已核对来源':'机械通过；语义待核对'):'需要核对']);
+});
+D['functional-check.json'].forEach(r=>tr('functional-check',[r.case_id,stateNames[r.expected_status],stateNames[r.validated?.status]||'无有效判断',node('span',r.matched?'符合预期':'不符合预期',r.matched?'complete':'warn')]));
+D['functional-check.json'].filter(r=>!r.matched).forEach(r=>{const detail=node('details');detail.append(node('summary',r.case_id+' · 查看原始判断依据'));detail.append(node('p',r.original_task,'small'));detail.append(node('pre',r.program_lines.map(l=>l.line_number+': '+l.text).join('\n')));detail.append(node('p','模型理由：'+r.validated.reason,'small'));detail.append(node('p','预期为未知：helper 的实际行为没有给出；“未能确认保证”尚不足以证明实现违反任务。','small'));$('functional-errors').append(detail)});
+D['planning-sensitivity.json'].rows.forEach(r=>tr('power-table',[r.task_effect_sd.toFixed(2),(r.effect_beyond_boundary*100).toFixed(0)+' pp',r.task_units_per_effect.toLocaleString()]));
+$('calls').textContent=`主运行实际本地调用 ${O.main_live_calls.toLocaleString()} 次；接口与功能试跑另 ${O.premain_live_calls} 次。本阶段云端调用为 0。每次代码生成后至多调用一次固定功能评审，代码没有作为程序执行。`;
+$('provenance').textContent=JSON.stringify({overview:O,independent_verification:D['verification.json']},null,2);
+$('export').onclick=()=>{const a=node('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D,null,2)],{type:'application/json'}));a.download='local-models-development-data.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+</script></body></html>

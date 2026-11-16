@@ -1,8 +1,14 @@
-\documentclass[acmsmall,screen,review,anonymous]{acmart}
+\documentclass[manuscript,screen,review,anonymous]{acmart}
+% TOSEM uses acmsmall for publication; manuscript is ACM's review format.
+% Keep the working draft anonymous until the author block is supplied.
 
 \settopmatter{printacmref=false}
 \setcopyright{none}
-\renewcommand\footnotetextcopyrightpermission[1]{}
+\acmJournal{TOSEM}
+\acmDOI{}
+\acmYear{}
+\copyrightyear{}
+\citestyle{acmnumeric}
 
 \usepackage{booktabs}
 \usepackage{flafter}
@@ -13,19 +19,14 @@
 \usepackage{tabularx}
 \usepackage{tikz}
 \usepackage{xspace}
-\usetikzlibrary{arrows.meta,fit,positioning}
+\usetikzlibrary{arrows.meta,backgrounds,fit,positioning}
 
 \newcommand{\model}{\textsc{CausalGuide}\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
 
-\acmConference[FSE 2027]{The ACM International Conference on the Foundations
-of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
-\acmYear{2027}
-\copyrightyear{2027}
-
 \begin{document}
 
-\title{\model: Causal Analysis for Explainable Security Guidance in LLM Code
+\title[CausalGuide: Explainable Security Guidance in LLM Code Generation]{\model: Causal Analysis for Explainable Security Guidance in LLM Code
 Generation}
 
 \author{Anonymous Author(s)}
@@ -35,7 +36,7 @@ Generation}
 }
 
 \begin{abstract}
-% Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit. 
+% Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit.
 \end{abstract}
 
 \begin{CCSXML}
@@ -76,8 +77,5 @@ Generation}
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
-
-\appendix
-\input{sections/appendix-method-details}
 
 \end{document}

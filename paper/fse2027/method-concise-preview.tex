@@ -1,15 +1,21 @@
-\documentclass[acmsmall,screen,review,anonymous]{acmart}
+\documentclass[manuscript,screen,review,anonymous]{acmart}
 
 \settopmatter{printacmref=false}
 \setcopyright{none}
-\renewcommand\footnotetextcopyrightpermission[1]{}
+\acmJournal{TOSEM}
+\acmDOI{}
+\acmYear{}
+\copyrightyear{}
+\citestyle{acmnumeric}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tikz}
 \usepackage{xspace}
+\usetikzlibrary{arrows.meta,backgrounds,fit,positioning}
 \newcommand{\model}{\textsc{CausalGuide}\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
 \title[Method draft]{CausalGuide Method: task representation, causal analysis, and evidence-grounded guidance}
 \author{Anonymous Author(s)}
-\acmYear{2027}
-\copyrightyear{2027}
 
 \begin{document}
 \raggedbottom
@@ -17,6 +23,4 @@
 \input{sections/03-method}
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
-\appendix
-\input{sections/appendix-method-details}
 \end{document}

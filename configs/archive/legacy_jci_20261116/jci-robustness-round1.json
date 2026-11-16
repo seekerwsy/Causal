@@ -1,0 +1,19 @@
+{
+  "study_id": "jci-robustness-round1-20261103",
+  "evidence_role": "PROSPECTIVE_BOUNDED_JCI_ROBUSTNESS_DEVELOPMENT",
+  "base_plan": "configs/jci-target-budget-curve-n16.json",
+  "regimes": [
+    {"name": "reference", "batch_seeds": [2026112151, 2026112152], "auxiliary_size": 512, "context_effect_strength": 0.3, "attribute_measurement_flip_probability": 0.0},
+    {"name": "weak_context", "batch_seeds": [2026112161, 2026112162], "auxiliary_size": 512, "context_effect_strength": 0.1, "attribute_measurement_flip_probability": 0.0},
+    {"name": "measurement_error", "batch_seeds": [2026112171, 2026112172], "auxiliary_size": 512, "context_effect_strength": 0.3, "attribute_measurement_flip_probability": 0.1},
+    {"name": "limited_structure_data", "batch_seeds": [2026112181, 2026112182], "auxiliary_size": 128, "context_effect_strength": 0.3, "attribute_measurement_flip_probability": 0.0}
+  ],
+  "repetitions_per_batch": 16,
+  "target_size": 16,
+  "component_alpha": 0.025,
+  "comparison_family_size": 204,
+  "minimum_relative_variance_reduction": 0.05,
+  "workers": 4,
+  "formal_claim_allowed": false,
+  "new_provider_calls": 0
+}

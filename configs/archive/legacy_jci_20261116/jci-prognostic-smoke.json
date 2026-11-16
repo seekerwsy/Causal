@@ -1,0 +1,22 @@
+{
+  "study_id": "jci-prognostic-smoke-20261101",
+  "evidence_role": "NON_CLAIM_PROGNOSTIC_STRUCTURE_LEARNING",
+  "formal_claim_allowed": false,
+  "scenarios": ["stable_signal", "background_shift"],
+  "target_sizes": [8],
+  "batch_seeds": [2026110191, 2026110192],
+  "repetitions_per_batch": 1,
+  "source_task_units": 128,
+  "confirmation_task_units": 512,
+  "ridge_penalties": [0.1, 1.0, 10.0, 100.0],
+  "deviation_penalties": [1.0, 10.0],
+  "structure_strengths": [0.0, 2.0, 8.0],
+  "ci_draws": 99,
+  "ci_alpha": 0.05,
+  "component_alpha": 0.01,
+  "confirmation_alpha": 0.03,
+  "minimum_relative_variance_reduction": 0.05,
+  "practical_effect": 0.04,
+  "primary_comparators": ["direct", "direct_invariance"],
+  "new_provider_calls": 0
+}

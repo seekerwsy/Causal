@@ -1,0 +1,32 @@
+# Historical Development Ledger (2026-10 to 2026-11)
+
+This ledger consolidates the chronological Oct–Nov 2026 development logs, bounded pilot diagnostics, and pre-consolidation protocol snapshots moved out of `README.md` and `docs/jci-method.md` on `2026-11-16` so that the main documentation remains a crisp normative specification. All underlying frozen packages under `data/method/`, `results/`, `archive/`, and individual experiment reports in `docs/experiments/` retain their original evidence identities and reproduction commands unchanged.
+
+---
+
+## 1. Early JCI Studies (2026-10-14 to 2026-11-01)
+
+- **Finite-regularization SCM reliability & budget replay (2026-10-14)**: Completed 3,072 independent SCM repetitions (`2026-10-14-jci-reliability-results.md`) and real historical model-outcome replay (`2026-10-14-jci-budget-replay-results.md`). Zero conditions established a reliable JCI increment over direct baselines under that earlier design. Implementation history preserved at `main` commit `d304d4ec` and `archive/legacy_jci_20261116/`.
+- **Cross-environment transfer & randomized-editor validation (2026-10-28 to 2026-10-29)**: Verified 12 transfer cells / 400 tasks (`2026-10-28-jci-transfer-results.md`) and 96 mechanism repetitions (`2026-10-29-jci-context-validation-results.md`); zero provider calls.
+- **Directional validation & target-only correction rounds (2026-10-30 to 2026-10-31)**:
+  - Established via exact counterexample in [2026-10-31-pro-design-review.md](2026-10-31-pro-design-review.md) that source residual mixing introduces estimation bias under covariate shift; target-only randomized correction preserves finite-sample unbiasedness.
+  - Executed 176 repetitions across 11 mechanisms (`2026-10-31-source-context-full-results.md`), 48 prognostic-learning repetitions (`2026-11-01-prognostic-learning-results.md`), and 48 independent target-shrinkage repetitions (`2026-11-01-prognostic-correction-repair-results.md`). None met the 5% variance reduction gate against direct conditional invariance.
+  - [2026-11-01-jci-query-information-equivalence.md](2026-11-01-jci-query-information-equivalence.md) proved over all 2,816 source-population queries (24 mechanism/hypothesis cases) that the $(C, W, Z, Y)$ source-context separation support sets match exact direct conditional queries 100%, motivating the transition to directional PAG role consumers.
+
+## 2. Directional Attribute Graph & Robustness Round 1 (2026-11-01 to 2026-11-03)
+
+- **True-structure & high-dimensional directional validation (2026-11-01 to 2026-11-02)**:
+  - High-dimensional oracle check (`2026-11-01-jci-highdim-oracle-results.md`, 192 units) and fresh directional validity check (`2026-11-01-jci-direction-validity-results.md`, 96 units) demonstrated directional PAG variance gains of `10.06%–18.11%` under `downstream_signal`.
+  - Target-budget curve (`2026-11-02-jci-target-budget-curve-results.md`, 288 budget cells) confirmed `11.60%–17.43%` same-budget precision gains at 64/128/256 target outcomes under `downstream_signal`, while failing the half-target-data criterion and exhibiting negative transfer under `upstream_control`.
+- **Frozen JCI Robustness Round 1 (`jci-robustness-round1-20261103`)**:
+  - Completed 384 fixed simulation units across 4 regimes (`reference`, `weak_context`, `measurement_error`, `limited_structure_data`), 204 Bonferroni-adjusted comparisons, and 132 descriptive diagnostics (`summary.json` SHA-256 `af02ef80b4e0eee5eebe0ef78403940426f1ee5259b128f05c713439282b6ac2`; `verification.json` SHA-256 `424a68aee2d1c0e8e7c675663dfa9550ba66322946466a9e88e2445e32779270`).
+  - `reference / downstream_signal` passed `10/10` (`+12.51%` to `+18.38%`); `reference / target_new_attribute` passed `10/10` (`+5.19%` to `+7.92%`); `upstream_control` incurred harms down to `-13.78%` because the terminal-only consumer lacked an upstream role group and adaptive selection. This negative-transfer limitation directly motivated the `2026-11-16` PAG role-grouped shrinkage (`V_term`, `V_up`, `V_other`) and task-unit $K$-fold cross-fitting upgrade.
+
+## 3. TSG Representation & Local Qwen Interface Rounds (2026-11-01 to 2026-11-10)
+
+- **TSG binding, proposition readback, and component ownership checks (2026-11-01 to 2026-11-03)**:
+  - Evaluated 42 security-binding tasks (`2026-11-01-tsg-security-binding-results.md`), 48 natural issues / 144 source positions (`2026-11-01-tsg-source-attribute-results.md`), 24 APPS task contracts (`2026-11-01-tsg-task-contract-results.md`), `part_of` object ownership (`2026-11-02-tsg-object-ownership-results.md`), and target-relative attributes (`2026-11-02-security-relation-reference-results.md`). Graph did not outperform strong Flat baselines in general single-operation checklists and suffered whole-graph rejections on partial syntax mismatches.
+- **240-request unified-diff evaluation (`2026-11-05`)**: Reported in [2026-11-05-graph-jci-joint-results.md](2026-11-05-graph-jci-joint-results.md). All 240 local Qwen responses opened with Markdown fences and failed the bare unified-diff parser (`RESPONSE_IS_NOT_A_BARE_UNIFIED_DIFF`), yielding 0 executed security/functionality checks and `JOINT_SCIENTIFIC_BOUNDED_UNMET`.
+- **Policy Explicit Expression (`policy-expression-graph-20261106`) & physical-line array interface rounds (`2026-11-07` to `2026-11-10`)**:
+  - Switched intervention definition from pure absent `ADD` to explicit policy restatement (`P0/P1`, [2026-11-06-policy-expression-graph-design.md](2026-11-06-policy-expression-graph-design.md)) across 20 tasks (120 planned main + 6 qualification assignments).
+  - Under `line-coordinate-r1-20261108` (`data/method/policy-expression-graph-65536-20261107/finalization-20261109-executed/`, manifest `7dd31d42...`) and `physical-line-edit-array-r2-20261110` (`data/method/policy-expression-graph-65536-20261107/finalization-20261110-executed/`, manifest `a3cb7d17b121be530cdaed28991f5c565216241311647ede496b3fd132f1e86a`, execution freeze `7df333cf2a0bf317bd3f9681c4d47c17f611f3d435c5cf4bb92097c422a63f8f`), all 6 qualification calls completed without retries (`HTTP 200`, `finish_reason=stop`), but native XGrammar permitted 64 `delete` operations (and duplicate coordinates in 1 item) that the independent parser rejected (`delete_count > 16` or duplicate coordinate), halting before code measurement (`QUALIFICATION_GATE_FAILED`, remaining 114 assignments `NOT_STARTED_BY_PREDECLARED_INTERFACE_GATE`, `effect_estimates=null`).

@@ -19,7 +19,7 @@ not change the study scope or authorize formal use.
 
 ## Preview
 
-From the paper project root (`paper/fse2027`):
+From the paper project root (`paper/tosem`):
 
 ```text
 latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out/cwe-inventory tables/cwe-inventory/preview.tex

@@ -1,0 +1,20 @@
+{
+  "study_id": "jci-context-validation-20261029",
+  "evidence_role": "NON_CLAIM_CONTEXT_MECHANISM_SIMULATION",
+  "formal_claim_allowed": false,
+  "seed": 2026102901,
+  "scenarios": ["shared", "hidden_wording", "latent_confounding", "no_overlap", "effect_cancellation", "near_threshold"],
+  "hypotheses": 4,
+  "nomination_count": 2,
+  "repetitions": 16,
+  "discovery_task_units": 256,
+  "calibration_selection_task_units": 128,
+  "calibration_ranking_task_units": 128,
+  "confirmation_task_units_per_hypothesis": 1024,
+  "ci_draws": 199,
+  "ci_alpha": 0.05,
+  "minimum_per_environment": 2,
+  "overlap_epsilon": 0.1,
+  "confirmation_alpha": 0.05,
+  "practical_effect": 0.04
+}

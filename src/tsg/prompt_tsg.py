@@ -12,6 +12,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+import networkx as nx
+
 from prompt_mechanism_study.records import (
     canonical_json,
     canonical_value,
@@ -167,6 +169,235 @@ def requirement_membership(structures, requirement_ids):
 def graph_requirement_membership(graph):
     return requirement_membership(graph.requirement_structures,
         {n.node_id for n in graph.nodes if n.node_type in REQUIREMENT_TYPES})
+
+
+def _object_components(nodes, links):
+    components = nx.DiGraph()
+    components.add_nodes_from(key for key, node in nodes.items() if node.node_type == 'data_object')
+    parts = sorted((source, target) for source, kind, target in links if kind == 'part_of')
+    if any(source not in components or target not in components for source, target in parts):
+        raise PromptTSGError('对象组成关系需要两个data_object端点')
+    components.add_edges_from(parts)
+    if not nx.is_directed_acyclic_graph(components):
+        raise PromptTSGError('对象真组成关系不能包含自环或有向环')
+    return components
+
+
+def source_participation_paths(graph, operation_node_ids, subject_node_ids):
+    """保留要求对象到实际操作参与者的直接或组成路径。"""
+    nodes = {node.node_id: node for node in graph.nodes}
+    operations, subjects = tuple(operation_node_ids), tuple(subject_node_ids)
+    if (len(set(operations)) != len(operations) or len(set(subjects)) != len(subjects)
+        or any(key not in nodes or nodes[key].node_type != 'task_operation' for key in operations)
+        or any(key not in nodes or nodes[key].node_type != 'data_object' for key in subjects)):
+        raise PromptTSGError('操作参与路径需要明确的操作和对象端点')
+    links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+    components = _object_components(nodes, links)
+    paths = []
+    for subject in sorted(subjects):
+        containers = nx.single_source_shortest_path(components, subject)
+        for operation in sorted(operations):
+            for participant, path in sorted(containers.items()):
+                for kind, edge in (('used_by', (participant, 'used_by', operation)),
+                    ('produces', (operation, 'produces', participant))):
+                    if edge in links:
+                        paths.append(dict(subject_node_id=subject, participant_node_id=participant,
+                            operation_node_id=operation, participation_kind=kind,
+                            ownership_path_node_ids=path))
+    return paths
+
+
+def source_proposition_measurement(graph, proposition_node_ids):
+    """读取显式命题作用及来源绑定，缺失属性保持未知。"""
+    if (not isinstance(proposition_node_ids, (list, tuple))
+            or any(not isinstance(key, str) or not key for key in proposition_node_ids)
+            or len(set(proposition_node_ids)) != len(proposition_node_ids)):
+        raise PromptTSGError('proposition coordinates must be unique node identities')
+    nodes = {node.node_id: node for node in graph.nodes}
+    if any(key not in nodes or nodes[key].node_type not in REQUIREMENT_TYPES for key in proposition_node_ids):
+        raise PromptTSGError('a proposition measurement requires source proposition nodes')
+    attributes = {key: dict(nodes[key].attributes) for key in proposition_node_ids}
+
+    def joined(field):
+        values = [row.get(field) for row in attributes.values()]
+        return True if any(value is True for value in values) else (
+            False if values and all(value is False for value in values) else None)
+
+    force = {(True, False): 'normative', (False, True): 'descriptive',
+             (True, True): 'mixed', (False, False): 'mentioned'}.get(
+                 (joined('normative_force'), joined('descriptive_force')), 'unresolved')
+    links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+    roles = {'about_operation': {'task_operation'}, 'has_subject': {'data_object'},
+             'under_condition': {'condition'}, 'scope_evidence': REQUIREMENT_TYPES | {'condition'}}
+    fields = {role: set() for role in roles}
+    complete = bool(proposition_node_ids)
+    has_components = any(kind == 'part_of' for _, kind, _ in links)
+    participation_paths = []
+    for key in proposition_node_ids:
+        frame = {role: {target for source, kind, target in links if source == key and kind == role}
+                 for role in roles}
+        if any(nodes[target].node_type not in roles[role] for role in roles for target in frame[role]):
+            raise PromptTSGError('proposition binding has invalid source roles')
+        connected = all(any((subject, 'used_by', operation) in links
+                           or (operation, 'produces', subject) in links
+                           for operation in frame['about_operation'])
+                        for subject in frame['has_subject']) if frame['about_operation'] else True
+        if has_components:
+            paths = source_participation_paths(graph, sorted(frame['about_operation']), sorted(frame['has_subject']))
+            participation_paths.extend(dict(proposition_node_id=key, **path) for path in paths)
+            if frame['about_operation']:
+                connected = all(any(path['subject_node_id'] == subject for path in paths)
+                    for subject in frame['has_subject'])
+        complete = (complete and attributes[key].get('binding_complete') is True
+                    and bool(frame['about_operation'] or frame['has_subject']) and connected)
+        for role in roles:
+            fields[role].update(frame[role])
+    result = dict(force=force, proposition_node_ids=sorted(proposition_node_ids),
+        operation_node_ids=sorted(fields['about_operation']), subject_node_ids=sorted(fields['has_subject']),
+        condition_node_ids=sorted(fields['under_condition']), scope_evidence_node_ids=sorted(fields['scope_evidence']),
+        binding_complete=bool(complete))
+    if has_components:
+        result['subject_binding_paths'] = participation_paths
+    return result
+
+
+def source_proposition_readback(graph, proposition_node_ids, *, prompt, catalog, include_unbound_context=False):
+    """保留完整命题、操作实例和表达式归属，不补充来源语义。"""
+    validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
+    measurement = source_proposition_measurement(graph, proposition_node_ids)
+    nodes = {node.node_id: node for node in graph.nodes}
+    links = {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges}
+    forms = {key: (kind, members) for key, kind, members in graph.requirement_structures}
+    parents = {member: key for key, _, members in graph.requirement_structures for member in members}
+    scopes = {key: dict(kind=kind, boundary_node_ids=list(boundaries), target_class=target_class)
+              for key, kind, boundaries, target_class in graph.requirement_scopes}
+    asserted, _ = graph_requirement_membership(graph)
+    selected, referenced, pending = set(proposition_node_ids), set(), list(proposition_node_ids)
+    if include_unbound_context:
+        pending = [key for key, node in nodes.items() if node.node_type != 'task']
+    propositions, operations, context_links = {}, {}, set()
+    while pending:
+        key = pending.pop()
+        if key in referenced:
+            continue
+        referenced.add(key)
+        if nodes[key].node_type in REQUIREMENT_TYPES:
+            binding = source_proposition_measurement(graph, [key])
+            kind, members = forms.get(key, ('undeclared', ()))
+            guards = sorted(source for source, edge, target in links if edge == 'conditions' and target == key)
+            targets = sorted(target for source, edge, target in links if edge == 'constrains' and source == key)
+            owned = [dict(source_node_id=source, edge_type=relation, target_node_id=target)
+                     for owner, source, relation, target in graph.requirement_relations if owner == key]
+            scope = scopes.get(key)
+            propositions[key] = dict(selected=key in selected, binding=binding,
+                composition=dict(kind=kind, member_node_ids=list(members)),
+                native_expression_asserted=key in asserted, retained_scope=scope, owned_relations=owned,
+                requirement_condition_node_ids=guards, constraint_target_node_ids=targets)
+            pending.extend((*members, *guards, *targets))
+            if key in parents:
+                pending.append(parents[key])
+            for field in ('operation_node_ids', 'subject_node_ids', 'condition_node_ids', 'scope_evidence_node_ids'):
+                pending.extend(binding[field])
+            if scope is not None:
+                pending.extend(scope['boundary_node_ids'])
+            for relation in owned:
+                pending.extend((relation['source_node_id'], relation['target_node_id']))
+        elif nodes[key].node_type == 'task_operation':
+            inputs = sorted(source for source, kind, target in links if kind == 'used_by' and target == key)
+            outputs = sorted(target for source, kind, target in links if kind == 'produces' and source == key)
+            guards = sorted(source for source, kind, target in links if kind == 'conditions' and target == key)
+            contexts = sorted(source for source, kind, target in links if kind == 'context_for' and target == key)
+            order = [dict(source_node_id=source, edge_type=kind, target_node_id=target)
+                     for source, kind, target in sorted(links) if kind == 'precedes' and key in (source, target)]
+            operations[key] = dict(input_node_ids=inputs, output_node_ids=outputs,
+                execution_condition_node_ids=guards, non_gating_context_node_ids=contexts, independent_order=order)
+            pending.extend((*inputs, *outputs, *guards, *contexts))
+            for relation in order:
+                pending.extend((relation['source_node_id'], relation['target_node_id']))
+        elif nodes[key].node_type == 'data_object':
+            pending.extend(target for source, kind, target in links if source == key and kind == 'part_of')
+        for source, kind, target in links:
+            if kind in {'refers_to', 'supports', 'contrasts'} and key in (source, target):
+                context_links.add((source, kind, target))
+                pending.extend((source, target))
+    roots = {key for key in propositions if key not in parents}
+    for key, frame in propositions.items():
+        path = [key]
+        while path[-1] in parents:
+            path.append(parents[path[-1]])
+        path.reverse()
+        frame['expression_path_node_ids'] = path
+        frame['expression_condition_attachments'] = [
+            dict(owner_node_id=owner, source_node_id=source, edge_type=kind, target_node_id=target)
+            for owner in path for source, kind, target in sorted(links)
+            if (kind == 'conditions' and target == owner)
+            or (kind == 'under_condition' and source == owner)
+        ]
+    selected_roots = {propositions[key]['expression_path_node_ids'][0] for key in selected}
+    units = source_evidence_units(prompt)['units']
+    descriptions = {key: dict(canonical_value(nodes[key]),
+        meaning_claim=catalog['semantic_guidance'].get(nodes[key].semantic_id),
+        evidence_text=prompt[nodes[key].evidence_start:nodes[key].evidence_end],
+        source_unit_ids=[unit_id for unit_id, unit in units.items()
+            if nodes[key].evidence_start < unit['evidence_end'] and unit['evidence_start'] < nodes[key].evidence_end])
+        for key in sorted(referenced)}
+    result = dict(tsg_id=graph.tsg_id, prompt_sha256=graph.prompt_sha256, catalog_sha256=graph.catalog_sha256,
+        measurement=measurement, selected_proposition_node_ids=sorted(selected), expression_root_node_ids=sorted(roots),
+        selected_expression_root_node_ids=sorted(selected_roots),
+        propositions={key: propositions[key] for key in sorted(propositions)},
+        operations={key: operations[key] for key in sorted(operations)}, nodes=descriptions,
+        source_context_relations=[dict(source_node_id=source, edge_type=kind, target_node_id=target)
+                                 for source, kind, target in sorted(context_links)],
+        unresolved_semantics=list(graph.unresolved_semantics), unresolved_relations=[list(row) for row in graph.unresolved_relations],
+        source_entailment_verified=False)
+    if any(kind == 'part_of' for _, kind, _ in links):
+        result['object_component_relations'] = [dict(source_node_id=source, edge_type=kind, target_node_id=target)
+            for source, kind, target in sorted(links) if kind == 'part_of' and source in referenced]
+    return result
+
+
+def source_requirement_inventory(graph, *, prompt, catalog):
+    proposition_ids = [node.node_id for node in graph.nodes if node.node_type in REQUIREMENT_TYPES]
+    complete = source_proposition_readback(graph, proposition_ids, prompt=prompt, catalog=catalog,
+        include_unbound_context=True)
+    normative = {key for key, frame in complete['propositions'].items()
+        if dict(complete['nodes'][key]['attributes']).get('normative_force') is True and frame['native_expression_asserted']}
+    selected = {key for key in normative
+        if not (set(complete['propositions'][key]['expression_path_node_ids'][:-1]) & normative)}
+    uncertain = sorted(key for key in complete['propositions']
+        if 'normative_force' not in dict(complete['nodes'][key]['attributes']))
+    return dict(inventory_root_node_ids=sorted(selected), unresolved_candidate_node_ids=uncertain,
+        readback=source_proposition_readback(graph, sorted(selected), prompt=prompt, catalog=catalog),
+        source_state_readback=complete,
+        source_entailment_verified=False, source_coverage_verified=False)
+
+
+def source_binding_relations(graph, proposition_node_ids, *, prompt, catalog):
+    """测量两个来源命题的已记录绑定和逻辑所有者。"""
+    if len(proposition_node_ids) != 2 or len(set(proposition_node_ids)) != 2:
+        raise PromptTSGError('binding relation measurement requires two distinct propositions')
+    readback = source_proposition_readback(graph, proposition_node_ids, prompt=prompt, catalog=catalog)
+    frames = [readback['propositions'][key] for key in proposition_node_ids]
+
+    def shared(field):
+        values = [set(frame['binding'][field]) for frame in frames]
+        if not all(frame['binding']['binding_complete'] for frame in frames) or not all(values):
+            return None
+        return bool(values[0] & values[1])
+
+    owners = set(frames[0]['expression_path_node_ids']) & set(frames[1]['expression_path_node_ids'])
+    operators = {key: readback['propositions'][key]['composition']['kind'] for key in sorted(owners)
+        if readback['propositions'][key]['composition']['kind'] in {'and', 'or', 'not'}}
+    return dict(proposition_node_ids=sorted(proposition_node_ids),
+        shared_recorded_operation=shared('operation_node_ids'),
+        shared_recorded_subject=shared('subject_node_ids'),
+        common_expression_operators=operators,
+        native_asserted_node_ids=sorted(key for key in proposition_node_ids
+            if readback['propositions'][key]['native_expression_asserted']),
+        source_roles={key: readback['propositions'][key]['binding']['force'] for key in sorted(proposition_node_ids)},
+        condition_owners={key: readback['propositions'][key]['expression_condition_attachments']
+            for key in sorted(proposition_node_ids)},
+        source_entailment_verified=False)
 
 
 def requirement_binding(requirement, *, links, node_types, structures=(), retained_scopes=(), owned_relations=()):
@@ -549,6 +780,47 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
     return graph
 
 
+def source_evidence_units(prompt):
+    """按物理行索引原文边界，保留空白和逐字内容。"""
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise PromptTSGError('source evidence requires a nonempty prompt')
+    units, offset = {}, 0
+    for number, line in enumerate(prompt.splitlines(keepends=True), 1):
+        units[f'u{number:04d}'] = dict(evidence_start=offset, evidence_end=offset+len(line), evidence_text=line)
+        offset += len(line)
+    return dict(prompt_sha256=content_hash(prompt), units=units)
+
+
+def source_unit_evidence(prompt, source_unit_ids, *, anchor_text=None, anchor_occurrence=None):
+    """将来源单元及明确的定位词还原为原生逐字引文。"""
+    units = source_evidence_units(prompt)['units']
+    if (not isinstance(source_unit_ids, (list, tuple)) or not source_unit_ids
+            or any(not isinstance(key, str) or key not in units for key in source_unit_ids)
+            or len(set(source_unit_ids)) != len(source_unit_ids)):
+        raise PromptTSGError('source unit coordinates are invalid')
+    left = min(units[key]['evidence_start'] for key in source_unit_ids)
+    right = max(units[key]['evidence_end'] for key in source_unit_ids)
+    if anchor_text is not None:
+        if not isinstance(anchor_text, str) or not anchor_text.strip():
+            raise PromptTSGError('source anchor is invalid')
+        matches = list(re.finditer('(?='+re.escape(anchor_text)+')', prompt[left:right]))
+        if anchor_occurrence is None:
+            if len(matches) != 1:
+                raise PromptTSGError('source anchor requires a unique match or an explicit occurrence')
+            anchor_occurrence = 1
+        if type(anchor_occurrence) is not int or not 1 <= anchor_occurrence <= len(matches):
+            raise PromptTSGError('source anchor occurrence is invalid')
+        left += matches[anchor_occurrence-1].start()
+        right = left+len(anchor_text)
+    elif anchor_occurrence is not None:
+        raise PromptTSGError('source occurrence requires an anchor')
+    quote = prompt[left:right]
+    if not quote.strip():
+        raise PromptTSGError('source evidence contains only whitespace')
+    starts = [match.start() for match in re.finditer('(?='+re.escape(quote)+')', prompt)]
+    return dict(evidence_text=quote, occurrence=starts.index(left)+1)
+
+
 def source_nodes(facts: Sequence[Mapping[str, Any]], *, prompt: str) -> dict[str, TSGNode]:
     """Project source IDs and citations deterministically, without graph matching."""
     nodes = {}
@@ -590,7 +862,8 @@ def build_prompt_tsg(
     """Validate evidence-bound facts and deterministically commit one Prompt TSG."""
 
     require_text(task_id, "task_id")
-    require_text(prompt, "prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt must contain source text")
     require_text(extractor_id, "extractor_id")
     allowed = {tuple(item) for item in catalog["allowed_edges"]}
     root = _node("task", "task.root", 0, len(prompt), prompt, {})
@@ -903,6 +1176,7 @@ def validate_prompt_tsg(
             target.semantic_id,
         ) in unresolved_relation_set:
             raise PromptTSGError("Prompt TSG relation cannot be present and unresolved")
+    _object_components(node_by_id, {(edge.source_id, edge.edge_type, edge.target_id) for edge in graph.edges})
 
 
 def requirement_covers_scope(requirement: str, operation: str, subjects: Sequence[str],
@@ -934,8 +1208,9 @@ def validate_feature_scope(graph: PromptTSG, scope: FeatureScope) -> None:
             raise PromptTSGError("feature scope coordinates must be sorted and unique")
     for key in scope.subject_node_ids:
         if (key not in nodes or nodes[key].node_type != "data_object"
-            or not root_anchor and (key, "used_by", scope.operation_node_id) not in links):
-            raise PromptTSGError("factor subject must be a source-bound input of this operation")
+            or not root_anchor and (key, "used_by", scope.operation_node_id) not in links
+            and (scope.operation_node_id, "produces", key) not in links):
+            raise PromptTSGError("factor subject must be a source-bound input or output of this operation")
     for key in scope.condition_node_ids:
         requirements = {source for source, relation, target in links
                         if relation == "constrains" and target == scope.operation_node_id}
@@ -964,10 +1239,14 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
     for op in sorted(graph.nodes, key=lambda n: n.node_id):
         if op.node_type not in {"task_operation", "task"} or op.semantic_id != selector["operation_semantic_id"]:
             continue
-        inputs = (sorted(key for key, node in nodes.items() if node.node_type == "data_object")
-                  if selector.get("scope_kind") == "objects" else
-                  sorted(a for a, rel, b in links if rel == "used_by" and b == op.node_id
-                         and nodes[a].node_type == "data_object"))
+        if selector.get("scope_kind") == "objects" and op.node_type != "task":
+            continue
+        subjects = (sorted(key for key, node in nodes.items() if node.node_type == "data_object")
+                    if selector.get("scope_kind") == "objects" else
+                    sorted({a for a, rel, b in links if rel == "used_by" and b == op.node_id
+                            and nodes[a].node_type == "data_object"}
+                           | {b for a, rel, b in links if rel == "produces" and a == op.node_id
+                              and nodes[b].node_type == "data_object"}))
         conditions = sorted(a for a, rel, b in links if rel == "conditions" and b == op.node_id
                             and nodes[a].node_type == "condition")
         # Exact condition set preserves conditional versus unconditional scopes.
@@ -981,7 +1260,7 @@ def select_feature_scope(graph, selector: dict) -> FeatureScope | None:
         counts = Counter(selector["subject_semantic_ids"])
         selections = []
         for semantic, count in sorted(counts.items()):
-            choices = [key for key in inputs if nodes[key].semantic_id == semantic]
+            choices = [key for key in subjects if nodes[key].semantic_id == semantic]
             selections.append(list(combinations(choices, count)))
         for groups in product(*selections):
             subjects = tuple(sorted(key for group in groups for key in group))
